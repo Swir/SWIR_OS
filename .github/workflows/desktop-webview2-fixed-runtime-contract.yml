@@ -1,0 +1,91 @@
+name: Desktop WebView2 Fixed Runtime Contract
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'desktop/windows/acquire-webview2-fixed-runtime.ps1'
+      - 'desktop/windows/webview2-fixed-runtime.lock.json'
+      - 'desktop/windows/publish-desktop-host.ps1'
+      - '.github/workflows/desktop-webview2-fixed-runtime-contract.yml'
+  pull_request:
+    paths:
+      - 'desktop/windows/acquire-webview2-fixed-runtime.ps1'
+      - 'desktop/windows/webview2-fixed-runtime.lock.json'
+      - 'desktop/windows/publish-desktop-host.ps1'
+      - '.github/workflows/desktop-webview2-fixed-runtime-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-official-runtime:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: desktop/windows
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Validate lock contract
+        id: lock
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $lock = Get-Content webview2-fixed-runtime.lock.json -Raw | ConvertFrom-Json
+          if ($lock.schema -ne 'swir.webview2-fixed-runtime-lock/0.1') { throw 'Unexpected WebView2 lock schema.' }
+          if ($lock.architecture -ne 'x64' -or $lock.distribution -ne 'fixed-version-bundled' -or $lock.userDownloadRequired -ne $false) { throw 'WebView2 lock deployment policy mismatch.' }
+          if ($lock.version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$') { throw 'WebView2 lock version invalid.' }
+          if ($lock.sha256 -notmatch '^[a-fA-F0-9]{64}$') { throw 'WebView2 lock SHA-256 invalid.' }
+          $uri = [uri]$lock.sourceUrl
+          if ($uri.Scheme -ne 'https' -or -not ($uri.DnsSafeHost -eq 'microsoft.com' -or $uri.DnsSafeHost.EndsWith('.microsoft.com'))) { throw 'WebView2 lock is not pinned to an approved Microsoft HTTPS host.' }
+          "version=$($lock.version)" >> $env:GITHUB_OUTPUT
+          "sha256=$($lock.sha256.ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "source=$($lock.sourceUrl)" >> $env:GITHUB_OUTPUT
+
+      - name: Acquire and cryptographically verify official runtime
+        shell: pwsh
+        env:
+          SWIR_WV2_VERSION: ${{ steps.lock.outputs.version }}
+          SWIR_WV2_SHA256: ${{ steps.lock.outputs.sha256 }}
+          SWIR_WV2_SOURCE: ${{ steps.lock.outputs.source }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $destination = Join-Path '${{ runner.temp }}' 'verified-webview2-fixed'
+          ./acquire-webview2-fixed-runtime.ps1 `
+            -SourceUrl $env:SWIR_WV2_SOURCE `
+            -ExpectedSha256 $env:SWIR_WV2_SHA256 `
+            -ExpectedVersion $env:SWIR_WV2_VERSION `
+            -DestinationDir $destination
+          if (-not (Test-Path (Join-Path $destination 'msedgewebview2.exe') -PathType Leaf)) { throw 'Verified runtime missing msedgewebview2.exe.' }
+          foreach ($required in @('msedge.dll','icudtl.dat','.swir-webview2-provenance.json')) {
+            if (-not (Test-Path (Join-Path $destination $required) -PathType Leaf)) { throw "Verified runtime missing $required." }
+          }
+
+          $exe = Join-Path $destination 'msedgewebview2.exe'
+          $signature = Get-AuthenticodeSignature -LiteralPath $exe
+          if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or -not $signature.SignerCertificate -or [string]$signature.SignerCertificate.Subject -notmatch '(?i)(CN|O)=Microsoft Corporation') { throw 'Staged WebView2 executable is not validly signed by Microsoft Corporation.' }
+
+          $provenance = Get-Content (Join-Path $destination '.swir-webview2-provenance.json') -Raw | ConvertFrom-Json
+          if ($provenance.schema -ne 'swir.webview2-provenance/0.1' -or $provenance.sourcePolicy -ne 'swir.webview2-fixed-source-policy/0.1') { throw 'WebView2 provenance schema/policy mismatch.' }
+          if ($provenance.version -ne $env:SWIR_WV2_VERSION -or $provenance.archiveSha256 -ne $env:SWIR_WV2_SHA256) { throw 'WebView2 provenance does not match repository pin.' }
+          if ($provenance.architecture -ne 'x64' -or $provenance.userDownloadRequired -ne $false) { throw 'WebView2 provenance deployment policy mismatch.' }
+          if ($provenance.sourceUrl -ne $env:SWIR_WV2_SOURCE) { throw 'WebView2 provenance source mismatch.' }
+          $exeHash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($provenance.executable.sha256 -ne $exeHash -or $provenance.executable.authenticode -ne 'valid') { throw 'WebView2 provenance executable identity mismatch.' }
+          Write-Host "Verified official Microsoft WebView2 Fixed Runtime $($provenance.version) x64"
+          Write-Host "CAB SHA-256: $($provenance.archiveSha256)"
+          Write-Host "Executable SHA-256: $exeHash"
+
+      - name: Verify publisher consumes pinned acquisition path
+        shell: pwsh
+        run: |
+          $publisher = Get-Content publish-desktop-host.ps1 -Raw
+          foreach ($marker in @('webview2-fixed-runtime.lock.json','acquire-webview2-fixed-runtime.ps1','swir.webview2-provenance/0.1','WebView2FixedRuntime','userPrerequisiteDownloadsRequired = $false')) {
+            if (-not $publisher.Contains($marker)) { throw "Publisher does not enforce bundled pinned WebView2 contract: $marker" }
+          }
