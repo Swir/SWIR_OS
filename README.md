@@ -110,9 +110,9 @@ Implemented native foundations include:
 - startup health verification,
 - automatic rollback and recovery.
 
-The host uses **.NET 8 Windows Desktop + WebView2 Evergreen Runtime**. Privileged operating-system actions remain behind explicit native brokers and permission checks.
+The release host uses **self-contained .NET 8 Windows Desktop + a pinned Microsoft WebView2 Fixed Version Runtime bundled inside the SWIR Desktop package**. A release package is designed so the end user does not manually install .NET or WebView2. The packaging pipeline obtains the repository-pinned WebView2 runtime from an approved Microsoft HTTPS source, checks its pinned SHA-256, exact version and Microsoft Authenticode signer, records acquisition provenance, bundles the runtime, and the Desktop Host verifies the bundled integrity/provenance chain before release startup.
 
-Desktop Edition may still host portable Web Edition surfaces during the transition. That transitional architecture does **not** define the final System Edition application model.
+Privileged operating-system actions remain behind explicit native brokers and permission checks. Desktop Edition may still host portable Web Edition surfaces during the transition. That transitional architecture does **not** define the final System Edition application model.
 
 ---
 
@@ -205,7 +205,7 @@ The Web/Desktop work already provides reusable package, dependency and trust-cha
 
 Current foundations include:
 
-- **SWIR App SDK 1.3** for portable contracts and Web/Desktop development,
+- **SWIR App SDK 1.6.1** for portable contracts and Web/Desktop development,
 - **SWIR App Package 1.0** metadata,
 - dependency-aware package resolution,
 - application permissions,
@@ -251,7 +251,9 @@ Current Desktop security work includes:
 - transactional package/update slots,
 - update health challenges,
 - restart handoff protection,
-- recovery after interrupted updates.
+- recovery after interrupted updates,
+- pinned bundled-runtime source metadata and acquisition provenance,
+- startup SHA-256 binding for the Desktop Host, WebView2 executable and WebView2 provenance record.
 
 ### Production signing status
 
@@ -263,13 +265,18 @@ Private production signing keys must never be stored in this repository.
 
 ## 🌍 Language architecture
 
-SWIR OS is designed for multilingual operation.
+SWIR OS is designed for multilingual operation and global use.
 
 - the runtime detects the system/device language,
-- supported locales can be selected globally,
+- supported locales can be selected globally without reinstalling the OS,
 - unsupported locales fall back to English,
-- applications receive locale information through edition-appropriate APIs,
-- the i18n architecture is designed to accept additional languages without rewriting the shell.
+- BCP-47 locale matching includes language/region and likely-script handling,
+- LTR and RTL direction are propagated for supported interfaces,
+- the core distribution currently bundles 15 locale packs: English, Polish, Norwegian Bokmål, German, Spanish, French, Italian, Brazilian Portuguese, Ukrainian, Russian, Turkish, Arabic, Hebrew, Japanese and Simplified Chinese,
+- First Boot / OOBE is localized across the bundled core locale set,
+- critical File Explorer, Store, Update Center and Settings UI strings are supplied through bundled application locale packs,
+- application locale resources are kept available by the offline runtime/cache and are intended to expand until the complete system/application surface is localized,
+- no core language pack requires the user to visit another site and install it manually.
 
 Repository documentation and development files are maintained in **English**.
 
@@ -279,13 +286,13 @@ Repository documentation and development files are maintained in **English**.
 
 | Path | Purpose |
 |---|---|
-| `desktop/windows/` | Windows Desktop Host, native brokers, updater and self-tests |
+| `desktop/windows/` | Windows Desktop Host, native brokers, updater, self-tests and pinned bundled-runtime policy |
 | `system/` | System Edition architecture, Hardware Service and Driver Center contracts |
 | `scripts/` | package, catalog, trust-chain and release validators |
 | `.github/workflows/` | CI contracts for Desktop, System, security, packages and i18n |
 | `SWIR-OS-ARCHITECTURE.md` | canonical measurable project roadmap |
 | `SWIR-ROADMAP-STANDARD.md` | locked roadmap dashboard format |
-| `swir-*.js` | Web Edition portable runtime and prototype services |
+| `swir-*.js` | Web Edition portable runtime, i18n and prototype services |
 | `swir-*.html` | Web Edition applications and prototype system UI; not the final System Edition app implementation |
 
 ---
@@ -310,11 +317,15 @@ http://localhost:8000
 
 ## 🪟 Build the Windows Desktop Host
 
-### Requirements
+### Developer requirements
+
+A source/developer build requires:
 
 - Windows 10 or Windows 11 x64,
 - .NET 8 SDK,
-- Microsoft Edge WebView2 Evergreen Runtime.
+- network access only when the packaging script needs to obtain the repository-pinned WebView2 Fixed Version Runtime.
+
+These are **developer/build-machine requirements, not end-user prerequisites**. The verified Desktop release is intended to bundle the required .NET runtime and WebView2 runtime so the user receives one SWIR Desktop package.
 
 ### Build
 
@@ -323,7 +334,7 @@ cd desktop/windows
 dotnet build SWIR.Desktop.Host.csproj -c Release
 ```
 
-### Preview publish
+### Self-contained preview publish
 
 ```powershell
 ./publish-desktop-host.ps1 `
@@ -331,6 +342,8 @@ dotnet build SWIR.Desktop.Host.csproj -c Release
   -ReleaseVersion 0.5.7 `
   -Channel preview
 ```
+
+If no explicit Fixed Version Runtime directory is supplied, the publisher reads `webview2-fixed-runtime.lock.json`, downloads only the pinned official Microsoft artifact, verifies SHA-256/version/Microsoft Authenticode, records provenance and bundles it into the output. An explicit preverified runtime directory may still be supplied for controlled/offline build infrastructure.
 
 A local build is **not** equivalent to an official verified release. Official release pipelines add package/catalog validation, signed update metadata and trust-chain checks.
 
@@ -341,13 +354,13 @@ A local build is **not** equivalent to an official verified release. Official re
 Development is currently focused on the highest-value steps toward a dependable Desktop/System platform:
 
 1. complete the production package-signing trust cutover,
-2. keep hardening the Windows Desktop Host and update lifecycle,
+2. keep hardening the Windows Desktop Host, self-contained packaging and update lifecycle,
 3. expand Hardware Service and Driver Center foundations,
 4. define and implement the native Linux application framework and essential native application suite,
 5. build the common System Package Provider architecture,
 6. prepare native Linux process/network/filesystem adapters,
 7. move toward the first controlled bootable System Edition image,
-8. test reliability, recovery, accessibility and daily-use workflows before calling System Edition stable.
+8. finish full-system i18n, reliability, recovery, accessibility and daily-use workflows before calling System Edition stable.
 
 Roadmap boxes are checked only after the functionality is actually implemented and verified.
 
@@ -362,7 +375,8 @@ SWIR OS is under active development.
 - production package-signing provisioning is not yet fully cut over,
 - hardware catalog coverage is intentionally limited while the safety model is being validated,
 - the essential native Linux application suite is not yet implemented,
-- Windows application compatibility through Wine/Proton belongs to the System Edition roadmap and is not yet a completed subsystem.
+- Windows application compatibility through Wine/Proton belongs to the System Edition roadmap and is not yet a completed subsystem,
+- full localization of every application screen is still being expanded beyond the bundled core/OOBE/critical application UI coverage.
 
 These limitations are intentionally kept visible instead of marking unfinished prototypes as complete.
 
@@ -378,7 +392,9 @@ These limitations are intentionally kept visible instead of marking unfinished p
 6. Keep update, package and driver mutations transactional and recoverable.
 7. Preserve a path from Desktop Edition to a native bootable System Edition.
 8. Make the default application set complete enough for real daily use before calling the system stable.
-9. Never commit production private signing keys.
+9. Bundle end-user runtime prerequisites with SWIR releases instead of requiring manual prerequisite downloads.
+10. Bundle core locale resources and keep English as a safe fallback while expanding complete worldwide localization.
+11. Never commit production private signing keys.
 
 ---
 
