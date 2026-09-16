@@ -99,7 +99,7 @@ jobs:
           dotnet build SWIR.Desktop.ReleaseToCandidate.SelfTests.csproj --configuration Release
           dotnet build SWIR.Desktop.ReleaseActivation.SelfTests.csproj --configuration Release
 
-      - name: Run signed self-contained 0.5.2-preview release through Store trust, Candidate and real Host health commit
+      - name: Run signed lightweight 0.5.2-preview release through Store trust, Candidate and real Host health commit
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -172,7 +172,7 @@ jobs:
             (Join-Path $publish 'catalog.json'),
             (Join-Path $publish 'catalog-artifacts.json')
           )) {
-            if (-not (Test-Path $required -PathType Leaf)) { throw "Self-contained Desktop publish is missing: $required" }
+            if (-not (Test-Path $required -PathType Leaf)) { throw "Lightweight Desktop publish is missing: $required" }
           }
 
           $trust = Get-Content (Join-Path $publish 'catalog-trust-roots.json') -Raw | ConvertFrom-Json
@@ -218,7 +218,7 @@ jobs:
               --output-dir $bundle `
               --version 0.5.2 `
               --entry-point SWIR.Desktop.Host.exe `
-              --package-url https://github.com/Swir/swir.github.io/releases/download/desktop-v0.5.2-preview/SWIR-Desktop-0.5.2-preview.zip `
+              --package-url "https://github.com/$env:GITHUB_REPOSITORY/releases/download/desktop-v0.5.2-preview/SWIR-Desktop-0.5.2-preview.zip" `
               --channel preview `
               --key-id ci-preview-contract `
               --private-key $privateKey
