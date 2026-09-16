@@ -1,0 +1,141 @@
+name: Desktop App Package Contract
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'desktop/windows/DesktopAppPackageInstaller.cs'
+      - 'desktop/windows/DesktopAppPackageInstallerSelfTests.cs'
+      - 'desktop/windows/DesktopPackageBridge.cs'
+      - 'desktop/windows/DesktopPackageBridgeSelfTests.cs'
+      - 'desktop/windows/DesktopPackageBridgeSelfTestShim.cs'
+      - 'desktop/windows/DesktopSignedPackageLifecycleSelfTests.cs'
+      - 'desktop/windows/DesktopPackageDependencyResolver.cs'
+      - 'desktop/windows/DesktopPackageDependencyResolverSelfTests.cs'
+      - 'desktop/windows/DesktopCatalogTrustVerifier.cs'
+      - 'desktop/windows/DesktopCatalogTrustVerifierSelfTests.cs'
+      - 'desktop/windows/DesktopCatalogTrustRootStore.cs'
+      - 'desktop/windows/catalog-trust-roots.json'
+      - 'desktop/windows/SWIR.Desktop.AppPackage.SelfTests.csproj'
+      - 'desktop/windows/SWIR.Desktop.PackageBridge.SelfTests.csproj'
+      - 'desktop/windows/SWIR.Desktop.SignedPackageLifecycle.SelfTests.csproj'
+      - 'desktop/windows/SWIR.Desktop.DependencyResolver.SelfTests.csproj'
+      - 'desktop/windows/SWIR.Desktop.CatalogTrust.SelfTests.csproj'
+      - 'desktop/windows/CapabilityBroker.cs'
+      - 'desktop/windows/PermissionBroker.cs'
+      - 'desktop/windows/Program.cs'
+      - 'desktop/windows/SWIR.Desktop.Host.csproj'
+      - 'contracts/swir-dependency-vectors.json'
+      - 'swir-package-resolver.js'
+      - 'swir-runtime.js'
+      - 'swir-store-desktop.js'
+      - 'swir-store.html'
+      - 'scripts/validate-desktop-package-runtime.mjs'
+      - 'scripts/validate-desktop-package-authorization.mjs'
+      - 'scripts/validate-store-desktop-coordinator.mjs'
+      - 'scripts/validate-shared-dependency-contract.mjs'
+      - '.github/workflows/desktop-app-package-contract.yml'
+  pull_request:
+    paths:
+      - 'desktop/windows/DesktopAppPackageInstaller.cs'
+      - 'desktop/windows/DesktopAppPackageInstallerSelfTests.cs'
+      - 'desktop/windows/DesktopPackageBridge.cs'
+      - 'desktop/windows/DesktopPackageBridgeSelfTests.cs'
+      - 'desktop/windows/DesktopPackageBridgeSelfTestShim.cs'
+      - 'desktop/windows/DesktopSignedPackageLifecycleSelfTests.cs'
+      - 'desktop/windows/DesktopPackageDependencyResolver.cs'
+      - 'desktop/windows/DesktopPackageDependencyResolverSelfTests.cs'
+      - 'desktop/windows/DesktopCatalogTrustVerifier.cs'
+      - 'desktop/windows/DesktopCatalogTrustVerifierSelfTests.cs'
+      - 'desktop/windows/DesktopCatalogTrustRootStore.cs'
+      - 'desktop/windows/catalog-trust-roots.json'
+      - 'desktop/windows/SWIR.Desktop.AppPackage.SelfTests.csproj'
+      - 'desktop/windows/SWIR.Desktop.PackageBridge.SelfTests.csproj'
+      - 'desktop/windows/SWIR.Desktop.SignedPackageLifecycle.SelfTests.csproj'
+      - 'desktop/windows/SWIR.Desktop.DependencyResolver.SelfTests.csproj'
+      - 'desktop/windows/SWIR.Desktop.CatalogTrust.SelfTests.csproj'
+      - 'desktop/windows/CapabilityBroker.cs'
+      - 'desktop/windows/PermissionBroker.cs'
+      - 'desktop/windows/Program.cs'
+      - 'desktop/windows/SWIR.Desktop.Host.csproj'
+      - 'contracts/swir-dependency-vectors.json'
+      - 'swir-package-resolver.js'
+      - 'swir-runtime.js'
+      - 'swir-store-desktop.js'
+      - 'swir-store.html'
+      - 'scripts/validate-desktop-package-runtime.mjs'
+      - 'scripts/validate-desktop-package-authorization.mjs'
+      - 'scripts/validate-store-desktop-coordinator.mjs'
+      - 'scripts/validate-shared-dependency-contract.mjs'
+      - '.github/workflows/desktop-app-package-contract.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-app-package-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: desktop/windows
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Assert pinned .NET SDK line
+        shell: pwsh
+        run: |
+          $version = dotnet --version
+          if ($version -notmatch '^8\.0\.4\d\d$') { throw "Expected pinned .NET 8.0.4xx SDK, got $version" }
+
+      - name: Check SWIR Runtime syntax
+        working-directory: .
+        run: node --check swir-runtime.js
+
+      - name: Check SWIR Store Desktop coordinator syntax
+        working-directory: .
+        run: node --check swir-store-desktop.js
+
+      - name: Validate shipping package runtime wiring
+        working-directory: .
+        run: node scripts/validate-desktop-package-runtime.mjs
+
+      - name: Validate structured Desktop catalog authorization transport
+        working-directory: .
+        run: node scripts/validate-desktop-package-authorization.mjs
+
+      - name: Validate SWIR Store Desktop coordinator
+        working-directory: .
+        run: node scripts/validate-store-desktop-coordinator.mjs
+
+      - name: Validate Web dependency resolver shared vectors
+        working-directory: .
+        run: node scripts/validate-shared-dependency-contract.mjs
+
+      - name: Build shipping Desktop Host
+        run: dotnet build SWIR.Desktop.Host.csproj --configuration Release
+
+      - name: Run hardened swirapp payload self-tests
+        run: dotnet run --project SWIR.Desktop.AppPackage.SelfTests.csproj --configuration Release
+
+      - name: Run capability-bound package bridge self-tests
+        run: dotnet run --project SWIR.Desktop.PackageBridge.SelfTests.csproj --configuration Release
+
+      - name: Run signed package install-update-restart-rollback lifecycle
+        run: dotnet run --project SWIR.Desktop.SignedPackageLifecycle.SelfTests.csproj --configuration Release
+
+      - name: Run Desktop dependency resolver shared-vector self-tests
+        run: dotnet run --project SWIR.Desktop.DependencyResolver.SelfTests.csproj --configuration Release
+
+      - name: Run native Ed25519 catalog trust self-tests
+        run: dotnet run --project SWIR.Desktop.CatalogTrust.SelfTests.csproj --configuration Release

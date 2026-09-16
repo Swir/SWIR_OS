@@ -1,0 +1,93 @@
+name: SWIR Signed Catalog Contract
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'swir-packages.js'
+      - 'swir-catalog-integrity.js'
+      - 'swir-catalog-trust-state.js'
+      - 'swir-trusted-keys.js'
+      - 'swir-signed-catalog-release.js'
+      - 'swir-v17.js'
+      - 'sw.js'
+      - 'scripts/validate-signed-catalog.mjs'
+      - 'scripts/build-signed-catalog-release.mjs'
+      - 'scripts/verify-catalog-root-pin.mjs'
+      - 'scripts/apply-catalog-root-rotation.mjs'
+      - 'scripts/verify-catalog-root-rotation.mjs'
+      - 'scripts/test-catalog-root-cutover-e2e.mjs'
+      - 'scripts/validate-release-root-pin-wiring.mjs'
+      - 'scripts/validate-desktop-release-root-rotation-wiring.mjs'
+      - 'SWIR-SIGNED-CATALOG-1.0.md'
+      - '.github/workflows/signed-catalog-contract.yml'
+      - '.github/workflows/signed-catalog-release.yml'
+      - '.github/workflows/desktop-release.yml'
+  pull_request:
+    paths:
+      - 'swir-packages.js'
+      - 'swir-catalog-integrity.js'
+      - 'swir-catalog-trust-state.js'
+      - 'swir-trusted-keys.js'
+      - 'swir-signed-catalog-release.js'
+      - 'swir-v17.js'
+      - 'sw.js'
+      - 'scripts/validate-signed-catalog.mjs'
+      - 'scripts/build-signed-catalog-release.mjs'
+      - 'scripts/verify-catalog-root-pin.mjs'
+      - 'scripts/apply-catalog-root-rotation.mjs'
+      - 'scripts/verify-catalog-root-rotation.mjs'
+      - 'scripts/test-catalog-root-cutover-e2e.mjs'
+      - 'scripts/validate-release-root-pin-wiring.mjs'
+      - 'scripts/validate-desktop-release-root-rotation-wiring.mjs'
+      - 'SWIR-SIGNED-CATALOG-1.0.md'
+      - '.github/workflows/signed-catalog-contract.yml'
+      - '.github/workflows/signed-catalog-release.yml'
+      - '.github/workflows/desktop-release.yml'
+
+concurrency:
+  group: swir-signed-catalog-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify-signed-catalog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax check catalog security core
+        run: |
+          node --check swir-catalog-integrity.js
+          node --check swir-catalog-trust-state.js
+          node --check swir-signed-catalog-release.js
+          node --check scripts/build-signed-catalog-release.mjs
+          node --check scripts/verify-catalog-root-pin.mjs
+          node --check scripts/apply-catalog-root-rotation.mjs
+          node --check scripts/verify-catalog-root-rotation.mjs
+          node --check scripts/test-catalog-root-cutover-e2e.mjs
+          node --check scripts/validate-release-root-pin-wiring.mjs
+          node --check scripts/validate-desktop-release-root-rotation-wiring.mjs
+          node --check swir-v17.js
+          node --check sw.js
+      - name: Verify signed catalog freshness, cryptography and anti-rollback
+        run: node scripts/validate-signed-catalog.mjs
+      - name: Verify production release builder with ephemeral Ed25519 key
+        run: node scripts/build-signed-catalog-release.mjs --self-test
+      - name: Verify fail-closed public-root pinning
+        run: node scripts/verify-catalog-root-pin.mjs --self-test
+      - name: Verify fail-closed root rotation bundle construction
+        run: node scripts/apply-catalog-root-rotation.mjs --self-test
+      - name: Verify sequence-bounded current-next rotation policy
+        run: node scripts/verify-catalog-root-rotation.mjs --self-test
+      - name: Verify restart-safe current-next cutover E2E
+        run: node scripts/test-catalog-root-cutover-e2e.mjs
+      - name: Verify release workflow root-pin wiring
+        run: node scripts/validate-release-root-pin-wiring.mjs
+      - name: Verify Desktop release current-next root rotation wiring
+        run: node scripts/validate-desktop-release-root-rotation-wiring.mjs

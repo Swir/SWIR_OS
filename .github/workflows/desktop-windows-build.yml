@@ -1,0 +1,227 @@
+name: Desktop Windows Build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'desktop/windows/**'
+      - 'swir-runtime.js'
+      - 'swir-apps.js'
+      - 'swir-packages.js'
+      - 'swir-app-bridge.js'
+      - 'swir-app-bridge-host.js'
+      - 'swir-code.html'
+      - 'swir-image.html'
+      - 'swir-archive.html'
+      - 'swir-pdf.html'
+      - 'swir-chat.html'
+      - 'swir-chat-api.php'
+      - 'swir-updates.html'
+      - 'sw.js'
+      - '.github/workflows/desktop-windows-build.yml'
+  pull_request:
+    paths:
+      - 'desktop/windows/**'
+      - 'swir-runtime.js'
+      - 'swir-apps.js'
+      - 'swir-packages.js'
+      - 'swir-app-bridge.js'
+      - 'swir-app-bridge-host.js'
+      - 'swir-code.html'
+      - 'swir-image.html'
+      - 'swir-archive.html'
+      - 'swir-pdf.html'
+      - 'swir-chat.html'
+      - 'swir-chat-api.php'
+      - 'swir-updates.html'
+      - 'sw.js'
+      - '.github/workflows/desktop-windows-build.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: desktop/windows
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check Runtime JavaScript syntax
+        run: node --check ../../swir-runtime.js
+
+      - name: Check application registry syntax
+        run: node --check ../../swir-apps.js
+
+      - name: Check App Bridge JavaScript syntax
+        run: |
+          node --check ../../swir-app-bridge.js
+          node --check ../../swir-app-bridge-host.js
+
+      - name: Validate Desktop package policy
+        run: node validate-policy.mjs
+
+      - name: Validate deterministic Desktop package contract
+        run: node validate-desktop-package-contract.mjs
+
+      - name: Validate App Bridge isolation readiness
+        run: node validate-app-isolation.mjs
+
+      - name: Validate Chat portable bridge contract
+        run: node validate-chat-bridge.mjs
+
+      - name: Validate native App Data bridge routing
+        run: node validate-native-appdata-bridge.mjs
+
+      - name: Validate Update Center Desktop readiness boundary
+        run: node validate-update-center-desktop-contract.mjs
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # Compile the shipping host before running the expensive updater/recovery matrix.
+      # This catches accidental second entry points, missing production references and
+      # other host-integration regressions immediately instead of several minutes later.
+      - name: Restore Desktop Host compile gate
+        run: dotnet restore SWIR.Desktop.Host.csproj
+
+      - name: Build Desktop Host compile gate
+        run: dotnet build SWIR.Desktop.Host.csproj --configuration Release --no-restore
+
+      - name: Run native App Data isolation self-tests
+        run: dotnet run --project SWIR.Desktop.AppData.SelfTests.csproj --configuration Release
+
+      - name: Run Permission Broker isolation self-tests
+        run: dotnet run --project SWIR.Desktop.Permission.SelfTests.csproj --configuration Release
+
+      - name: Run signed Update Broker self-tests
+        run: dotnet run --project SWIR.Desktop.Update.SelfTests.csproj --configuration Release
+
+      - name: Run deterministic Desktop package builder self-tests
+        run: dotnet run --project SWIR.Desktop.PackageBuilder.SelfTests.csproj --configuration Release
+
+      - name: Build Desktop package tool
+        run: dotnet build SWIR.Desktop.PackageTool.csproj --configuration Release
+
+      - name: Build real Desktop Host package smoke artifact
+        shell: pwsh
+        run: |
+          $publish = Join-Path '${{ runner.temp }}' 'swir-desktop-publish'
+          $package = Join-Path '${{ runner.temp }}' 'swir-desktop-smoke.zip'
+          dotnet publish SWIR.Desktop.Host.csproj --configuration Release --output $publish
+          dotnet run --project SWIR.Desktop.PackageTool.csproj --configuration Release -- $publish $package 0.5.1 SWIR.Desktop.Host.exe
+          if (-not (Test-Path $package)) { throw 'Desktop package tool did not create the smoke package.' }
+          if ((Get-Item $package).Length -le 0) { throw 'Desktop smoke package is empty.' }
+
+      - name: Run Desktop signed release builder self-tests
+        run: dotnet run --project SWIR.Desktop.ReleaseBuilder.SelfTests.csproj --configuration Release
+
+      - name: Build Desktop signed release tool
+        run: dotnet build SWIR.Desktop.ReleaseTool.csproj --configuration Release
+
+      - name: Run transactional Desktop release bundle self-tests
+        run: dotnet run --project SWIR.Desktop.ReleaseBundle.SelfTests.csproj --configuration Release
+
+      - name: Build Desktop release bundle tool
+        run: dotnet build SWIR.Desktop.ReleaseBundleTool.csproj --configuration Release
+
+      - name: Build signed Desktop release bundle smoke artifact
+        shell: pwsh
+        run: |
+          $publish = Join-Path '${{ runner.temp }}' 'swir-release-publish'
+          $bundle = Join-Path '${{ runner.temp }}' 'swir-release-bundle'
+          $key = Join-Path '${{ runner.temp }}' 'swir-release-test-key.pem'
+          dotnet publish SWIR.Desktop.Host.csproj --configuration Release --output $publish
+          $rsa = [System.Security.Cryptography.RSA]::Create(2048)
+          try { [System.IO.File]::WriteAllText($key, $rsa.ExportRSAPrivateKeyPem()) } finally { $rsa.Dispose() }
+          dotnet run --project SWIR.Desktop.ReleaseBundleTool.csproj --configuration Release -- `
+            --source $publish `
+            --output-dir $bundle `
+            --version 0.5.1 `
+            --entry-point SWIR.Desktop.Host.exe `
+            --package-url https://updates.example.test/SWIR-Desktop-0.5.1-ci.zip `
+            --channel ci `
+            --key-id ci-ephemeral `
+            --private-key $key
+          if (-not (Test-Path (Join-Path $bundle 'SWIR-Desktop-0.5.1-ci.zip'))) { throw 'Release bundle package missing.' }
+          if (-not (Test-Path (Join-Path $bundle 'desktop-update-ci.json'))) { throw 'Release bundle signed manifest missing.' }
+          if (-not (Test-Path (Join-Path $bundle 'release-bundle.json'))) { throw 'Release bundle metadata missing.' }
+          Remove-Item $key -Force
+
+      - name: Run end-to-end update preparation self-tests
+        run: dotnet run --project SWIR.Desktop.UpdatePreparation.SelfTests.csproj --configuration Release
+
+      - name: Run Desktop update preparation bridge and release policy self-tests
+        run: dotnet run --project SWIR.Desktop.UpdatePreparationBridge.SelfTests.csproj --configuration Release
+
+      - name: Run packaged Desktop update preparation host self-tests
+        run: dotnet run --project SWIR.Desktop.UpdatePreparationHost.SelfTests.csproj --configuration Release
+
+      - name: Run signed Desktop update check host self-tests
+        run: dotnet run --project SWIR.Desktop.UpdateCheckHost.SelfTests.csproj --configuration Release
+
+      - name: Run update transaction recovery self-tests
+        run: dotnet run --project SWIR.Desktop.Transaction.SelfTests.csproj --configuration Release
+
+      - name: Run activation health rollback self-tests
+        run: dotnet run --project SWIR.Desktop.ActivationCoordinator.SelfTests.csproj --configuration Release
+
+      - name: Run controlled candidate launcher self-tests
+        run: dotnet run --project SWIR.Desktop.CandidateLauncher.SelfTests.csproj --configuration Release
+
+      - name: Run candidate startup health handshake self-tests
+        run: dotnet run --project SWIR.Desktop.StartupHealth.SelfTests.csproj --configuration Release
+
+      - name: Run host shutdown handoff self-tests
+        run: dotnet run --project SWIR.Desktop.HostShutdown.SelfTests.csproj --configuration Release
+
+      - name: Run desktop update restart launcher self-tests
+        run: dotnet run --project SWIR.Desktop.UpdateRestart.SelfTests.csproj --configuration Release
+
+      - name: Run Desktop restart lifecycle failure-injection self-tests
+        run: dotnet run --project SWIR.Desktop.RestartLifecycle.SelfTests.csproj --configuration Release
+
+      - name: Run Desktop bridge drain restart session self-tests
+        run: dotnet run --project SWIR.Desktop.RestartSession.SelfTests.csproj --configuration Release
+
+      - name: Run prepared Desktop update selector self-tests
+        run: dotnet run --project SWIR.Desktop.PreparedUpdate.SelfTests.csproj --configuration Release
+
+      - name: Run Desktop host restart hooks self-tests
+        run: dotnet run --project SWIR.Desktop.HostRestartHooks.SelfTests.csproj --configuration Release
+
+      - name: Run Desktop update bridge command gate self-tests
+        run: dotnet run --project SWIR.Desktop.UpdateBridge.SelfTests.csproj --configuration Release
+
+      - name: Run Desktop startup recovery self-tests
+        run: dotnet run --project SWIR.Desktop.StartupRecovery.SelfTests.csproj --configuration Release
+
+      - name: Run updater worker contract self-tests
+        run: dotnet run --project SWIR.Desktop.UpdaterWorker.SelfTests.csproj --configuration Release
+
+      - name: Build standalone updater worker
+        run: dotnet build SWIR.Desktop.UpdaterWorker.csproj --configuration Release
+
+      - name: Run standalone updater worker process E2E self-tests
+        run: dotnet run --project SWIR.Desktop.UpdaterWorker.ProcessE2E.SelfTests.csproj --configuration Release -- "${{ github.workspace }}\desktop\windows\bin\Release\net8.0\SWIR.Desktop.UpdaterWorker.exe"
+
+      - name: Publish packaged E2E Candidate
+        run: dotnet publish SWIR.Desktop.PackagedCandidate.SelfTests.csproj --configuration Release --output "${{ runner.temp }}\swir-e2e-candidate"
+
+      - name: Run packaged two-slot activation and rollback E2E
+        run: dotnet run --project SWIR.Desktop.Updater.PackagedActivation.SelfTests.csproj --configuration Release -- "${{ github.workspace }}\desktop\windows\bin\Release\net8.0\SWIR.Desktop.UpdaterWorker.exe" "${{ runner.temp }}\swir-e2e-candidate"
+
+      - name: Run packaged health-timeout startup recovery E2E
+        run: dotnet run --project SWIR.Desktop.Updater.PackagedRecovery.SelfTests.csproj --configuration Release -- "${{ github.workspace }}\desktop\windows\bin\Release\net8.0\SWIR.Desktop.UpdaterWorker.exe" "${{ runner.temp }}\swir-e2e-candidate"
+
+      - name: Build activation crash harness
+        run: dotnet build SWIR.Desktop.Updater.ActivationCrashHarness.csproj --configuration Release
+
+      - name: Run packaged interrupted-swap and rollback-pending recovery E2E
+        run: dotnet run --project SWIR.Desktop.Updater.PackagedCrashRecovery.SelfTests.csproj --configuration Release -- "${{ github.workspace }}\desktop\windows\bin\Release\net8.0\SWIR.Desktop.UpdaterWorker.exe" "${{ runner.temp }}\swir-e2e-candidate" "${{ github.workspace }}\desktop\windows\bin\Release\net8.0\SWIR.Desktop.Updater.ActivationCrashHarness.exe"

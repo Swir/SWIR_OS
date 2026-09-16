@@ -1,0 +1,76 @@
+name: Desktop Shell Integration Contract
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'desktop/windows/Program.cs'
+      - 'desktop/windows/DesktopShellIntegrationBroker.cs'
+      - 'desktop/windows/DesktopOpenFileActivationBroker.cs'
+      - 'desktop/windows/DesktopShellIntegrationCoordinator.cs'
+      - 'desktop/windows/DesktopShellIntegrationBrokerSelfTests.cs'
+      - 'desktop/windows/SWIR.Desktop.ShellIntegration.SelfTests.csproj'
+      - 'desktop/windows/validate-shell-integration-foundation.mjs'
+      - 'desktop/windows/validate-open-file-activation.mjs'
+      - 'desktop/windows/validate-shell-file-handoff.mjs'
+      - 'desktop/windows/validate-shell-host-coordinator.mjs'
+      - 'desktop/windows/validate-shell-host-wiring.mjs'
+      - 'desktop/windows/SWIR.Desktop.Host.csproj'
+      - 'swir-associations.js'
+      - 'sw.js'
+      - '.github/workflows/desktop-shell-integration-contract.yml'
+  pull_request:
+    paths:
+      - 'desktop/windows/Program.cs'
+      - 'desktop/windows/DesktopShellIntegrationBroker.cs'
+      - 'desktop/windows/DesktopOpenFileActivationBroker.cs'
+      - 'desktop/windows/DesktopShellIntegrationCoordinator.cs'
+      - 'desktop/windows/DesktopShellIntegrationBrokerSelfTests.cs'
+      - 'desktop/windows/SWIR.Desktop.ShellIntegration.SelfTests.csproj'
+      - 'desktop/windows/validate-shell-integration-foundation.mjs'
+      - 'desktop/windows/validate-open-file-activation.mjs'
+      - 'desktop/windows/validate-shell-file-handoff.mjs'
+      - 'desktop/windows/validate-shell-host-coordinator.mjs'
+      - 'desktop/windows/validate-shell-host-wiring.mjs'
+      - 'desktop/windows/SWIR.Desktop.Host.csproj'
+      - 'swir-associations.js'
+      - 'sw.js'
+      - '.github/workflows/desktop-shell-integration-contract.yml'
+  workflow_dispatch:
+
+jobs:
+  shell-integration-contract:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check JavaScript syntax
+        run: |
+          node --check desktop/windows/validate-shell-integration-foundation.mjs
+          node --check desktop/windows/validate-open-file-activation.mjs
+          node --check desktop/windows/validate-shell-file-handoff.mjs
+          node --check desktop/windows/validate-shell-host-coordinator.mjs
+          node --check desktop/windows/validate-shell-host-wiring.mjs
+          node --check swir-associations.js
+          node --check sw.js
+      - name: Validate shell integration safety contract
+        run: node desktop/windows/validate-shell-integration-foundation.mjs
+      - name: Validate guarded open-file activation contract
+        run: node desktop/windows/validate-open-file-activation.mjs
+      - name: Validate native-to-portable file handoff contract
+        run: node desktop/windows/validate-shell-file-handoff.mjs
+      - name: Validate shell host coordinator contract
+        run: node desktop/windows/validate-shell-host-coordinator.mjs
+      - name: Validate shipping Desktop Host shell wiring
+        run: node desktop/windows/validate-shell-host-wiring.mjs
+      - name: Build shell integration self-tests
+        run: dotnet build desktop/windows/SWIR.Desktop.ShellIntegration.SelfTests.csproj -c Release --nologo
+      - name: Run shell integration self-tests
+        run: dotnet run --project desktop/windows/SWIR.Desktop.ShellIntegration.SelfTests.csproj -c Release --no-build
+      - name: Build shipping Desktop Host with shell integration broker
+        run: dotnet build desktop/windows/SWIR.Desktop.Host.csproj -c Release --nologo
