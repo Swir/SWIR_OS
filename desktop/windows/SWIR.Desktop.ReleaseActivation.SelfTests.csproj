@@ -18,6 +18,7 @@
     <Compile Include="CandidatePackagePreparer.cs" />
     <Compile Include="UpdaterWorkerProtocol.cs" />
     <Compile Include="HostShutdownHandoff.cs" />
+    <Compile Include="DesktopReleaseTestTiming.cs" />
     <Compile Include="DesktopReleaseActivationSelfTests.cs" />
   </ItemGroup>
 </Project>
