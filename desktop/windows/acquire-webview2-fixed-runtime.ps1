@@ -17,9 +17,9 @@ function Assert-OfficialSourceUrl([string]$Value) {
     $uri = $null
     if (-not [Uri]::TryCreate($Value, [UriKind]::Absolute, [ref]$uri)) { throw 'WebView2 source URL must be absolute.' }
     if ($uri.Scheme -ne 'https') { throw 'WebView2 source URL must use HTTPS.' }
-    $host = $uri.DnsSafeHost.ToLowerInvariant()
-    if (-not ($host -eq 'microsoft.com' -or $host.EndsWith('.microsoft.com'))) {
-        throw "WebView2 source host is not an approved Microsoft host: $host"
+    $sourceHost = $uri.DnsSafeHost.ToLowerInvariant()
+    if (-not ($sourceHost -eq 'microsoft.com' -or $sourceHost.EndsWith('.microsoft.com'))) {
+        throw "WebView2 source host is not an approved Microsoft host: $sourceHost"
     }
     return $uri
 }
