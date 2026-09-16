@@ -1,0 +1,68 @@
+name: Desktop GitHub Update Contract
+
+on:
+  push:
+    paths:
+      - 'desktop/windows/UpdateDownloadClient.cs'
+      - 'desktop/windows/DesktopInstalledBuildIdentity.cs'
+      - 'desktop/windows/DesktopUpdatePreparationHostService.cs'
+      - 'desktop/windows/DesktopGitHubUpdatePolicy.cs'
+      - 'desktop/windows/DesktopReleaseBundleBuilder.cs'
+      - 'desktop/windows/*GitHubUpdateSource*'
+      - 'desktop/windows/*GitHubUpdatePolicy*'
+      - 'desktop/windows/*BuildIdentity*'
+      - 'scripts/promote-desktop-update-feed.mjs'
+      - 'scripts/test-desktop-update-feed.mjs'
+      - '.github/workflows/desktop-github-update-contract.yml'
+      - '.github/workflows/desktop-update-feed.yml'
+  pull_request:
+    paths:
+      - 'desktop/windows/UpdateDownloadClient.cs'
+      - 'desktop/windows/DesktopInstalledBuildIdentity.cs'
+      - 'desktop/windows/DesktopUpdatePreparationHostService.cs'
+      - 'desktop/windows/DesktopGitHubUpdatePolicy.cs'
+      - 'desktop/windows/DesktopReleaseBundleBuilder.cs'
+      - 'desktop/windows/*GitHubUpdateSource*'
+      - 'desktop/windows/*GitHubUpdatePolicy*'
+      - 'desktop/windows/*BuildIdentity*'
+      - 'scripts/promote-desktop-update-feed.mjs'
+      - 'scripts/test-desktop-update-feed.mjs'
+      - '.github/workflows/desktop-github-update-contract.yml'
+      - '.github/workflows/desktop-update-feed.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify existing update security contract
+        working-directory: desktop/windows
+        run: dotnet run --project SWIR.Desktop.Update.SelfTests.csproj --configuration Release
+      - name: Verify GitHub Release redirect policy
+        working-directory: desktop/windows
+        run: dotnet run --project SWIR.Desktop.GitHubUpdateSource.SelfTests.csproj --configuration Release
+      - name: Verify installed build identity
+        working-directory: desktop/windows
+        run: dotnet run --project SWIR.Desktop.BuildIdentity.SelfTests.csproj --configuration Release
+      - name: Verify release policy provisioning
+        working-directory: desktop/windows
+        run: dotnet run --project SWIR.Desktop.GitHubUpdatePolicy.SelfTests.csproj --configuration Release
+      - name: Verify release bundle integration
+        working-directory: desktop/windows
+        run: dotnet run --project SWIR.Desktop.ReleaseBundle.SelfTests.csproj --configuration Release
+      - name: Verify update preparation host
+        working-directory: desktop/windows
+        run: dotnet run --project SWIR.Desktop.UpdatePreparationHost.SelfTests.csproj --configuration Release
+      - name: Verify anti-downgrade feed promotion
+        run: node scripts/test-desktop-update-feed.mjs

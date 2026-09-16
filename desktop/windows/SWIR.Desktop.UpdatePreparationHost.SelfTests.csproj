@@ -22,6 +22,7 @@
     <Compile Include="DesktopUpdateBridgeCoordinator.cs" />
     <Compile Include="DesktopUpdateReleasePolicy.cs" />
     <Compile Include="DesktopUpdatePreparationBridgeCoordinator.cs" />
+    <Compile Include="DesktopInstalledBuildIdentity.cs" />
     <Compile Include="DesktopUpdatePreparationHostService.cs" />
     <Compile Include="DesktopUpdatePreparationHostServiceSelfTests.cs" />
   </ItemGroup>

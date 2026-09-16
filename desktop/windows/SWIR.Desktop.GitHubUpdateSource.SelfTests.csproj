@@ -8,10 +8,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="UpdateBroker.cs" />
-    <Compile Include="DesktopPackageBuilder.cs" />
-    <Compile Include="DesktopUpdateReleaseBuilder.cs" />
-    <Compile Include="DesktopGitHubUpdatePolicy.cs" />
-    <Compile Include="DesktopReleaseBundleBuilder.cs" />
-    <Compile Include="DesktopReleaseBundleSelfTests.cs" />
+    <Compile Include="UpdateStagingBroker.cs" />
+    <Compile Include="UpdateDownloadClient.cs" />
+    <Compile Include="GitHubUpdateSourceSelfTests.cs" />
   </ItemGroup>
 </Project>

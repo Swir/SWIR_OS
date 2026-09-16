@@ -11,6 +11,7 @@
     <Compile Include="UpdateBroker.cs" />
     <Compile Include="DesktopPackageBuilder.cs" />
     <Compile Include="DesktopUpdateReleaseBuilder.cs" />
+    <Compile Include="DesktopGitHubUpdatePolicy.cs" />
     <Compile Include="DesktopReleaseBundleBuilder.cs" />
     <Compile Include="DesktopReleaseBundleTool.cs" />
   </ItemGroup>

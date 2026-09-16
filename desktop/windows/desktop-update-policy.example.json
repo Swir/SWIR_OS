@@ -2,8 +2,8 @@
   "Schema": "swir.desktop-update-policy/0.1",
   "Enabled": false,
   "Channel": "stable",
-  "ManifestUrl": null,
-  "ManifestHosts": [],
-  "PackageHosts": [],
+  "ManifestUrl": "https://raw.githubusercontent.com/Swir/SWIR_OS/main/updates/stable/desktop-update-stable.json",
+  "ManifestHosts": ["raw.githubusercontent.com"],
+  "PackageHosts": ["github.com"],
   "PublicKeyPem": null
 }

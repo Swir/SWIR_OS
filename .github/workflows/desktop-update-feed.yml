@@ -1,0 +1,86 @@
+name: SWIR Desktop Update Feed
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: swir-desktop-update-feed-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    if: ${{ startsWith(github.event.release.tag_name, 'desktop-v') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ github.event.release.tag_name }}
+    steps:
+      - name: Checkout current main without persisted credentials
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Parse immutable Desktop release tag
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RELEASE_TAG" =~ ^desktop-v([0-9]+\.[0-9]+\.[0-9]+)-(preview|stable)$ ]]; then
+            echo "version=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+            echo "channel=${BASH_REMATCH[2]}" >> "$GITHUB_OUTPUT"
+          else
+            echo "Ignoring non-Desktop SWIR release tag: $RELEASE_TAG" >&2
+            exit 1
+          fi
+      - name: Fast-forward to current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git checkout main
+          git merge --ff-only origin/main
+      - name: Download signed update envelope from published Release
+        shell: bash
+        env:
+          CHANNEL: ${{ steps.release.outputs.channel }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/swir-update-feed"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "desktop-update-${CHANNEL}.json" --dir "$RUNNER_TEMP/swir-update-feed"
+          test -s "$RUNNER_TEMP/swir-update-feed/desktop-update-${CHANNEL}.json"
+      - name: Promote signed envelope without downgrade
+        shell: bash
+        env:
+          CHANNEL: ${{ steps.release.outputs.channel }}
+        run: |
+          set -euo pipefail
+          node scripts/promote-desktop-update-feed.mjs \
+            --incoming "$RUNNER_TEMP/swir-update-feed/desktop-update-${CHANNEL}.json" \
+            --output "updates/${CHANNEL}/desktop-update-${CHANNEL}.json" \
+            --channel "$CHANNEL" \
+            --tag "$RELEASE_TAG"
+      - name: Commit feed only when it advanced
+        shell: bash
+        env:
+          CHANNEL: ${{ steps.release.outputs.channel }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- "updates/${CHANNEL}/desktop-update-${CHANNEL}.json"; then
+            echo "Feed already points at ${VERSION}; nothing to publish."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "updates/${CHANNEL}/desktop-update-${CHANNEL}.json"
+          git commit -m "Promote Desktop ${CHANNEL} update feed to ${VERSION}"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
