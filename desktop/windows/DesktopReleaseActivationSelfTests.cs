@@ -75,7 +75,11 @@ internal static class DesktopReleaseActivationSelfTests
 
             Expect(RunWorker(workerExe, null, "plan", state.JournalPath, transactionsRoot, deploymentRoot).ExitCode == 0,
                 "worker creates canonical activation plan for signed release");
-            Expect(RunWorker(workerExe, null, "prepare-candidate", state.JournalPath, transactionsRoot, deploymentRoot).ExitCode == 0,
+            var candidateTimeoutMs = DesktopReleaseTestTiming.CandidatePreparationTimeoutMs(verified.PackageSize);
+            Expect(candidateTimeoutMs >= DesktopReleaseTestTiming.MinimumCandidatePreparationTimeoutMs
+                && candidateTimeoutMs <= DesktopReleaseTestTiming.MaximumCandidatePreparationTimeoutMs,
+                "activation Candidate extraction timeout remains bounded for bundled release size");
+            Expect(RunWorker(workerExe, null, "prepare-candidate", state.JournalPath, transactionsRoot, deploymentRoot, candidateTimeoutMs).ExitCode == 0,
                 "worker prepares verified Candidate from signed release");
 
             using var deadHost = Process.Start(new ProcessStartInfo("cmd.exe", "/d /c exit 0")
