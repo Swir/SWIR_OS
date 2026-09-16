@@ -11,6 +11,7 @@ const settings = read('swir-settings.html');
 const sdk = read('swir-sdk.js');
 const bridgeHost = read('swir-app-bridge-host.js');
 const bridgeClient = read('swir-app-bridge.js');
+const runtimeSelfTest = read('scripts/test-i18n-runtime.mjs');
 
 const fail = message => { throw new Error(`SWIR_I18N_CONTRACT: ${message}`); };
 
@@ -21,6 +22,8 @@ for (const api of ['setLocale','registerMessages','formatDate','formatNumber','f
 }
 if (!i18n.includes('Intl.getCanonicalLocales')) fail('BCP-47 canonicalization is missing');
 if (!i18n.includes('Intl.Locale')) fail('Intl.Locale support is missing');
+if (!i18n.includes('.maximize()')) fail('likely-script fallback for regional locale matching is missing');
+if (!i18n.includes("LANGUAGE_ALIASES=Object.freeze({no:'nb'})")) fail('legacy Norwegian language alias is missing from runtime matching');
 if (!i18n.includes("document.documentElement.dir=directionOf(canonical)")) fail('document RTL/LTR direction propagation is missing');
 if (!i18n.includes("const FALLBACK_LOCALE='en'")) fail('English fallback locale must remain explicit');
 
@@ -36,6 +39,10 @@ for (const key of ['system.language','system.settings','system.search','system.n
   if (occurrences < 12) fail(`core translation coverage is incomplete for ${key}: ${occurrences}/12 extension packs`);
 }
 if (!i18n.includes("'ar'") || !i18n.includes("'he'")) fail('RTL language allowlist must include Arabic and Hebrew');
+
+for (const marker of ["localeChain('zh-CN')", "localeChain('no-NO')", "directionOf('ar-EG')", "locale: 'eo'"]) {
+  if (!runtimeSelfTest.includes(marker)) fail(`executable locale runtime coverage missing: ${marker}`);
+}
 
 const i18nScript = index.indexOf('<script src="./swir-i18n.js"></script>');
 const packsScript = index.indexOf('<script src="./swir-locale-packs.js"></script>');
@@ -68,4 +75,4 @@ if (!sdk.includes("version: '1.6.1'")) fail('App SDK runtime version must be 1.6
 if (!index.includes('APP SDK: 1.6.1') || index.includes('App SDK 1.3')) fail('shell SDK version is stale');
 if (!manifest.includes('SWIR App SDK 1.6.1') || manifest.includes('SWIR App SDK 1.3')) fail('PWA manifest SDK version is stale');
 
-console.log('SWIR i18n contract OK: BCP-47 core, English fallback, RTL, 12 bundled extension locale packs, shell bindings, offline cache, Desktop staging and SDK 1.6.1 consistency are wired.');
+console.log('SWIR i18n contract OK: BCP-47 core, script/alias matching, English fallback, RTL, 12 bundled extension locale packs, shell bindings, offline cache, Desktop staging and SDK 1.6.1 consistency are wired.');
