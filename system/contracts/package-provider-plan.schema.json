@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://swir.github.io/system/contracts/package-provider-plan.schema.json",
+  "title": "SWIR Package Provider Plan 0.1",
+  "type": "object",
+  "required": [
+    "schema",
+    "mode",
+    "readOnly",
+    "autoExecutable",
+    "packageId",
+    "provider",
+    "executionClass",
+    "sourceClass",
+    "requiredCapability",
+    "capabilityAvailable",
+    "status",
+    "packageManagers",
+    "privilegedMutation",
+    "privilegedMutationRequiresPlan",
+    "privilegedMutationRequiresJournal",
+    "signatureVerificationRequired"
+  ],
+  "properties": {
+    "schema": { "const": "swir.package-provider-plan/0.1" },
+    "mode": { "const": "preview" },
+    "readOnly": { "const": true },
+    "autoExecutable": { "const": false },
+    "packageId": { "type": "string", "minLength": 1 },
+    "provider": {
+      "enum": [
+        "swir.package.system",
+        "swir.package.flatpak",
+        "swir.package.appimage",
+        "swir.compat.wine",
+        "swir.compat.proton"
+      ]
+    },
+    "executionClass": { "enum": ["linux-native", "windows-compat"] },
+    "sourceClass": {
+      "enum": [
+        "swir-signed",
+        "distribution-repository",
+        "flatpak-remote",
+        "vendor-official-repository",
+        "local-user-selected"
+      ]
+    },
+    "requiredCapability": { "enum": ["system-package-manager", "flatpak", "appimage", "wine", "proton"] },
+    "capabilityAvailable": { "type": "boolean" },
+    "status": { "enum": ["ready", "unavailable"] },
+    "packageManagers": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "enum": ["apt", "dnf", "rpm-ostree", "pacman", "zypper"] }
+    },
+    "privilegedMutation": { "type": "boolean" },
+    "privilegedMutationRequiresPlan": { "const": true },
+    "privilegedMutationRequiresJournal": { "const": true },
+    "signatureVerificationRequired": { "const": true }
+  },
+  "additionalProperties": false
+}
