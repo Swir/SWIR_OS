@@ -87,6 +87,10 @@ jobs:
           if ($build.schema -ne 'swir.desktop-installer-build/0.1' -or $build.selfContained -ne $true -or $build.singleFile -ne $true -or $build.userPrerequisiteDownloadsRequired -ne $false) {
             throw 'Installer build manifest does not prove a self-contained single-file setup.'
           }
+          $setupHash = (Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash.ToLowerInvariant()
+          $payloadHash = (Get-FileHash -LiteralPath $payload -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($build.installerSha256 -ne $setupHash -or $build.payloadSha256 -ne $payloadHash) { throw 'Installer build manifest SHA-256 does not match produced bytes.' }
+          if ([long]$build.installerSize -ne (Get-Item $setup).Length -or [long]$build.payloadSize -ne (Get-Item $payload).Length) { throw 'Installer build manifest size does not match produced bytes.' }
 
       - name: Verify embedded payload and perform clean install
         shell: pwsh
@@ -102,12 +106,15 @@ jobs:
           if (-not (Test-Path -LiteralPath $currentPath -PathType Leaf)) { throw 'Setup did not write current.json.' }
           $current = Get-Content $currentPath -Raw | ConvertFrom-Json
           if ($current.schema -ne 'swir.desktop-current-install/0.1' -or $current.version -ne '0.5.7' -or $current.channel -ne 'preview') { throw 'Current installation pointer is invalid.' }
-          $installed = [string]$current.installDirectory
+          $installed = [IO.Path]::GetFullPath([string]$current.installDirectory).TrimEnd('\')
           foreach ($required in @('SWIR.Desktop.Host.exe','desktop-host-build.json','install-receipt.json','WebView2FixedRuntime\msedgewebview2.exe')) {
             if (-not (Test-Path -LiteralPath (Join-Path $installed $required) -PathType Leaf)) { throw "Installed runtime is missing $required" }
           }
           $receipt = Get-Content (Join-Path $installed 'install-receipt.json') -Raw | ConvertFrom-Json
-          if ($receipt.Schema -ne 'swir.desktop-install-receipt/0.1' -or $receipt.Version -ne '0.5.7' -or $receipt.Channel -ne 'preview') { throw 'Install receipt is invalid.' }
+          $receiptDirectory = [IO.Path]::GetFullPath([string]$receipt.InstallDirectory).TrimEnd('\')
+          if ($receipt.Schema -ne 'swir.desktop-install-receipt/0.1' -or $receipt.Version -ne '0.5.7' -or $receipt.Channel -ne 'preview' -or $receiptDirectory -ne $installed) {
+            throw 'Install receipt is invalid or still points at the staging directory.'
+          }
 
       - name: Refuse tampered existing installation
         shell: pwsh
