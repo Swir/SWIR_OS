@@ -11,7 +11,7 @@ SWIR OS is designed in three editions sharing one application model and platform
 <!-- SWIR-ROADMAP-STANDARD:v1 -->
 <!-- ROADMAP-PROGRESS:START -->
 <p align="center">
-  <a href="https://github.com/Swir/swir.github.io/actions/workflows/system-contracts.yml"><img alt="CI" src="https://github.com/Swir/swir.github.io/actions/workflows/system-contracts.yml/badge.svg"></a>
+  <a href="https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml"><img alt="CI" src="https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml/badge.svg"></a>
   <img alt="Roadmap progress" src="https://img.shields.io/badge/ROADMAP-63.0%25-2ea043?style=for-the-badge">
   <img alt="Completed" src="https://img.shields.io/badge/DONE-34%2F54-1f6feb?style=for-the-badge">
   <img alt="Status" src="https://img.shields.io/badge/STATUS-IN%20PROGRESS-7c3aed?style=for-the-badge">
