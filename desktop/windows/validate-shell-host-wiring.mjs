@@ -21,7 +21,6 @@ const required = [
   '"cancelOpenFile"',
   'nativeShellIntegration: true',
   "shellIntegration: surface('shellIntegration', ['info','pendingOpenFiles','claimOpenFile','cancelOpenFile'])",
-  "version: '0.5.7-preview'",
   '_shellIntegration.Dispose()'
 ];
 
