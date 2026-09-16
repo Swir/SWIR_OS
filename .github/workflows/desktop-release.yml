@@ -60,7 +60,7 @@ concurrency:
 jobs:
   build-and-verify:
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     defaults:
       run:
         working-directory: desktop/windows
@@ -309,11 +309,37 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Final bundle catalog root pin verification failed with exit code $LASTEXITCODE" }
           }
 
+      - name: Build, verify and smoke-test one-file Desktop Setup
+        shell: pwsh
+        run: |
+          $bundle = Join-Path '${{ runner.temp }}' 'swir-release-bundle'
+          & (Join-Path (Get-Location) 'attach-desktop-installer-to-bundle.ps1') `
+            -BundleDir $bundle `
+            -Version $env:SWIR_RELEASE_VERSION `
+            -Channel $env:SWIR_RELEASE_CHANNEL `
+            -SmokeInstall
+          if ($LASTEXITCODE -ne 0) { throw "Desktop Setup attachment failed with exit code $LASTEXITCODE" }
+
+          $setupName = "SWIR-Desktop-Setup-$env:SWIR_RELEASE_VERSION-$env:SWIR_RELEASE_CHANNEL.exe"
+          $setup = Join-Path $bundle $setupName
+          $installerManifestPath = Join-Path $bundle 'desktop-installer-build.json'
+          foreach ($required in @($setup, $installerManifestPath)) {
+            if (-not (Test-Path -LiteralPath $required -PathType Leaf) -or (Get-Item -LiteralPath $required).Length -le 0) { throw "Verified Setup artifact is missing or empty: $required" }
+          }
+          $installerManifest = Get-Content -LiteralPath $installerManifestPath -Raw | ConvertFrom-Json
+          $releaseZip = Join-Path $bundle "SWIR-Desktop-$env:SWIR_RELEASE_VERSION-$env:SWIR_RELEASE_CHANNEL.zip"
+          if ($installerManifest.schema -ne 'swir.desktop-installer-build/0.1' `
+              -or $installerManifest.userPrerequisiteDownloadsRequired -ne $false `
+              -or $installerManifest.payloadSha256 -ne (Get-FileHash -LiteralPath $releaseZip -Algorithm SHA256).Hash.ToLowerInvariant() `
+              -or $installerManifest.installerSha256 -ne (Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash.ToLowerInvariant()) {
+            throw 'Final one-file Desktop Setup is not cryptographically bound to the verified release package.'
+          }
+
       - name: Validate final release artifact set
         shell: pwsh
         run: |
           $bundle = Join-Path '${{ runner.temp }}' 'swir-release-bundle'
-          foreach ($file in @("SWIR-Desktop-$env:SWIR_RELEASE_VERSION-$env:SWIR_RELEASE_CHANNEL.zip","desktop-update-$env:SWIR_RELEASE_CHANNEL.json",'release-bundle.json','catalog.json','catalog-envelope.json','catalog-trust-roots.json','catalog-artifacts.json')) {
+          foreach ($file in @("SWIR-Desktop-$env:SWIR_RELEASE_VERSION-$env:SWIR_RELEASE_CHANNEL.zip","SWIR-Desktop-Setup-$env:SWIR_RELEASE_VERSION-$env:SWIR_RELEASE_CHANNEL.exe","desktop-update-$env:SWIR_RELEASE_CHANNEL.json",'desktop-installer-build.json','release-bundle.json','catalog.json','catalog-envelope.json','catalog-trust-roots.json','catalog-artifacts.json')) {
             $path = Join-Path $bundle $file
             if (-not (Test-Path $path -PathType Leaf) -or (Get-Item $path).Length -le 0) { throw "Missing/empty release artifact: $file" }
           }
