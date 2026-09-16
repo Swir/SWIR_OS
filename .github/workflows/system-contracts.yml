@@ -47,6 +47,8 @@ jobs:
           node --check system/runtime/application-runtime.selftest.mjs
           node --check system/runtime/package-launch-broker.mjs
           node --check system/runtime/package-launch-broker.selftest.mjs
+          node --check system/runtime/package-runtime-coordinator.mjs
+          node --check system/runtime/package-runtime-coordinator.selftest.mjs
           node --check system/providers/package-provider-registry.mjs
           node --check system/providers/package-provider-registry.selftest.mjs
           node --check system/hardware/hardware-service.mjs
@@ -83,6 +85,9 @@ jobs:
 
       - name: Run System Package Launch Broker self-tests
         run: node system/runtime/package-launch-broker.selftest.mjs
+
+      - name: Run System Package Runtime Coordinator self-tests
+        run: node system/runtime/package-runtime-coordinator.selftest.mjs
 
       - name: Run System Package Provider Registry self-tests
         run: node system/providers/package-provider-registry.selftest.mjs
