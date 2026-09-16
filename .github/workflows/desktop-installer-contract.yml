@@ -97,11 +97,11 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $setup = Join-Path '${{ runner.temp }}' 'swir-installer-output\SWIR-Desktop-Setup-0.5.7-preview.exe'
-          & $setup --verify-only --quiet
-          if ($LASTEXITCODE -ne 0) { throw "Setup --verify-only failed with exit code $LASTEXITCODE." }
+          $verify = Start-Process -FilePath $setup -ArgumentList @('--verify-only','--quiet') -Wait -PassThru
+          if ($verify.ExitCode -ne 0) { throw "Setup --verify-only failed with exit code $($verify.ExitCode)." }
           $root = Join-Path '${{ runner.temp }}' 'swir-clean-install'
-          & $setup --no-launch --quiet --install-root $root
-          if ($LASTEXITCODE -ne 0) { throw "Setup clean install failed with exit code $LASTEXITCODE." }
+          $install = Start-Process -FilePath $setup -ArgumentList @('--no-launch','--quiet','--install-root',$root) -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Setup clean install failed with exit code $($install.ExitCode)." }
           $currentPath = Join-Path $root 'current.json'
           if (-not (Test-Path -LiteralPath $currentPath -PathType Leaf)) { throw 'Setup did not write current.json.' }
           $current = Get-Content $currentPath -Raw | ConvertFrom-Json
@@ -125,6 +125,6 @@ jobs:
           $current = Get-Content (Join-Path $root 'current.json') -Raw | ConvertFrom-Json
           $host = Join-Path ([string]$current.installDirectory) 'SWIR.Desktop.Host.exe'
           [IO.File]::AppendAllText($host, 'tamper')
-          & $setup --no-launch --quiet --install-root $root
-          if ($LASTEXITCODE -eq 0) { throw 'Setup accepted a tampered existing installation.' }
-          Write-Host "Tampered-install refusal returned expected non-zero exit code $LASTEXITCODE."
+          $tampered = Start-Process -FilePath $setup -ArgumentList @('--no-launch','--quiet','--install-root',$root) -Wait -PassThru
+          if ($tampered.ExitCode -eq 0) { throw 'Setup accepted a tampered existing installation.' }
+          Write-Host "Tampered-install refusal returned expected non-zero exit code $($tampered.ExitCode)."
