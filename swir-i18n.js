@@ -6,6 +6,7 @@
   const STORAGE_KEY='swir.locale';
   const FALLBACK_LOCALE='en';
   const RTL_LANGUAGES=new Set(['ar','arc','ckb','dv','fa','ha','he','khw','ks','ku','ps','sd','ug','ur','yi']);
+  const LANGUAGE_ALIASES=Object.freeze({no:'nb'});
   const listeners=new Set();
   const messagePacks=new Map();
   const formatterCache=new Map();
@@ -101,10 +102,21 @@
     return RTL_LANGUAGES.has(languageOf(locale))?'rtl':'ltr';
   }
 
+  function scriptFallbackOf(locale){
+    try{
+      const current=new Intl.Locale(locale);
+      const maximized=current.maximize();
+      const script=current.script||maximized.script;
+      return script?canonicalize(`${current.language}-${script}`):null;
+    }catch{return null}
+  }
+
   function localeChain(locale){
     const canonical=canonicalize(locale)||FALLBACK_LOCALE;
     const base=languageOf(canonical);
-    return [...new Set([canonical,base,FALLBACK_LOCALE])];
+    const scriptFallback=scriptFallbackOf(canonical);
+    const alias=LANGUAGE_ALIASES[base]||null;
+    return [...new Set([canonical,scriptFallback,base,alias,FALLBACK_LOCALE].filter(Boolean))];
   }
 
   function translate(locale,key){
