@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WojThom 4.0 - Hybrid APK</title>
+    
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+    
+    <style>
+        :root {
+            --primary-color: #1A5276;
+            --secondary-color: #2874A6;
+            --accent-color: #3498DB;
+            --light-accent: #EBF5FB;
+            --dark-text: #333;
+            --light-text: #f8f9fa;
+            --highlight: #F39C12;
+            --success-color: #2E8B57;
+            --danger-color: #C0392B;
+            --even-row: #ffffff;
+            --odd-row: #E8F4FC;
+            --sum-row: #D3D3D3;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f6f9;
+            margin: 0; padding: 0; min-height: 100vh;
+            display: flex; flex-direction: column;
+        }
+        
+        .toolbar {
+            background-color: var(--primary-color);
+            color: white;
+            padding: 10px 15px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            position: sticky; top: 0; z-index: 1000;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        
+        .toolbar h1 { margin: 0; font-size: 1.2rem; font-weight: bold; }
+        
+        .main-container {
+            flex: 1; padding: 15px; max-width: 1200px; margin: 0 auto; width: 100%;
+        }
+        
+        .section {
+            background-color: white; border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 20px; padding: 20px;
+        }
+        
+        .header-input { margin-bottom: 15px; }
+        .header-input label { font-weight: bold; display: block; margin-bottom: 5px; }
+        .header-input input {
+            width: 100%; padding: 10px; border: 1px solid #ddd;
+            border-radius: 4px; font-size: 16px;
+        }
+        
+        .input-area textarea {
+            width: 100%; height: 120px; padding: 10px;
+            border: 1px solid #ddd; border-radius: 4px;
+            font-family: 'Consolas', monospace; resize: vertical;
+            font-size: 16px;
+        }
+        
+        .buttons-container {
+            display: flex; gap: 10px; flex-wrap: wrap; margin-top: 15px;
+        }
+        
+        .action-btn {
+            padding: 12px 20px; border: none; border-radius: 4px;
+            cursor: pointer; font-weight: bold; color: white;
+            display: flex; align-items: center; gap: 8px; flex: 1; justify-content: center;
+        }
+        
+        .generate-btn { background-color: var(--secondary-color); }
+        .clear-btn { background-color: #7B7D7D; }
+        .export-btn { background-color: var(--danger-color); }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th {
+            background-color: var(--secondary-color); color: white;
+            padding: 12px; text-align: center; position: sticky; top: 0;
+        }
+        td { padding: 12px; text-align: center; border-bottom: 1px solid #ddd; }
+        
+        tr:nth-child(even) { background-color: var(--odd-row); }
+        
+        /* Oznaczenia Błędów */
+        tr.row-error td { background-color: #ffebee; border-left: 5px solid var(--danger-color); }
+        tr.row-warning td { background-color: #fff8e1; border-left: 5px solid var(--highlight); }
+        
+        .summary-label {
+            text-align: right; font-weight: bold; font-size: 1.2em;
+            padding: 15px; background: #eee; border-radius: 4px; margin-top: 15px;
+        }
+        
+        /* Modal */
+        .modal { display: none; position: fixed; z-index: 1001; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); }
+        .modal-content { background-color: white; margin: 15% auto; padding: 20px; border-radius: 8px; width: 90%; max-width: 500px; }
+        
+        #toast {
+            visibility: hidden; min-width: 250px; background-color: #333; color: #fff;
+            text-align: center; border-radius: 4px; padding: 16px; position: fixed;
+            z-index: 2000; left: 50%; bottom: 30px; transform: translateX(-50%);
+        }
+        #toast.show { visibility: visible; animation: fadein 0.5s, fadeout 0.5s 2.5s; }
+        @keyframes fadein { from {bottom: 0; opacity: 0;} to {bottom: 30px; opacity: 1;} }
+        @keyframes fadeout { from {bottom: 30px; opacity: 1;} to {bottom: 0; opacity: 0;} }
+    </style>
+</head>
+<body>
+
+    <div class="toolbar">
+        <h1>WojThom 4.0 Hybrid</h1>
+        <div>
+            <button class="btn btn-sm btn-light" onclick="setLang('en')">EN</button>
+            <button class="btn btn-sm btn-light" onclick="setLang('no')">NO</button>
+            <button class="btn btn-sm btn-light" onclick="setLang('pl')">PL</button>
+        </div>
+    </div>
+    
+    <div class="main-container">
+        <div class="section">
+            <div class="header-input">
+                <label id="lbl_header">Header:</label>
+                <input type="text" id="headerInput" value="Time List">
+            </div>
+            
+            <div class="input-area">
+                <label id="lbl_input">Paste data:</label>
+                <textarea id="rawInput" placeholder="0101 Client 8-16&#10;02.01 Client 0.75&#10;03.01 Client 1:30"></textarea>
+            </div>
+            
+            <div class="buttons-container">
+                <button class="action-btn generate-btn" onclick="processData()">
+                    <i class="fas fa-play"></i> <span id="btn_gen">Generate</span>
+                </button>
+                <button class="action-btn clear-btn" onclick="document.getElementById('rawInput').value=''">
+                    <i class="fas fa-trash"></i> <span id="btn_clear">Clear</span>
+                </button>
+                <button class="action-btn export-btn" onclick="openExportModal()">
+                    <i class="fas fa-file-pdf"></i> <span id="btn_pdf">PDF</span>
+                </button>
+            </div>
+        </div>
+        
+        <div class="section" id="resultSection" style="display:none;">
+            <div style="overflow-x:auto;">
+                <table id="resultTable">
+                    <thead>
+                        <tr>
+                            <th id="th_date">Date</th>
+                            <th id="th_client">Client</th>
+                            <th id="th_input">Input</th>
+                            <th id="th_res">Hours</th>
+                        </tr>
+                    </thead>
+                    <tbody id="resultBody"></tbody>
+                </table>
+            </div>
+            <div class="summary-label" id="summaryLabel">Total: 0:00</div>
+        </div>
+    </div>
+    
+    <div id="exportModal" class="modal">
+        <div class="modal-content">
+            <h3>Export PDF</h3>
+            <p>Select language / Wybierz język / Velg språk</p>
+            <div class="d-grid gap-2">
+                <button class="btn btn-primary" onclick="exportPDF('en')">🇬🇧 English PDF</button>
+                <button class="btn btn-primary" onclick="exportPDF('no')">🇳🇴 Norsk PDF</button>
+                <button class="btn btn-primary" onclick="exportPDF('pl')">🇵🇱 Polski PDF</button>
+            </div>
+            <button class="btn btn-secondary mt-3 w-100" onclick="document.getElementById('exportModal').style.display='none'">Close</button>
+        </div>
+    </div>
+
+    <div id="editModal" class="modal">
+        <div class="modal-content">
+            <h3>Edit Entry</h3>
+            <input type="hidden" id="editIndex">
+            
+            <label class="fw-bold mt-2">Date</label>
+            <input type="text" id="editDate" class="form-control">
+            
+            <label class="fw-bold mt-2">Client</label>
+            <input type="text" id="editClient" class="form-control">
+            
+            <label class="fw-bold mt-2">Time Input</label>
+            <input type="text" id="editRaw" class="form-control">
+            <small class="text-muted">Accepts: 8-16, 0.75, 1:30</small>
+            
+            <div class="d-flex gap-2 mt-4">
+                <button class="btn btn-success flex-fill" onclick="saveEdit()">Save</button>
+                <button class="btn btn-danger flex-fill" onclick="deleteEntry()">Delete</button>
+            </div>
+            <button class="btn btn-secondary w-100 mt-2" onclick="document.getElementById('editModal').style.display='none'">Cancel</button>
+        </div>
+    </div>
+
+    <div id="toast">Notification</div>
+
+    <script>
+        // --- DATA & TRANSLATIONS ---
+        const translations = {
+            en: { header: "Header:", input: "Paste Data:", gen: "Generate List", clear: "Clear", pdf: "PDF Export", date: "Date", client: "Client", inp: "Input", res: "Time", total: "Total:", generated: "Generated on", msg_ok: "List generated", msg_err: "Check highlighted rows" },
+            pl: { header: "Nagłówek:", input: "Wklej Dane:", gen: "Generuj Listę", clear: "Wyczyść", pdf: "Eksport PDF", date: "Data", client: "Klient", inp: "Wpis", res: "Czas", total: "Suma:", generated: "Wygenerowano", msg_ok: "Lista gotowa", msg_err: "Sprawdź błędy" },
+            no: { header: "Overskrift:", input: "Lim inn data:", gen: "Generer Liste", clear: "Tøm", pdf: "Eksport PDF", date: "Dato", client: "Kunde", inp: "Inndata", res: "Tid", total: "Totalt:", generated: "Generert", msg_ok: "Liste generert", msg_err: "Sjekk feil" }
+        };
+
+        let currentLang = localStorage.getItem('wt_hybrid_lang') || 'en';
+        let entries = [];
+
+        // --- INIT ---
+        document.addEventListener('DOMContentLoaded', () => {
+            setLang(currentLang);
+            const savedData = localStorage.getItem('wt_hybrid_data');
+            if(savedData) document.getElementById('rawInput').value = savedData;
+        });
+
+        function setLang(l) {
+            currentLang = l; localStorage.setItem('wt_hybrid_lang', l);
+            const t = translations[l];
+            document.getElementById('lbl_header').innerText = t.header;
+            document.getElementById('lbl_input').innerText = t.input;
+            document.getElementById('btn_gen').innerText = t.gen;
+            document.getElementById('btn_clear').innerText = t.clear;
+            document.getElementById('btn_pdf').innerText = t.pdf;
+            document.getElementById('th_date').innerText = t.date;
+            document.getElementById('th_client').innerText = t.client;
+            document.getElementById('th_input').innerText = t.inp;
+            document.getElementById('th_res').innerText = t.res;
+            if(entries.length) renderTable();
+        }
+
+        // --- SMART LOGIC ---
+        function parseToMins(str) {
+            if(!str) return 0;
+            let s = str.trim().replace(/,/g, '.');
+
+            // 1. Range (8-16, 08:00-16:00)
+            let range = s.match(/(\d{1,4}[.:]?\d{0,2})\s*[-–]\s*(\d{1,4}[.:]?\d{0,2})/);
+            if(range) {
+                let start = normalizeTime(range[1]);
+                let end = normalizeTime(range[2]);
+                return end - start;
+            }
+            // 2. Duration (1:30)
+            if(s.includes(':')) {
+                let p = s.split(':');
+                return (parseInt(p[0])*60) + (parseInt(p[1])||0);
+            }
+            // 3. Decimal (0.75)
+            if(!isNaN(parseFloat(s))) return Math.round(parseFloat(s)*60);
+            return 0;
+        }
+
+        function normalizeTime(t) {
+            t = t.replace(':', '.');
+            if(t.includes('.')) { let p=t.split('.'); return (parseInt(p[0])*60)+parseInt(p[1]||0); }
+            if(t.length <= 2) return parseInt(t)*60; // 8 -> 8:00
+            if(t.length === 3) return (parseInt(t[0])*60)+parseInt(t.substring(1)); // 830 -> 8:30
+            if(t.length === 4) return (parseInt(t.substring(0,2))*60)+parseInt(t.substring(2)); // 1600 -> 16:00
+            return 0;
+        }
+
+        function smartDate(s) {
+            s = s.replace(/[,/-]/g, '.');
+            if(/^\d{3,4}$/.test(s)) {
+                if(s.length===3) return `0${s[0]}.${s.substring(1)}`;
+                if(s.length===4) return `${s.substring(0,2)}.${s.substring(2)}`;
+            }
+            return s;
+        }
+
+        function fmt(m) {
+            let h = Math.floor(m/60);
+            let min = Math.round(m%60);
+            return `${h}:${min.toString().padStart(2,'0')}`;
+        }
+
+        // --- PROCESSING ---
+        function processData() {
+            let raw = document.getElementById('rawInput').value;
+            localStorage.setItem('wt_hybrid_data', raw);
+            let lines = raw.split('\n');
+            entries = [];
+            let issue = false;
+
+            lines.forEach(line => {
+                if(!line.trim()) return;
+
+                // Date
+                let dm = line.match(/^(\d{1,2}[.,/-]?\d{1,2})/);
+                let d = dm ? smartDate(dm[0]) : '?';
+                let rest = line.substring(dm ? dm[0].length : 0).trim();
+
+                // Time
+                let tm = rest.match(/(\d{1,4}[.:]?\d{0,2}\s*[-–]\s*\d{1,4}[.:]?\d{0,2})|(\d+[.,]\d+)|(\d+:\d{2})/);
+                let tStr = tm ? tm[0] : '';
+                let mins = parseToMins(tStr);
+                let client = rest.replace(tStr, '').trim();
+
+                // Status
+                let status = 'ok';
+                if(d === '?' || mins <= 0) status = 'error';
+                else if(!tStr.includes(':') && !tStr.includes('-') && !tStr.includes('.')) status = 'warning'; // Warning for simple numbers like '8'
+
+                entries.push({ date: d, client: client || '-', input: tStr || '?', mins: mins, status: status });
+                if(status !== 'ok') issue = true;
+            });
+
+            renderTable();
+            document.getElementById('resultSection').style.display = 'block';
+            showToast(issue ? translations[currentLang].msg_err : translations[currentLang].msg_ok);
+        }
+
+        function renderTable() {
+            let tb = document.getElementById('resultBody'); tb.innerHTML = '';
+            let total = 0;
+            entries.forEach((e, i) => {
+                let tr = document.createElement('tr');
+                if(e.status === 'error') tr.className = 'row-error';
+                if(e.status === 'warning') tr.className = 'row-warning';
+                
+                tr.onclick = () => openEdit(i);
+                tr.innerHTML = `<td>${e.date}</td><td>${e.client}</td><td>${e.input}</td><td style="font-weight:bold">${e.mins>0?fmt(e.mins):'-'}</td>`;
+                if(e.mins>0) total += e.mins;
+                tb.appendChild(tr);
+            });
+            document.getElementById('summaryLabel').innerText = `${translations[currentLang].total} ${fmt(total)}`;
+        }
+
+        // --- EDITING ---
+        function openEdit(i) {
+            let e = entries[i];
+            document.getElementById('editIndex').value = i;
+            document.getElementById('editDate').value = e.date;
+            document.getElementById('editClient').value = e.client;
+            document.getElementById('editRaw').value = e.input;
+            document.getElementById('editModal').style.display = 'block';
+        }
+        function saveEdit() {
+            let i = document.getElementById('editIndex').value;
+            let e = entries[i];
+            e.date = document.getElementById('editDate').value;
+            e.client = document.getElementById('editClient').value;
+            e.input = document.getElementById('editRaw').value;
+            e.mins = parseToMins(e.input);
+            e.status = e.mins > 0 ? 'ok' : 'error';
+            renderTable();
+            document.getElementById('editModal').style.display = 'none';
+        }
+        function deleteEntry() {
+            entries.splice(document.getElementById('editIndex').value, 1);
+            renderTable();
+            document.getElementById('editModal').style.display = 'none';
+        }
+
+        // --- EXPORT PDF (APK FIXED) ---
+        async function exportPDF(l) {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            const t = translations[l];
+            const title = document.getElementById('headerInput').value;
+
+            // 1. Stylistyka
+            doc.setFontSize(22);
+            doc.text(title, 105, 20, { align: 'center' }); // Centrowany tytuł
+            
+            doc.setFontSize(10);
+            doc.text(`${t.generated}: ${new Date().toLocaleDateString()}`, 195, 20, { align: 'right' });
+            
+            doc.line(14, 25, 196, 25); // Linia pod tytułem
+
+            // 2. Dane do tabeli
+            let body = entries.map(e => [
+                e.date, 
+                e.client, 
+                e.input, 
+                e.mins > 0 ? fmt(e.mins) : '-'
+            ]);
+            
+            let total = entries.reduce((a,b)=>a+b.mins,0);
+            body.push(['', '', { content: t.total, styles: { fontStyle: 'bold', halign: 'right' }}, { content: fmt(total), styles: { fontStyle: 'bold', fillColor: [230,230,230] }}]);
+
+            // 3. Generowanie tabeli (GRID = czarne linie = dobra widoczność)
+            doc.autoTable({
+                startY: 30,
+                head: [[t.date.toUpperCase(), t.client.toUpperCase(), t.inp.toUpperCase(), t.res.toUpperCase()]],
+                body: body,
+                theme: 'grid', // TO JEST KLUCZOWE DLA WYDRUKU/PDF
+                styles: { 
+                    fontSize: 10, 
+                    cellPadding: 3, 
+                    lineColor: [0, 0, 0], // Czarne linie
+                    lineWidth: 0.1, 
+                    textColor: [0, 0, 0] 
+                },
+                headStyles: { 
+                    fillColor: [40, 116, 166], // Niebieski nagłówek z wersji 3.0
+                    textColor: 255, 
+                    fontStyle: 'bold' 
+                },
+                columnStyles: { 
+                    3: { halign: 'right', fontStyle: 'bold' } 
+                }
+            });
+
+            // 4. ZAPISYWANIE DLA APK (Web Share API)
+            // To omija problemy z blokowaniem pobierania w WebView
+            const blob = doc.output('blob');
+            const file = new File([blob], "TimeReport.pdf", { type: "application/pdf" });
+
+            if (navigator.share && navigator.canShare({ files: [file] })) {
+                try {
+                    await navigator.share({
+                        files: [file],
+                        title: title,
+                        text: 'PDF from WojThom App'
+                    });
+                    showToast("Shared successfully!");
+                } catch (err) {
+                    // Jeśli użytkownik anuluje udostępnianie, nic nie rób
+                    console.log("Share cancelled");
+                }
+            } else {
+                // Fallback dla zwykłej przeglądarki
+                doc.save("TimeReport.pdf");
+                showToast("Downloaded PDF");
+            }
+            
+            document.getElementById('exportModal').style.display = 'none';
+        }
+
+        function openExportModal() {
+            if(entries.length === 0) { showToast("Generate list first!"); return; }
+            document.getElementById('exportModal').style.display = 'block';
+        }
+
+        function showToast(msg) {
+            let x = document.getElementById("toast");
+            x.innerText = msg; x.className = "show";
+            setTimeout(function(){ x.className = x.className.replace("show", ""); }, 3000);
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,166 @@
+/* =============================================================
+   SWIR OS 1.7.13 — RUNTIME ADAPTER CONTRACT 1.7.0
+   Portable Web -> Desktop -> System host boundary.
+   ============================================================= */
+(() => {
+  'use strict';
+
+  const META = Object.freeze({ name: 'SWIR Runtime', version: '1.7.0', contract: 'swir.runtime/1.0' });
+  const SHELL_APP_ID = 'swir.system.shell';
+  const DESKTOP_CATALOG_AUTH_SCHEMA = 'swir.desktop-catalog-authorization/1.0';
+  const SIGNED_RELEASE_ARTIFACT_REF = 'release:verified-catalog-artifact';
+  const host = () => window.SWIR_NATIVE_HOST || null;
+  const platform = () => window.SwirPlatform || null;
+  const listeners = new Map();
+
+  function emit(type, detail = {}) {
+    listeners.get(type)?.forEach(fn => { try { fn(detail); } catch (_) {} });
+    try { window.dispatchEvent(new CustomEvent(`swir:runtime:${type}`, { detail })); } catch (_) {}
+  }
+  function on(type, fn) {
+    if (typeof fn !== 'function') return () => {};
+    if (!listeners.has(type)) listeners.set(type, new Set());
+    listeners.get(type).add(fn); return () => listeners.get(type)?.delete(fn);
+  }
+  function nativeMethod(surface, method) {
+    const h = host(); const fn = h?.[surface]?.[method];
+    return typeof fn === 'function' ? fn.bind(h[surface]) : null;
+  }
+  async function call(surface, method, args, fallback) {
+    const fn = nativeMethod(surface, method);
+    if (fn) return fn(...args);
+    if (typeof fallback === 'function') return fallback(...args);
+    throw Object.assign(new Error(`${surface}.${method} is not available in this runtime`), { code: 'RUNTIME_UNSUPPORTED', surface, method });
+  }
+  function appIdOf(context) {
+    if (context?.appId === undefined || context?.appId === null || context?.appId === '') return SHELL_APP_ID;
+    const value = String(context.appId).trim();
+    if (!/^[a-zA-Z0-9._-]{1,128}$/.test(value)) throw Object.assign(new Error('Invalid SWIR application identity'), { code: 'INVALID_APP_ID' });
+    return value;
+  }
+  function packageIdOf(value) {
+    const id = String(value || '').trim();
+    if (!/^[a-zA-Z0-9._-]{1,128}$/.test(id)) throw Object.assign(new Error('Invalid SWIR package identity'), { code: 'INVALID_APP_ID' });
+    return id;
+  }
+  function versionOf(value) {
+    const version = String(value || '').trim();
+    if (!version || version.length > 64) throw Object.assign(new Error('Invalid SWIR package version'), { code: 'INVALID_PACKAGE_VERSION' });
+    return version;
+  }
+  function catalogAuthorization(packageId, version, catalog, envelope) {
+    const id = packageIdOf(packageId);
+    const ver = versionOf(version);
+    if (!Array.isArray(catalog)) throw Object.assign(new Error('Signed catalog array required'), { code: 'CATALOG_AUTHORIZATION_INVALID' });
+    if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) throw Object.assign(new Error('Signed catalog envelope required'), { code: 'CATALOG_AUTHORIZATION_INVALID' });
+    return Object.freeze({ schema: DESKTOP_CATALOG_AUTH_SCHEMA, packageId: id, version: ver, catalog: JSON.parse(JSON.stringify(catalog)), envelope: JSON.parse(JSON.stringify(envelope)) });
+  }
+  function packageTrustInput(value) {
+    if (value && typeof value === 'object') return JSON.stringify(value);
+    return String(value || '');
+  }
+
+  async function pickFile(options = {}, context = {}) {
+    const owner = appIdOf(context);
+    return call('filesystem', 'pickFile', [owner], async () => {
+      if (!window.showOpenFilePicker) throw Object.assign(new Error('Native file picker unavailable'), { code: 'RUNTIME_UNSUPPORTED' });
+      const [handle] = await window.showOpenFilePicker(options); return handle || null;
+    });
+  }
+  async function pickDirectory(options = {}, context = {}) {
+    const owner = appIdOf(context);
+    return call('filesystem', 'pickDirectory', [owner], async () => {
+      if (!window.showDirectoryPicker) throw Object.assign(new Error('Native directory picker unavailable'), { code: 'RUNTIME_UNSUPPORTED' });
+      return window.showDirectoryPicker(options);
+    });
+  }
+
+  const filesystem = Object.freeze({
+    info: () => call('filesystem', 'info', [], async () => ({ schema: 'swir.desktop-filesystem/web', provider: 'web-adapter', native: false })),
+    list: (...args) => call('filesystem', 'list', args, (...a) => platform()?.files?.list?.(...a) ?? []),
+    get: (...args) => call('filesystem', 'get', args, (...a) => platform()?.files?.get?.(...a) ?? null),
+    save: (...args) => call('filesystem', 'save', args, (...a) => platform()?.files?.save?.(...a)),
+    remove: (...args) => call('filesystem', 'remove', args, (...a) => platform()?.files?.remove?.(...a)),
+    pickFile, pickDirectory,
+    capabilityInfo: (token, context = {}) => call('filesystem', 'capabilityInfo', [token, appIdOf(context)]),
+    readCapabilityText: (token, context = {}) => call('filesystem', 'readCapabilityText', [token, appIdOf(context)]),
+    revokeCapability: (token, context = {}) => call('filesystem', 'revokeCapability', [token, appIdOf(context)]),
+    revokeOwnerCapabilities: (context = {}) => call('filesystem', 'revokeOwnerCapabilities', [appIdOf(context)]),
+    pruneCapabilities: () => call('filesystem', 'pruneCapabilities', []),
+    capabilityStatus: () => call('filesystem', 'capabilityStatus', []),
+    forApp(appId) {
+      const context = Object.freeze({ appId: appIdOf({ appId }) });
+      return Object.freeze({
+        pickFile: options => pickFile(options, context), pickDirectory: options => pickDirectory(options, context),
+        capabilityInfo: token => filesystem.capabilityInfo(token, context), readCapabilityText: token => filesystem.readCapabilityText(token, context),
+        revokeCapability: token => filesystem.revokeCapability(token, context), revokeAllCapabilities: () => filesystem.revokeOwnerCapabilities(context)
+      });
+    }
+  });
+
+  const appData = Object.freeze({
+    info: packageId => call('appData', 'info', [packageIdOf(packageId)], async id => ({ schema: 'swir.appdata/web', packageId: id, provider: 'web' })),
+    list: packageId => call('appData', 'list', [packageIdOf(packageId)], async () => []),
+    get: (packageId, key, fallback = null) => call('appData', 'get', [packageIdOf(packageId), String(key || ''), fallback], async (id, k, f) => {
+      const pkg = (window.SWIR_PACKAGE_CATALOG || []).find(p => p.packageId === id);
+      return pkg ? window.SwirAppSDK?.storage?.namespace?.(pkg.id)?.get?.(k, f) ?? f : f;
+    }),
+    set: (packageId, key, value) => call('appData', 'set', [packageIdOf(packageId), String(key || ''), value], async (id, k, v) => {
+      const pkg = (window.SWIR_PACKAGE_CATALOG || []).find(p => p.packageId === id);
+      return pkg ? window.SwirAppSDK?.storage?.namespace?.(pkg.id)?.set?.(k, v) : undefined;
+    }),
+    remove: (packageId, key) => call('appData', 'remove', [packageIdOf(packageId), String(key || '')], async (id, k) => {
+      const pkg = (window.SWIR_PACKAGE_CATALOG || []).find(p => p.packageId === id);
+      return pkg ? window.SwirAppSDK?.storage?.namespace?.(pkg.id)?.remove?.(k) : false;
+    })
+  });
+
+  const packages = Object.freeze({
+    info: () => call('packages', 'info', [], async () => ({ schema: 'swir.desktop-package-bridge/web', provider: 'web', native: false, supported: false })),
+    catalogAuthorization,
+    installFromCapability: (capabilityToken, trustInput) => call('packages', 'installFromCapability', [String(capabilityToken || ''), packageTrustInput(trustInput), SHELL_APP_ID]),
+    installAuthorizedFromCapability: (capabilityToken, packageId, version, catalog, envelope) => call('packages', 'installFromCapability', [String(capabilityToken || ''), JSON.stringify(catalogAuthorization(packageId, version, catalog, envelope)), SHELL_APP_ID]),
+    installAuthorizedReleaseArtifact: (packageId, version, catalog, envelope) => call('packages', 'installFromCapability', [SIGNED_RELEASE_ARTIFACT_REF, JSON.stringify(catalogAuthorization(packageId, version, catalog, envelope)), SHELL_APP_ID]),
+    status: packageId => call('packages', 'status', [packageIdOf(packageId), SHELL_APP_ID]),
+    rollback: packageId => call('packages', 'rollback', [packageIdOf(packageId), SHELL_APP_ID])
+  });
+
+  const processes = Object.freeze({ list: (...args) => call('processes','list',args,(...a)=>platform()?.processes?.list?.(...a)??[]), open:(...args)=>call('processes','open',args,(...a)=>platform()?.processes?.open?.(...a)), kill:(...args)=>call('processes','kill',args,(...a)=>platform()?.processes?.kill?.(...a)??false), spawn:(...args)=>call('processes','spawn',args) });
+  const services = Object.freeze({
+    info:()=>call('services','info',[],async()=>({schema:'swir.desktop-process-service/web',provider:'web-adapter',native:false,readOnly:true,serviceMutation:false,count:0})),
+    list:()=>call('services','list',[],async()=>({schema:'swir.desktop-services/web',provider:'web-adapter',native:false,readOnly:true,truncated:false,count:0,services:[]}))
+  });
+  const clipboard = Object.freeze({ readText:(...args)=>call('clipboard','readText',args,(...a)=>platform()?.clipboard?.readText?.(...a)??''), writeText:(...args)=>call('clipboard','writeText',args,(...a)=>platform()?.clipboard?.writeText?.(...a)??false), clear:(...args)=>call('clipboard','clear',args,(...a)=>platform()?.clipboard?.clear?.(...a)) });
+  const tray = Object.freeze({ set:(...args)=>call('tray','set',args,async options=>({ok:false,emulated:true,reason:'WEB_RUNTIME',options})), clear:(...args)=>call('tray','clear',args,async()=>({ok:false,emulated:true,reason:'WEB_RUNTIME'})) });
+  const network = Object.freeze({ async status(){return call('network','status',[],async()=>({online:navigator.onLine,type:navigator.connection?.type||navigator.connection?.effectiveType||'unknown',downlinkMbps:navigator.connection?.downlink??null,rttMs:navigator.connection?.rtt??null,saveData:navigator.connection?.saveData??false}))}, adapters:(...args)=>call('network','adapters',args,async()=>[]), scan:(...args)=>call('network','scan',args), connect:(...args)=>call('network','connect',args), disconnect:(...args)=>call('network','disconnect',args) });
+  const devices = Object.freeze({ info:()=>call('devices','info',[],async()=>({schema:'swir.desktop-device-network/web',provider:'web-adapter',native:false,readOnly:true,capabilities:[]})), list:()=>call('devices','list',[],async()=>({schema:'swir.desktop-devices/web',provider:'web-adapter',supported:false,readOnly:true,truncated:false,count:0,devices:[]})) });
+  const identity = Object.freeze({
+    info:()=>call('identity','info',[],async()=>({schema:'swir.desktop-account-session/web',provider:'web-adapter',native:false,readOnly:true,accountManagement:false,credentialExposure:false})),
+    account:()=>call('identity','account',[],async()=>{const user=await platform()?.identity?.active?.();return{schema:'swir.identity-account/web',provider:'web-adapter',native:false,readOnly:true,id:user?.id??null,name:user?.name??user?.displayName??'Web User',role:user?.role??'user'}}),
+    session:()=>call('identity','session',[],async()=>{const user=await platform()?.identity?.active?.();return{schema:'swir.identity-session/web',provider:'web-adapter',native:false,readOnly:true,sessionId:null,interactive:true,authenticated:!!user}})
+  });
+  const updater = Object.freeze({ async check(){return call('updater','check',[],async()=>({runtime:'web',serviceWorker:'serviceWorker' in navigator,controller:!!navigator.serviceWorker?.controller,updateAvailable:false}))}, apply:(...args)=>call('updater','apply',args), restart:(...args)=>call('updater','restart',args,async()=>{location.reload();return true}) });
+
+  async function buildInstalledContextSnapshot() {
+    const api = platform(); if (!api?.packages?.list || !api?.permissions?.list) return [];
+    const [installedPackages, grants] = await Promise.all([api.packages.list(), api.permissions.list()]); const grantList = Array.isArray(grants) ? grants : [];
+    return (Array.isArray(installedPackages) ? installedPackages : []).filter(pkg=>pkg&&pkg.installed!==false&&pkg.packageId).map(pkg=>({ packageId:String(pkg.packageId), permissions:[...new Set(grantList.filter(grant=>grant&&grant.value===true&&String(grant.appId||'')===String(pkg.id||'')).map(grant=>String(grant.permission||'')).filter(Boolean))].sort() })).sort((a,b)=>a.packageId.localeCompare(b.packageId));
+  }
+
+  const security = Object.freeze({
+    context:()=>call('security','contextInfo',[],async()=>({appId:SHELL_APP_ID,packageId:null,kind:'web-shell',sessionId:null,trusted:false,permissions:[],provider:'web',tokenExposed:false})),
+    can:permission=>call('security','can',[String(permission||'')],async()=>false),
+    policyCatalog:()=>call('security','policyCatalog',[],async()=>({schema:null,packageCount:0,packages:[],provider:'web'})),
+    appUrl:(packageId,entry)=>call('security','appUrl',[String(packageId||''),String(entry||'')],async()=>String(entry||'')),
+    isolationInfo:()=>call('security','isolationInfo',[],async()=>({schema:null,packageCount:0,packages:[],provider:'web',isolated:false,routingEnabled:false})),
+    packageContexts:()=>call('security','packageContexts',[],async()=>({schema:null,sessionId:null,count:0,contexts:[],provider:'web'})),
+    async syncInstalledContexts(){ if(!nativeMethod('security','syncPackageContexts')) return {ok:false,provider:'web',synchronized:0,reason:'NO_NATIVE_CONTEXT_BROKER'}; const contexts=await buildInstalledContextSnapshot(); const result=await call('security','syncPackageContexts',[contexts]); emit('security-contexts-synced',{count:contexts.length,contexts:contexts.map(x=>x.packageId)}); return result; },
+    async isAuthenticated(){const ctx=await security.context();return !!ctx?.trusted&&!!ctx?.sessionId}
+  });
+
+  function capabilities(){ const native=!!host(); const surfaces=['filesystem','appData','packages','processes','services','clipboard','tray','network','devices','identity','updater','security']; const result={}; for(const surface of surfaces){const impl=host()?.[surface];result[surface]={provider:impl?'native':'web',native:!!impl,methods:impl?Object.keys(impl).filter(k=>typeof impl[k]==='function'):Object.keys(api[surface]||{}).filter(k=>typeof api[surface][k]==='function')}} return {native,edition:native?String(host()?.edition||'DESKTOP').toUpperCase():'WEB',features:host()?.features||{},surfaces:result}; }
+  function info(){const caps=capabilities();return {...META,provider:caps.native?'native-host':'web-adapter',edition:caps.edition,nativeHost:caps.native,nativeSessionId:host()?.sessionId||null,nativeFeatures:caps.features,capabilities:caps.surfaces}}
+
+  const api=Object.freeze({meta:META,filesystem,appData,packages,processes,services,clipboard,tray,network,devices,identity,updater,security,capabilities,info,events:Object.freeze({on,emit}),hasNativeHost:()=>!!host()});
+  window.SwirRuntime=api;window.SWIR_RUNTIME=api;emit('ready',info());
+})();

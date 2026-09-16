@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>SWIR.Desktop.Host</AssemblyName>
+    <RootNamespace>Swir.Desktop.Host</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Self-test and standalone executable sources live beside production sources for focused CI projects.
+         Keep them out of the shipping Desktop Host so newly-added harnesses/tools cannot accidentally
+         introduce a second entry point or ship release-only functionality in the runtime host. -->
+    <Compile Remove="*SelfTests*.cs" />
+    <Compile Remove="UpdaterActivationCrashHarness.cs" />
+    <Compile Remove="DesktopUpdateReleaseTool.cs" />
+    <Compile Remove="DesktopPackageBuilder.cs" />
+    <Compile Remove="DesktopPackageTool.cs" />
+    <Compile Remove="DesktopReleaseBundleBuilder.cs" />
+    <Compile Remove="DesktopReleaseBundleTool.cs" />
+    <Compile Remove="DesktopReleaseBundleVerifier.cs" />
+    <Compile Remove="DesktopReleaseBundleVerifierTool.cs" />
+    <Compile Remove="AppDataSelfTests.cs" />
+    <Compile Remove="AppDataSelfTests.BridgeException.cs" />
+    <Compile Remove="PermissionBrokerSelfTests.cs" />
+    <Compile Remove="UpdateBrokerSelfTests.cs" />
+    <Compile Remove="UpdateTransactionSelfTests.cs" />
+    <Compile Remove="UpdaterWorkerMain.cs" />
+    <Compile Remove="UpdaterWorkerSelfTests.cs" />
+    <Compile Remove="UpdateActivationCoordinatorSelfTests.cs" />
+    <Compile Remove="ControlledCandidateLauncherSelfTests.cs" />
+    <Compile Remove="StartupHealthHandshakeSelfTests.cs" />
+    <Compile Remove="HostShutdownHandoffSelfTests.cs" />
+    <Compile Remove="UpdateRestartLauncherSelfTests.cs" />
+    <Compile Remove="DesktopStartupRecoverySelfTests.cs" />
+    <Compile Remove="DesktopUpdateRestartLifecycleSelfTests.cs" />
+    <Compile Remove="DesktopUpdateRestartSessionSelfTests.cs" />
+    <Compile Remove="DesktopPreparedUpdateSelectorSelfTests.cs" />
+    <Compile Remove="DesktopHostRestartHooksSelfTests.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="catalog-trust-roots.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3537.50" />
+    <!-- Pinned .NET 8-compatible Ed25519 implementation. Production clients contain public verification material only. -->
+    <PackageReference Include="NSec.Cryptography" Version="24.4.0" />
+  </ItemGroup>
+</Project>

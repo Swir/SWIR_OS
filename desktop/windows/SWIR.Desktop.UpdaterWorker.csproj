@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>SWIR.Desktop.UpdaterWorker</AssemblyName>
+    <RootNamespace>Swir.Desktop.UpdaterWorker</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="UpdateBroker.cs" />
+    <Compile Include="UpdateStagingBroker.cs" />
+    <Compile Include="UpdateHandoffBroker.cs" />
+    <Compile Include="UpdateTransactionJournal.cs" />
+    <Compile Include="UpdateHealthBroker.cs" />
+    <Compile Include="UpdaterWorkerProtocol.cs" />
+    <Compile Include="CandidatePackagePreparer.cs" />
+    <Compile Include="DeploymentSlotActivator.cs" />
+    <Compile Include="UpdateActivationCoordinator.cs" />
+    <Compile Include="UpdateRecoveryCoordinator.cs" />
+    <Compile Include="ControlledCandidateLauncher.cs" />
+    <Compile Include="HostShutdownHandoff.cs" />
+    <Compile Include="UpdaterWorkerMain.cs" />
+  </ItemGroup>
+</Project>
