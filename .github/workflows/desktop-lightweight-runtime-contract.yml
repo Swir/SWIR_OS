@@ -50,7 +50,7 @@ jobs:
           $out = Join-Path '${{ runner.temp }}' 'swir-bundled-runtime'
           ./publish-desktop-host.ps1 -PublishDir $out -ReleaseVersion '0.5.7' -Channel preview -SourceCommit '${{ github.sha }}'
           $manifest = Get-Content (Join-Path $out 'desktop-host-build.json') -Raw | ConvertFrom-Json
-          if ($manifest.schema -ne 'swir.desktop-host-build/0.2') { throw 'Unexpected host build schema.' }
+          if ($manifest.schema -ne 'swir.desktop-host-build/0.1') { throw 'Unexpected host build schema.' }
           if ($manifest.deployment.contract -ne 'swir.desktop-bundled-runtime/0.1') { throw 'Bundled runtime contract missing.' }
           if ($manifest.deployment.mode -ne 'self-contained-bundled' -or $manifest.deployment.selfContained -ne $true -or $manifest.deployment.singleFile -ne $true) { throw 'Desktop Host must be self-contained and single-file.' }
           if ($manifest.deployment.userPrerequisiteDownloadsRequired -ne $false) { throw 'Desktop release must not require user prerequisite downloads.' }
