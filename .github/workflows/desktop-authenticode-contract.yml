@@ -1,0 +1,147 @@
+name: Desktop Authenticode Contract
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'desktop/windows/sign-desktop-artifact.ps1'
+      - 'desktop/windows/publish-desktop-host.ps1'
+      - 'desktop/windows/build-desktop-installer.ps1'
+      - 'desktop/windows/SWIR.Desktop.Host.csproj'
+      - 'desktop/windows/SWIR.Desktop.Installer.csproj'
+      - '.github/workflows/desktop-authenticode-contract.yml'
+  pull_request:
+    paths:
+      - 'desktop/windows/sign-desktop-artifact.ps1'
+      - 'desktop/windows/publish-desktop-host.ps1'
+      - 'desktop/windows/build-desktop-installer.ps1'
+      - 'desktop/windows/SWIR.Desktop.Host.csproj'
+      - 'desktop/windows/SWIR.Desktop.Installer.csproj'
+      - '.github/workflows/desktop-authenticode-contract.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  authenticode-e2e:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: desktop/windows
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Provision isolated CI code-signing identity
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $subject = 'CN=SWIR OS CI Authenticode Contract'
+          $cert = New-SelfSignedCertificate `
+            -Subject $subject `
+            -Type CodeSigningCert `
+            -KeyAlgorithm RSA `
+            -KeyLength 2048 `
+            -KeyExportPolicy Exportable `
+            -CertStoreLocation 'Cert:\CurrentUser\My' `
+            -NotAfter (Get-Date).AddDays(2)
+          if (-not $cert.HasPrivateKey) { throw 'CI code-signing certificate has no private key.' }
+          $passwordText = 'SWIR-CI-Authenticode-Contract-Only!2026'
+          $password = ConvertTo-SecureString $passwordText -AsPlainText -Force
+          $pfx = Join-Path $env:RUNNER_TEMP 'swir-ci-authenticode.pfx'
+          $cer = Join-Path $env:RUNNER_TEMP 'swir-ci-authenticode.cer'
+          Export-PfxCertificate -Cert $cert -FilePath $pfx -Password $password | Out-Null
+          Export-Certificate -Cert $cert -FilePath $cer | Out-Null
+          Import-Certificate -FilePath $cer -CertStoreLocation 'Cert:\CurrentUser\Root' | Out-Null
+          "SWIR_AUTHENTICODE_PFX_PATH=$pfx" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "SWIR_AUTHENTICODE_PFX_PASSWORD=$passwordText" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "SWIR_AUTHENTICODE_CERT_THUMBPRINT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "SWIR_AUTHENTICODE_REQUIRED=true" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Verify signing helper fail-closed and tamper detection
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = Join-Path $env:SystemRoot 'System32\where.exe'
+          $target = Join-Path $env:RUNNER_TEMP 'swir-authenticode-helper-fixture.exe'
+          Copy-Item -LiteralPath $source -Destination $target -Force
+          $helper = Join-Path (Get-Location) 'sign-desktop-artifact.ps1'
+          $result = & $helper -FilePath $target | ConvertFrom-Json
+          if ($result.schema -ne 'swir.desktop-authenticode/0.1' -or $result.status -ne 'valid' -or $result.signerThumbprint -ne $env:SWIR_AUTHENTICODE_CERT_THUMBPRINT) {
+            throw 'Signing helper did not bind the artifact to the pinned CI certificate.'
+          }
+          $signature = Get-AuthenticodeSignature -FilePath $target
+          if ($signature.Status -ne 'Valid') { throw "Signed helper fixture is not valid: $($signature.Status)" }
+          [IO.File]::AppendAllText($target, 'tamper-after-signing')
+          $tampered = Get-AuthenticodeSignature -FilePath $target
+          if ($tampered.Status -eq 'Valid') { throw 'Authenticode remained valid after artifact tampering.' }
+
+          $wrong = Join-Path $env:RUNNER_TEMP 'swir-authenticode-wrong-pin.exe'
+          Copy-Item -LiteralPath $source -Destination $wrong -Force
+          $failed = $false
+          try { & $helper -FilePath $wrong -ExpectedThumbprint ('0' * 40) | Out-Null } catch { $failed = $true }
+          if (-not $failed) { throw 'Signing helper accepted the wrong pinned certificate thumbprint.' }
+
+      - name: Publish Authenticode-signed bundled Desktop Host
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $publish = Join-Path $env:RUNNER_TEMP 'swir-authenticode-host'
+          & (Join-Path (Get-Location) 'publish-desktop-host.ps1') `
+            -PublishDir $publish `
+            -ReleaseVersion '0.5.7' `
+            -Channel preview `
+            -SourceCommit $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { throw "Signed Desktop Host publish failed with exit code $LASTEXITCODE." }
+          $host = Join-Path $publish 'SWIR.Desktop.Host.exe'
+          $manifest = Get-Content (Join-Path $publish 'desktop-host-build.json') -Raw | ConvertFrom-Json
+          if ($manifest.authenticode.contract -ne 'swir.desktop-authenticode/0.1' -or $manifest.authenticode.required -ne $true -or $manifest.authenticode.signed -ne $true -or $manifest.authenticode.status -ne 'valid') {
+            throw 'Desktop Host build manifest does not prove required Authenticode signing.'
+          }
+          if ($manifest.authenticode.signerThumbprint -ne $env:SWIR_AUTHENTICODE_CERT_THUMBPRINT) { throw 'Desktop Host manifest signer pin mismatch.' }
+          $signature = Get-AuthenticodeSignature -FilePath $host
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Thumbprint -ne $env:SWIR_AUTHENTICODE_CERT_THUMBPRINT) { throw 'Desktop Host Authenticode verification failed.' }
+          $hash = (Get-FileHash -LiteralPath $host -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($manifest.integrity.entryPoint.sha256 -ne $hash) { throw 'Desktop Host integrity manifest was not calculated from the signed Host bytes.' }
+
+      - name: Build Authenticode-signed one-file Setup
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $publish = Join-Path $env:RUNNER_TEMP 'swir-authenticode-host'
+          $payload = Join-Path $env:RUNNER_TEMP 'SWIR-Desktop-0.5.7-preview.zip'
+          [IO.Compression.ZipFile]::CreateFromDirectory($publish, $payload, [IO.Compression.CompressionLevel]::Optimal, $false)
+          $out = Join-Path $env:RUNNER_TEMP 'swir-authenticode-setup'
+          & (Join-Path (Get-Location) 'build-desktop-installer.ps1') `
+            -PackageZip $payload `
+            -OutputDir $out `
+            -Version '0.5.7' `
+            -Channel preview
+          if ($LASTEXITCODE -ne 0) { throw "Signed Desktop Setup build failed with exit code $LASTEXITCODE." }
+          $setup = Join-Path $out 'SWIR-Desktop-Setup-0.5.7-preview.exe'
+          $manifest = Get-Content (Join-Path $out 'desktop-installer-build.json') -Raw | ConvertFrom-Json
+          if ($manifest.authenticode.contract -ne 'swir.desktop-authenticode/0.1' -or $manifest.authenticode.required -ne $true -or $manifest.authenticode.signed -ne $true -or $manifest.authenticode.status -ne 'valid') {
+            throw 'Desktop Setup build manifest does not prove required Authenticode signing.'
+          }
+          if ($manifest.authenticode.signerThumbprint -ne $env:SWIR_AUTHENTICODE_CERT_THUMBPRINT) { throw 'Desktop Setup manifest signer pin mismatch.' }
+          $signature = Get-AuthenticodeSignature -FilePath $setup
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Thumbprint -ne $env:SWIR_AUTHENTICODE_CERT_THUMBPRINT) { throw 'Desktop Setup Authenticode verification failed.' }
+          $hash = (Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($manifest.installerSha256 -ne $hash) { throw 'Desktop Setup manifest was not calculated from the signed Setup bytes.' }
+
+      - name: Cleanup CI certificate
+        if: always()
+        shell: powershell
+        run: |
+          $thumb = $env:SWIR_AUTHENTICODE_CERT_THUMBPRINT
+          if ($thumb) {
+            Remove-Item -LiteralPath "Cert:\CurrentUser\My\$thumb" -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath "Cert:\CurrentUser\Root\$thumb" -Force -ErrorAction SilentlyContinue
+          }

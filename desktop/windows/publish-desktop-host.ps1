@@ -11,7 +11,10 @@ param(
     [string]$ProgramFile = 'Program.cs',
     [string]$SourceCommit = $env:GITHUB_SHA,
     [string]$WebView2RuntimeDir = $env:SWIR_WEBVIEW2_FIXED_RUNTIME_DIR,
-    [string]$WebView2LockFile = ''
+    [string]$WebView2LockFile = '',
+    [string]$AuthenticodePfxPath = $env:SWIR_AUTHENTICODE_PFX_PATH,
+    [string]$AuthenticodeExpectedThumbprint = $env:SWIR_AUTHENTICODE_CERT_THUMBPRINT,
+    [string]$AuthenticodeTimestampServer = $env:SWIR_AUTHENTICODE_TIMESTAMP_URL
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -26,6 +29,8 @@ $runtimeIdentifier = 'win-x64'
 $targetFramework = 'net8.0-windows'
 $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $autoAcquiredRoot = $null
+$authenticodeRequired = $env:SWIR_AUTHENTICODE_REQUIRED -eq 'true'
+$hostAuthenticode = $null
 
 function Get-SwirSha256([string]$Path) {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -48,7 +53,7 @@ function Assert-MicrosoftHttpsUrl([string]$Value) {
 
 # Contract workflows may synthesize only an executable-shaped fixture. Real release packaging instead
 # auto-acquires the repository-pinned Microsoft Fixed Version Runtime when no explicit directory is supplied.
-$ciFixtureWorkflows = @('Desktop Release Contract', 'Desktop Release Candidate Trust Contract')
+$ciFixtureWorkflows = @('Desktop Release Contract', 'Desktop Release Candidate Trust Contract', 'Desktop Authenticode Contract')
 if ([string]::IsNullOrWhiteSpace($WebView2RuntimeDir) -and $env:GITHUB_ACTIONS -eq 'true' -and $env:GITHUB_WORKFLOW -in $ciFixtureWorkflows) {
     $fixtureRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('swir-webview2-contract-fixture-' + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $fixtureRoot -Force | Out-Null
@@ -130,6 +135,17 @@ try {
 $hostExe = Join-Path $publishPath 'SWIR.Desktop.Host.exe'
 if (-not (Test-Path -LiteralPath $hostExe -PathType Leaf)) { throw "Desktop Host publish output is missing: $hostExe" }
 
+if (-not [string]::IsNullOrWhiteSpace($AuthenticodePfxPath)) {
+    $signScript = Join-Path $PSScriptRoot 'sign-desktop-artifact.ps1'
+    if (-not (Test-Path -LiteralPath $signScript -PathType Leaf)) { throw "Authenticode signing script is missing: $signScript" }
+    $json = & $signScript -FilePath $hostExe -PfxPath $AuthenticodePfxPath -ExpectedThumbprint $AuthenticodeExpectedThumbprint -TimestampServer $AuthenticodeTimestampServer
+    if ($LASTEXITCODE -ne 0) { throw "Desktop Host Authenticode signing failed with exit code $LASTEXITCODE." }
+    $hostAuthenticode = $json | ConvertFrom-Json
+    if ($hostAuthenticode.schema -ne 'swir.desktop-authenticode/0.1' -or $hostAuthenticode.status -ne 'valid') { throw 'Desktop Host Authenticode result is invalid.' }
+} elseif ($authenticodeRequired) {
+    throw 'SWIR_AUTHENTICODE_REQUIRED=true but no Authenticode PFX path was supplied.'
+}
+
 $bundledWebView2 = Join-Path $publishPath 'WebView2FixedRuntime'
 if (Test-Path -LiteralPath $bundledWebView2) { Remove-Item -LiteralPath $bundledWebView2 -Recurse -Force }
 New-Item -ItemType Directory -Path $bundledWebView2 -Force | Out-Null
@@ -171,6 +187,16 @@ $hostInfo = Get-Item -LiteralPath $hostExe
 $webViewInfo = Get-Item -LiteralPath $bundledWebView2Exe
 $provenanceInfo = Get-Item -LiteralPath $bundledProvenancePath
 
+$authenticodeManifest = [ordered]@{
+    contract = 'swir.desktop-authenticode/0.1'
+    required = [bool]$authenticodeRequired
+    signed = $null -ne $hostAuthenticode
+    status = if ($null -eq $hostAuthenticode) { 'unsigned' } else { [string]$hostAuthenticode.status }
+    signerThumbprint = if ($null -eq $hostAuthenticode) { '' } else { [string]$hostAuthenticode.signerThumbprint }
+    signerSubject = if ($null -eq $hostAuthenticode) { '' } else { [string]$hostAuthenticode.signerSubject }
+    timestamped = if ($null -eq $hostAuthenticode) { $false } else { [bool]$hostAuthenticode.timestamped }
+}
+
 $manifest = [ordered]@{
     schema = 'swir.desktop-host-build/0.1'
     releaseVersion = $ReleaseVersion
@@ -178,6 +204,7 @@ $manifest = [ordered]@{
     hostVersion = $hostVersion
     sourceCommit = $commit
     entryPoint = 'SWIR.Desktop.Host.exe'
+    authenticode = $authenticodeManifest
     deployment = [ordered]@{
         contract = 'swir.desktop-bundled-runtime/0.1'
         mode = 'self-contained-bundled'
@@ -238,5 +265,6 @@ if ($autoAcquiredRoot -and (Test-Path -LiteralPath $autoAcquiredRoot -PathType C
 }
 
 Write-Host "SWIR Desktop Host published as $hostVersion ($runtimeIdentifier, self-contained .NET + bundled WebView2 Fixed Runtime)"
+Write-Host "Authenticode: $($authenticodeManifest.status)"
 Write-Host "Bundled integrity: SHA-256 host + WebView2 executable + acquisition provenance"
 Write-Host "Build manifest: $manifestPath"
