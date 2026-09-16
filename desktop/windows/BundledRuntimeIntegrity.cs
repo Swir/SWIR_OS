@@ -7,6 +7,8 @@ internal static class BundledRuntimeIntegrity
 {
     internal const string ManifestFileName = "desktop-host-build.json";
     internal const string IntegrityContract = "swir.desktop-bundled-integrity/0.1";
+    internal const string WebView2ProvenanceContract = "swir.webview2-provenance/0.1";
+    private const string WebView2SourcePolicy = "swir.webview2-fixed-source-policy/0.1";
     private const string BuildSchema = "swir.desktop-host-build/0.1";
 
     internal sealed record VerificationResult(
@@ -14,7 +16,8 @@ internal static class BundledRuntimeIntegrity
         bool Verified,
         string Mode,
         string? EntryPointSha256,
-        string? WebView2Sha256);
+        string? WebView2Sha256,
+        string? WebView2ProvenanceSha256);
 
     internal static VerificationResult Verify(string baseDirectory, bool requireManifest)
     {
@@ -28,7 +31,7 @@ internal static class BundledRuntimeIntegrity
         {
             if (requireManifest)
                 throw new InvalidOperationException($"Bundled Desktop release is missing {ManifestFileName}.");
-            return new VerificationResult(false, false, "development-unverified", null, null);
+            return new VerificationResult(false, false, "development-unverified", null, null, null);
         }
 
         using var document = JsonDocument.Parse(File.ReadAllBytes(manifestPath));
@@ -40,6 +43,11 @@ internal static class BundledRuntimeIntegrity
         if (!deployment.TryGetProperty("userPrerequisiteDownloadsRequired", out var prerequisites)
             || prerequisites.ValueKind is not JsonValueKind.False)
             throw new InvalidOperationException("Desktop release must not require user prerequisite downloads.");
+        if (!deployment.TryGetProperty("webView2", out var webViewDeployment) || webViewDeployment.ValueKind != JsonValueKind.Object)
+            throw new InvalidOperationException("Desktop build manifest is missing WebView2 deployment metadata.");
+        RequireString(webViewDeployment, "mode", "fixed-version-bundled", "Desktop WebView2 must use bundled Fixed Version deployment.");
+        RequireString(webViewDeployment, "provenanceContract", WebView2ProvenanceContract, "Desktop WebView2 provenance contract mismatch.");
+        RequireString(webViewDeployment, "provenanceFile", ".swir-webview2-provenance.json", "Desktop WebView2 provenance file mismatch.");
 
         if (!manifest.TryGetProperty("integrity", out var integrity) || integrity.ValueKind != JsonValueKind.Object)
             throw new InvalidOperationException("Desktop build manifest is missing bundled runtime integrity metadata.");
@@ -48,15 +56,23 @@ internal static class BundledRuntimeIntegrity
 
         var entry = ReadArtifact(integrity, "entryPoint");
         var webView = ReadArtifact(integrity, "webView2Executable");
+        var provenance = ReadArtifact(integrity, "webView2Provenance");
         VerifyArtifact(root, entry, "Desktop Host entry point");
         VerifyArtifact(root, webView, "Bundled WebView2 executable");
+        VerifyArtifact(root, provenance, "Bundled WebView2 provenance");
 
         if (!manifest.TryGetProperty("entryPoint", out var manifestEntryPoint)
             || manifestEntryPoint.ValueKind != JsonValueKind.String
             || !string.Equals(NormalizeRelativePath(manifestEntryPoint.GetString()!), entry.Path, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Desktop entry point integrity metadata does not match the build manifest entry point.");
 
-        return new VerificationResult(true, true, "bundled-verified", entry.Sha256, webView.Sha256);
+        var declaredProvenancePath = NormalizeRelativePath("WebView2FixedRuntime/" + webViewDeployment.GetProperty("provenanceFile").GetString());
+        if (!string.Equals(declaredProvenancePath, provenance.Path, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Desktop WebView2 provenance integrity path does not match deployment metadata.");
+
+        VerifyWebView2Provenance(root, webView, provenance, webViewDeployment);
+
+        return new VerificationResult(true, true, "bundled-verified", entry.Sha256, webView.Sha256, provenance.Sha256);
     }
 
     private sealed record Artifact(string Path, string Sha256, long Size);
@@ -73,9 +89,7 @@ internal static class BundledRuntimeIntegrity
             throw new InvalidOperationException($"Desktop bundled integrity artifact {propertyName} has invalid size.");
 
         var relativePath = NormalizeRelativePath(pathValue.GetString()!);
-        var sha256 = hashValue.GetString()!.Trim().ToLowerInvariant();
-        if (sha256.Length != 64 || sha256.Any(ch => !Uri.IsHexDigit(ch)))
-            throw new InvalidOperationException($"Desktop bundled integrity artifact {propertyName} has invalid SHA-256.");
+        var sha256 = NormalizeSha256(hashValue.GetString()!, $"Desktop bundled integrity artifact {propertyName} has invalid SHA-256.");
         return new Artifact(relativePath, sha256, size);
     }
 
@@ -88,8 +102,78 @@ internal static class BundledRuntimeIntegrity
         if (info.Length != artifact.Size)
             throw new InvalidOperationException($"{displayName} size mismatch: {artifact.Path}");
         var actual = HashFile(fullPath);
-        if (!CryptographicOperations.FixedTimeEquals(Convert.FromHexString(actual), Convert.FromHexString(artifact.Sha256)))
+        if (!FixedHashEquals(actual, artifact.Sha256))
             throw new InvalidOperationException($"{displayName} SHA-256 mismatch: {artifact.Path}");
+    }
+
+    private static void VerifyWebView2Provenance(string root, Artifact webView, Artifact provenanceArtifact, JsonElement deployment)
+    {
+        var provenancePath = ResolveInsideRoot(root, provenanceArtifact.Path);
+        using var provenanceDocument = JsonDocument.Parse(File.ReadAllBytes(provenancePath));
+        var provenance = provenanceDocument.RootElement;
+        RequireString(provenance, "schema", WebView2ProvenanceContract, "Bundled WebView2 provenance schema mismatch.");
+        RequireString(provenance, "architecture", "x64", "Bundled WebView2 provenance architecture mismatch.");
+        if (!provenance.TryGetProperty("userDownloadRequired", out var userDownload) || userDownload.ValueKind is not JsonValueKind.False)
+            throw new InvalidOperationException("Bundled WebView2 provenance must not require a user download.");
+        if (!provenance.TryGetProperty("executable", out var executable) || executable.ValueKind != JsonValueKind.Object)
+            throw new InvalidOperationException("Bundled WebView2 provenance is missing executable metadata.");
+        RequireString(executable, "path", "msedgewebview2.exe", "Bundled WebView2 provenance executable path mismatch.");
+        if (!executable.TryGetProperty("sha256", out var executableHash) || executableHash.ValueKind != JsonValueKind.String)
+            throw new InvalidOperationException("Bundled WebView2 provenance executable SHA-256 is missing.");
+        var provenanceWebViewHash = NormalizeSha256(executableHash.GetString()!, "Bundled WebView2 provenance executable SHA-256 is invalid.");
+        if (!FixedHashEquals(provenanceWebViewHash, webView.Sha256))
+            throw new InvalidOperationException("Bundled WebView2 provenance executable SHA-256 does not match bundled WebView2 integrity metadata.");
+
+        var fixture = deployment.TryGetProperty("contractFixture", out var fixtureValue) && fixtureValue.ValueKind is JsonValueKind.True;
+        if (fixture)
+        {
+            RequireString(provenance, "sourcePolicy", "ci-contract-fixture", "Bundled WebView2 fixture provenance policy mismatch.");
+            if (!provenance.TryGetProperty("contractFixture", out var provenanceFixture) || provenanceFixture.ValueKind is not JsonValueKind.True)
+                throw new InvalidOperationException("Bundled WebView2 fixture provenance marker is missing.");
+            RequireString(executable, "authenticode", "fixture", "Bundled WebView2 fixture provenance signature marker mismatch.");
+        }
+        else
+        {
+            RequireString(provenance, "sourcePolicy", WebView2SourcePolicy, "Bundled WebView2 provenance source policy mismatch.");
+            if (!provenance.TryGetProperty("sourceUrl", out var sourceUrl) || sourceUrl.ValueKind != JsonValueKind.String)
+                throw new InvalidOperationException("Bundled WebView2 provenance source URL is missing.");
+            ValidateMicrosoftHttpsUrl(sourceUrl.GetString()!);
+            if (!provenance.TryGetProperty("archiveSha256", out var archiveHash) || archiveHash.ValueKind != JsonValueKind.String)
+                throw new InvalidOperationException("Bundled WebView2 provenance archive SHA-256 is missing.");
+            _ = NormalizeSha256(archiveHash.GetString()!, "Bundled WebView2 provenance archive SHA-256 is invalid.");
+            RequireString(executable, "authenticode", "valid", "Bundled WebView2 provenance must record a valid Authenticode signature.");
+            if (!executable.TryGetProperty("signerSubject", out var signer) || signer.ValueKind != JsonValueKind.String
+                || !signer.GetString()!.Contains("Microsoft Corporation", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Bundled WebView2 provenance signer is not Microsoft Corporation.");
+        }
+
+        RequireDeploymentMatchesProvenance(deployment, provenance, fixture);
+    }
+
+    private static void RequireDeploymentMatchesProvenance(JsonElement deployment, JsonElement provenance, bool fixture)
+    {
+        RequireSameString(deployment, provenance, "sourcePolicy", "Desktop WebView2 source policy does not match bundled provenance.");
+        RequireSameString(deployment, provenance, "sourceUrl", "Desktop WebView2 source URL does not match bundled provenance.");
+        RequireSameString(deployment, provenance, "archiveSha256", "Desktop WebView2 archive SHA-256 does not match bundled provenance.");
+        if (fixture && (!deployment.TryGetProperty("contractFixture", out var marker) || marker.ValueKind is not JsonValueKind.True))
+            throw new InvalidOperationException("Desktop WebView2 fixture deployment marker is missing.");
+    }
+
+    private static void RequireSameString(JsonElement left, JsonElement right, string propertyName, string error)
+    {
+        if (!left.TryGetProperty(propertyName, out var leftValue) || leftValue.ValueKind != JsonValueKind.String
+            || !right.TryGetProperty(propertyName, out var rightValue) || rightValue.ValueKind != JsonValueKind.String
+            || !string.Equals(leftValue.GetString(), rightValue.GetString(), StringComparison.Ordinal))
+            throw new InvalidOperationException(error);
+    }
+
+    private static void ValidateMicrosoftHttpsUrl(string value)
+    {
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) || !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Bundled WebView2 provenance source URL must use absolute HTTPS.");
+        var host = uri.DnsSafeHost.ToLowerInvariant();
+        if (host != "microsoft.com" && !host.EndsWith(".microsoft.com", StringComparison.Ordinal))
+            throw new InvalidOperationException("Bundled WebView2 provenance source URL is not on an approved Microsoft host.");
     }
 
     private static string ResolveInsideRoot(string root, string relativePath)
@@ -110,6 +194,17 @@ internal static class BundledRuntimeIntegrity
             throw new InvalidOperationException("Bundled runtime integrity path is invalid.");
         return value;
     }
+
+    private static string NormalizeSha256(string value, string error)
+    {
+        var normalized = (value ?? string.Empty).Trim().ToLowerInvariant();
+        if (normalized.Length != 64 || normalized.Any(ch => !Uri.IsHexDigit(ch)))
+            throw new InvalidOperationException(error);
+        return normalized;
+    }
+
+    private static bool FixedHashEquals(string left, string right) =>
+        CryptographicOperations.FixedTimeEquals(Convert.FromHexString(left), Convert.FromHexString(right));
 
     private static string HashFile(string path)
     {
