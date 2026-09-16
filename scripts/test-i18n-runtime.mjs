@@ -70,6 +70,6 @@ assert.equal(documentElement.dir, 'ltr');
 assert.equal(i18n.t('system.notifications'), 'Benachrichtigungszentrale');
 
 assert.equal(i18n.t('system.settings', null, { locale: 'eo' }), 'Settings', 'unsupported language must fail back to English');
-assert.throws(() => i18n.setLocale('not_a_locale'), RangeError);
+assert.throws(() => i18n.setLocale('@@@'), RangeError);
 
 console.log('SWIR i18n runtime self-tests: OK — regional/script fallback, Norwegian alias, RTL and English fallback verified.');
