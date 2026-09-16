@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.Json;
 
@@ -72,6 +73,8 @@ internal static class DesktopReleaseBundleSelfTests
                 new Uri("https://updates.example.test/wrong.zip"), "stable", "test-key-1", privatePem, publishedAt));
             Require(!Directory.Exists(Path.Combine(root, "bundle-bad-url")), "failed bundle left final output behind");
 
+            VerifyOfficialGitHubReleaseCarriesUpdatePolicy(root, privatePem, publicPem, publishedAt);
+
             Console.WriteLine("Desktop release bundle self-tests passed.");
             return 0;
         }
@@ -81,9 +84,59 @@ internal static class DesktopReleaseBundleSelfTests
         }
     }
 
+    private static void VerifyOfficialGitHubReleaseCarriesUpdatePolicy(
+        string root,
+        string privatePem,
+        string publicPem,
+        DateTimeOffset publishedAt)
+    {
+        var source = Path.Combine(root, "official-publish");
+        Directory.CreateDirectory(source);
+        File.WriteAllText(Path.Combine(source, "SWIR.Desktop.Host.exe"), "official-host-binary-test");
+        Directory.CreateDirectory(Path.Combine(source, "assets"));
+        File.WriteAllText(Path.Combine(source, "assets", "shell.txt"), "official-shell");
+
+        var version = new Version(0, 5, 8);
+        const string channel = "preview";
+        var tag = $"desktop-v{version}-{channel}";
+        var packageUri = new Uri($"https://github.com/Swir/SWIR_OS/releases/download/{tag}/SWIR-Desktop-{version}-{channel}.zip");
+        var bundle = DesktopReleaseBundleBuilder.Build(
+            source,
+            Path.Combine(root, "bundle-official"),
+            version,
+            "SWIR.Desktop.Host.exe",
+            packageUri,
+            channel,
+            "test-key-official",
+            privatePem,
+            publishedAt);
+
+        var broker = new UpdateBroker(publicPem, new[] { "github.com" });
+        var verified = broker.VerifyManifest(File.ReadAllText(bundle.ManifestPath), new Version(0, 5, 7), channel);
+        Require(verified.PackageUri == packageUri, "official signed manifest pins immutable SWIR_OS GitHub Release URL");
+        Require(UpdateBroker.VerifyPackage(File.ReadAllBytes(bundle.PackagePath), verified).Verified, "official GitHub release package verifies against signed digest");
+
+        using var archive = ZipFile.OpenRead(bundle.PackagePath);
+        var entry = archive.GetEntry("desktop-update-policy.json");
+        Require(entry is not null, "official release ZIP contains Desktop update policy");
+        using var reader = new StreamReader(entry!.Open());
+        var policyText = reader.ReadToEnd();
+        using var document = JsonDocument.Parse(policyText);
+        var policy = document.RootElement;
+        Require(policy.GetProperty("Schema").GetString() == DesktopGitHubUpdatePolicy.PolicySchema, "packaged update policy uses expected schema");
+        Require(policy.GetProperty("Enabled").GetBoolean(), "official release ZIP enables signed GitHub update feed");
+        Require(policy.GetProperty("Channel").GetString() == channel, "packaged update policy pins release channel");
+        Require(policy.GetProperty("ManifestUrl").GetString() == "https://raw.githubusercontent.com/Swir/SWIR_OS/main/updates/preview/desktop-update-preview.json", "packaged update policy reads feed only from SWIR_OS repository");
+        Require(policy.GetProperty("ManifestHosts")[0].GetString() == "raw.githubusercontent.com", "packaged update policy allowlists raw GitHub feed host");
+        Require(policy.GetProperty("PackageHosts")[0].GetString() == "github.com", "packaged update policy allowlists GitHub Release package host");
+        Require(policy.GetProperty("PublicKeyPem").GetString() == publicPem, "official release ZIP embeds matching public verifier key");
+        Require(!policyText.Contains("PRIVATE KEY", StringComparison.Ordinal), "official release ZIP never embeds private update signing key");
+    }
+
     private static void Require(bool condition, string message)
     {
         if (!condition) throw new InvalidOperationException(message);
+        Console.WriteLine("PASS " + message);
     }
 
     private static void ExpectCode(string code, Action action)
