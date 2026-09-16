@@ -15,6 +15,7 @@ on:
       - 'sw.js'
       - 'desktop/windows/stage-desktop-runtime.ps1'
       - 'scripts/validate-i18n.mjs'
+      - 'scripts/test-i18n-runtime.mjs'
       - 'SWIR-OS-ARCHITECTURE.md'
       - '.github/workflows/i18n-contract.yml'
   pull_request:
@@ -30,6 +31,7 @@ on:
       - 'sw.js'
       - 'desktop/windows/stage-desktop-runtime.ps1'
       - 'scripts/validate-i18n.mjs'
+      - 'scripts/test-i18n-runtime.mjs'
       - 'SWIR-OS-ARCHITECTURE.md'
       - '.github/workflows/i18n-contract.yml'
 
@@ -53,6 +55,7 @@ jobs:
         run: |
           node --check swir-i18n.js
           node --check swir-locale-packs.js
+          node --check scripts/test-i18n-runtime.mjs
 
       - name: Check App SDK and bridge syntax
         run: |
@@ -62,6 +65,9 @@ jobs:
 
       - name: Check i18n validator syntax
         run: node --check scripts/validate-i18n.mjs
+
+      - name: Run locale runtime behavior self-tests
+        run: node scripts/test-i18n-runtime.mjs
 
       - name: Validate locale runtime integration contract
         run: node scripts/validate-i18n.mjs
