@@ -23,6 +23,10 @@ $hostVersion = "$ReleaseVersion-$Channel"
 $runtimeIdentifier = 'win-x64'
 $targetFramework = 'net8.0-windows'
 
+function Get-SwirSha256([string]$Path) {
+    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+
 # Production packaging is fail-closed: a real official Microsoft Fixed Version Runtime must be supplied.
 # Only named CI contract workflows may synthesize an executable-shaped fixture, because those jobs verify
 # package topology and trust/update lifecycles rather than the Microsoft browser runtime itself.
@@ -66,6 +70,7 @@ try {
         --runtime $runtimeIdentifier `
         --self-contained true `
         --output $publishPath `
+        /p:SWIRBundledRelease=true `
         /p:PublishSingleFile=true `
         /p:IncludeNativeLibrariesForSelfExtract=true `
         /p:PublishTrimmed=false
@@ -89,6 +94,8 @@ if ($commit -ne 'local-unpinned' -and $commit -notmatch '^[0-9a-f]{40}$') { thro
 $webView2Version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($webView2Exe).FileVersion
 if ([string]::IsNullOrWhiteSpace($webView2Version)) { $webView2Version = 'fixture-or-unknown' }
 $isContractFixture = Test-Path -LiteralPath (Join-Path $webView2Source '.swir-ci-contract-fixture') -PathType Leaf
+$hostInfo = Get-Item -LiteralPath $hostExe
+$webViewInfo = Get-Item -LiteralPath $bundledWebView2Exe
 
 $manifest = [ordered]@{
     schema = 'swir.desktop-host-build/0.1'
@@ -119,14 +126,30 @@ $manifest = [ordered]@{
             version = $webView2Version
             sourcePolicy = 'microsoft-official-fixed-version-runtime'
             contractFixture = [bool]$isContractFixture
+            windows10AppContainerAclPolicy = 'host-ensures-read-execute'
+        }
+    }
+    integrity = [ordered]@{
+        contract = 'swir.desktop-bundled-integrity/0.1'
+        algorithm = 'SHA-256'
+        entryPoint = [ordered]@{
+            path = 'SWIR.Desktop.Host.exe'
+            sha256 = Get-SwirSha256 $hostExe
+            size = [long]$hostInfo.Length
+        }
+        webView2Executable = [ordered]@{
+            path = 'WebView2FixedRuntime/msedgewebview2.exe'
+            sha256 = Get-SwirSha256 $bundledWebView2Exe
+            size = [long]$webViewInfo.Length
         }
     }
 }
 $manifestPath = Join-Path $publishPath 'desktop-host-build.json'
-[System.IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 8), $utf8NoBom)
+[System.IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 10), $utf8NoBom)
 
 $restoredBytes = [System.IO.File]::ReadAllBytes($programPath)
 if (-not [System.Linq.Enumerable]::SequenceEqual([byte[]]$sourceBytes, [byte[]]$restoredBytes)) { throw 'Program.cs was not restored byte-for-byte after Desktop Host publish.' }
 
 Write-Host "SWIR Desktop Host published as $hostVersion ($runtimeIdentifier, self-contained .NET + bundled WebView2 Fixed Runtime)"
+Write-Host "Bundled integrity: SHA-256 host + WebView2 executable"
 Write-Host "Build manifest: $manifestPath"

@@ -7,6 +7,10 @@ on:
       - 'desktop/windows/SWIR.Desktop.Host.csproj'
       - 'desktop/windows/Program.cs'
       - 'desktop/windows/BundledWebView2Policy.cs'
+      - 'desktop/windows/BundledRuntimeIntegrity.cs'
+      - 'desktop/windows/BundledRuntimeIntegritySelfTests.cs'
+      - 'desktop/windows/BundledRuntimeStartup.cs'
+      - 'desktop/windows/SWIR.Desktop.BundledRuntimeIntegrity.SelfTests.csproj'
       - 'desktop/windows/publish-desktop-host.ps1'
       - '.github/workflows/desktop-lightweight-runtime-contract.yml'
   pull_request:
@@ -14,6 +18,10 @@ on:
       - 'desktop/windows/SWIR.Desktop.Host.csproj'
       - 'desktop/windows/Program.cs'
       - 'desktop/windows/BundledWebView2Policy.cs'
+      - 'desktop/windows/BundledRuntimeIntegrity.cs'
+      - 'desktop/windows/BundledRuntimeIntegritySelfTests.cs'
+      - 'desktop/windows/BundledRuntimeStartup.cs'
+      - 'desktop/windows/SWIR.Desktop.BundledRuntimeIntegrity.SelfTests.csproj'
       - 'desktop/windows/publish-desktop-host.ps1'
       - '.github/workflows/desktop-lightweight-runtime-contract.yml'
 
@@ -34,6 +42,9 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+
+      - name: Run bundled runtime integrity self-tests
+        run: dotnet run --project SWIR.Desktop.BundledRuntimeIntegrity.SelfTests.csproj --configuration Release
 
       - name: Create fixed-runtime packaging fixture
         shell: pwsh
@@ -56,18 +67,30 @@ jobs:
           if ($manifest.deployment.userPrerequisiteDownloadsRequired -ne $false) { throw 'Desktop release must not require user prerequisite downloads.' }
           if ($manifest.deployment.dotnet.bundled -ne $true -or $manifest.deployment.webView2.bundled -ne $true) { throw '.NET and WebView2 must both be bundled.' }
           if ($manifest.deployment.webView2.mode -ne 'fixed-version-bundled') { throw 'WebView2 must use fixed-version bundled deployment.' }
+          if ($manifest.deployment.webView2.windows10AppContainerAclPolicy -ne 'host-ensures-read-execute') { throw 'Windows 10 WebView2 AppContainer ACL policy missing.' }
           if ($manifest.deployment.runtimeIdentifier -ne 'win-x64' -or $manifest.deployment.targetFramework -ne 'net8.0-windows') { throw 'Desktop runtime identity mismatch.' }
+          if ($manifest.integrity.contract -ne 'swir.desktop-bundled-integrity/0.1' -or $manifest.integrity.algorithm -ne 'SHA-256') { throw 'Bundled integrity contract missing.' }
           foreach ($file in @('SWIR.Desktop.Host.exe','WebView2FixedRuntime\msedgewebview2.exe')) {
             if (-not (Test-Path (Join-Path $out $file) -PathType Leaf)) { throw "Published bundled host missing $file" }
           }
+          $hostHash = (Get-FileHash -LiteralPath (Join-Path $out 'SWIR.Desktop.Host.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+          $webHash = (Get-FileHash -LiteralPath (Join-Path $out 'WebView2FixedRuntime\msedgewebview2.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($manifest.integrity.entryPoint.sha256 -ne $hostHash) { throw 'Desktop Host integrity hash does not match published bytes.' }
+          if ($manifest.integrity.webView2Executable.sha256 -ne $webHash) { throw 'WebView2 integrity hash does not match published bytes.' }
+          if ([long]$manifest.integrity.entryPoint.size -ne (Get-Item (Join-Path $out 'SWIR.Desktop.Host.exe')).Length) { throw 'Desktop Host integrity size mismatch.' }
+          if ([long]$manifest.integrity.webView2Executable.size -ne (Get-Item (Join-Path $out 'WebView2FixedRuntime\msedgewebview2.exe')).Length) { throw 'WebView2 integrity size mismatch.' }
           if (Test-Path (Join-Path $out 'SWIR.Desktop.Host.runtimeconfig.json') -PathType Leaf) { throw 'Single-file self-contained package unexpectedly exposes a runtimeconfig prerequisite.' }
 
-      - name: Verify host binds bundled WebView2 path
+      - name: Verify host binds bundled WebView2 path and Windows 10 ACL policy
         shell: pwsh
         run: |
           $source = Get-Content BundledWebView2Policy.cs -Raw
-          foreach ($marker in @('WebView2FixedRuntime','msedgewebview2.exe','WEBVIEW2_BROWSER_EXECUTABLE_FOLDER','EnvironmentVariableTarget.Process')) {
+          foreach ($marker in @('WebView2FixedRuntime','msedgewebview2.exe','WEBVIEW2_BROWSER_EXECUTABLE_FOLDER','EnvironmentVariableTarget.Process','S-1-15-2-2','S-1-15-2-1','icacls.exe')) {
             if (-not $source.Contains($marker)) { throw "Bundled WebView2 host binding missing: $marker" }
+          }
+          $startup = Get-Content BundledRuntimeStartup.cs -Raw
+          foreach ($marker in @('SWIR_BUNDLED_RELEASE','requireManifest: true','EnsureRuntimeAccess')) {
+            if (-not $startup.Contains($marker)) { throw "Bundled runtime startup enforcement missing: $marker" }
           }
 
       - name: Build shipping Desktop Host

@@ -10,6 +10,10 @@
     <ApplicationIcon>swir-os.ico</ApplicationIcon>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(SWIRBundledRelease)' == 'true'">
+    <DefineConstants>$(DefineConstants);SWIR_BUNDLED_RELEASE</DefineConstants>
+  </PropertyGroup>
+
   <ItemGroup>
     <!-- Self-test and standalone executable sources live beside production sources for focused CI projects.
          Keep them out of the shipping Desktop Host so newly-added harnesses/tools cannot accidentally
