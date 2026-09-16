@@ -1,10 +1,10 @@
-# SWIR OS Desktop Host — Windows Preview 0.5.1
+# SWIR OS Desktop Host — Windows Preview 0.5.7
 
 This is the native-host line for SWIR OS Desktop Edition.
 
 ## Current state
 
-Preview 0.5.1 keeps the `swir.runtime/1.0` boundary, WebView2 host, capability broker, Desktop package policy registry and package execution-context broker. It enables isolated routing for the five official installable packages, provides package-scoped native App Data, and contains a signed update trust/download/staging/handoff pipeline with crash-safe transaction journaling, candidate preparation, rollback-safe deployment slots, controlled process launch, startup health confirmation and fail-closed host-start recovery.
+Preview 0.5.7 keeps the `swir.runtime/1.0` boundary, capability broker, Desktop package policy registry and package execution-context broker while moving the Windows distribution toward a **single-download, self-contained Desktop release**. Release packaging now publishes a self-contained .NET 8 host, a repository-pinned Microsoft WebView2 Fixed Version Runtime, signed Store/catalog metadata, the updater worker and a one-file SWIR Desktop Setup executable. End users are not expected to install .NET or WebView2 separately.
 
 The host now:
 
@@ -34,13 +34,19 @@ The host now:
 - runs `DesktopStartupRecovery` before creating WebView2, rolling back interrupted/expired active transactions and failing closed when an active transaction has lost its canonical worker plan;
 - centralizes canonical Desktop transaction/deployment locations in `DesktopUpdatePaths` so startup recovery does not trust mutable metadata for its root boundary;
 - keeps process spawn/kill and unrestricted native network control denied to WebView applications;
-- keeps external filesystem access behind expiring owner-bound capability tokens.
+- keeps external filesystem access behind expiring owner-bound capability tokens;
+- publishes the Desktop Host as self-contained .NET 8 for `win-x64`;
+- obtains only the repository-pinned official Microsoft WebView2 Fixed Version Runtime during controlled packaging, verifies its SHA-256/version/Microsoft Authenticode identity and stores acquisition provenance;
+- verifies the bundled Host/WebView2/provenance integrity contract before normal bundled-release startup;
+- can package the already-verified release ZIP into one self-contained `SWIR-Desktop-Setup-<version>-<channel>.exe`;
+- makes Setup verify the embedded package SHA-256, safely extract it, verify bundled runtime integrity, install transactionally into a versioned directory and write a final-path install receipt/current pointer;
+- refuses to silently reuse an existing installation when its receipt or bundled runtime bytes no longer match the verified package.
 
 ## App isolation routing
 
 The five official installable applications communicate with the shell through `swir-app-bridge.js` + `swir-app-bridge-host.js` rather than direct `parent.SwirPlatform` / `parent.SwirAppSDK` access.
 
-Preview 0.5.1 advertises:
+Preview 0.5.7 advertises:
 
 ```text
 features.packageContextBroker = true
@@ -125,7 +131,29 @@ signed manifest
 
 `DesktopStartupRecovery` now runs before normal shell startup. Prepared transactions remain pending because they have not touched `Current`; interrupted `applying`, missing/expired health metadata and persisted rollback states are reconciled before WebView2 starts. An active transaction without its canonical `worker-plan.json` blocks shell startup rather than silently continuing in an ambiguous deployment state.
 
-The update subsystem still deliberately does **not** expose unrestricted update execution to WebView applications, replace arbitrary binaries outside controlled deployment slots, execute arbitrary installers or bypass signature checks. The final user-facing `Apply update & restart` command remains gated until host shutdown/lifecycle integration and packaged Windows E2E tests are complete.
+The update subsystem deliberately does **not** expose unrestricted update execution to WebView applications, replace arbitrary binaries outside controlled deployment slots, execute arbitrary installers or bypass signature checks.
+
+## One-file Desktop Setup
+
+The end-user distribution target is one file:
+
+```text
+SWIR-Desktop-Setup-<version>-<channel>.exe
+```
+
+The official release pipeline builds that Setup **from the already verified signed Desktop release ZIP**, cryptographically binds `desktop-installer-build.json` to both the ZIP and Setup bytes, executes `--verify-only`, performs a clean-install smoke test and only then exposes the Setup as a release artifact.
+
+The Setup embeds the Desktop runtime, including self-contained .NET and the pinned WebView2 Fixed Version Runtime. The end user should not be sent to Microsoft, .NET or another dependency site to make SWIR OS Desktop start.
+
+Current installer safety properties include:
+
+- embedded release ZIP SHA-256 verification before extraction;
+- full bundled-runtime integrity verification in `--verify-only` and installation paths;
+- archive traversal/absolute-path/symlink rejection;
+- bounded archive entry count and expanded size;
+- versioned install directories and atomic staging-to-final promotion;
+- install receipts bound to version, channel, package SHA-256 and final install path;
+- refusal to overwrite/reuse a tampered existing installation as if it were trusted.
 
 ## Runtime diagnostics
 
@@ -145,34 +173,48 @@ await SwirRuntime.appData.info(packageId);
 
 Windows CI checks Runtime/registry/App Bridge syntax and contracts, validates the Desktop package policy and all five isolated application entries, runs native App Data and Permission Broker self-tests, signed Update Broker/download/staging/handoff tests, transaction recovery/health-check tests, guarded activation/rollback tests, candidate launch/startup-health tests, shutdown/restart launcher tests, Desktop startup-recovery tests and updater worker tests, then builds the standalone updater worker and Windows host.
 
-A green CI run verifies those automated paths. It is not yet a claim that every application workflow has been exercised manually in a packaged Windows `.exe`.
+The dedicated Desktop Installer Contract builds a real self-contained payload with the pinned official WebView2 runtime, creates the one-file Setup, verifies hashes and sizes, executes Setup verification, performs a clean installation and checks fail-closed behavior against a tampered installed Host. The Desktop Release Contract also puts Setup construction and clean-install smoke testing inside the signed release/Candidate/health lifecycle.
 
-## Requirements
+A green CI run verifies those automated paths. It is not yet a claim that every application workflow has been exercised manually on every supported Windows hardware configuration.
 
-- Windows 10/11
-- .NET 8 SDK
-- Microsoft Edge WebView2 Runtime
+## End-user requirements
+
+- Windows 10 or Windows 11 x64.
+- **One SWIR Desktop Setup EXE.**
+- No manual .NET Runtime installation.
+- No manual Microsoft WebView2 Runtime installation.
+- No separate core language-pack download.
+
+Runtime prerequisites are part of the verified SWIR release package rather than a manual end-user setup checklist.
+
+## Developer requirements
+
+A source/developer build requires Windows 10/11 x64 and the .NET 8 SDK. Packaging may require network access to acquire the repository-pinned WebView2 Fixed Version Runtime from the approved Microsoft HTTPS source; its archive hash, exact runtime version and Microsoft signature are verified before it can enter a release package.
 
 ## Build
 
 ```powershell
 cd desktop\windows
-dotnet restore
-dotnet build -c Release
+dotnet restore SWIR.Desktop.Host.csproj
+dotnet build SWIR.Desktop.Host.csproj -c Release
 ```
 
-or:
+Self-contained Desktop publish:
 
 ```powershell
-.\build.ps1
+.\publish-desktop-host.ps1 `
+  -PublishDir .\publish `
+  -ReleaseVersion 0.5.7 `
+  -Channel preview
 ```
 
-## Next host milestone
+A local developer build is not equivalent to an official signed release.
 
-1. integrate `UpdateRestartLauncher` with a controlled MainWindow/WebView2 shutdown lifecycle and use the canonical `DesktopUpdatePaths` roots end-to-end;
-2. expose a narrowly scoped, permission-gated `Apply update & restart` operation to Update Center only after packaged Windows failure-injection tests pass;
-3. add release key-id/key rotation policy without accepting unsigned fallback keys;
-4. expose read-only update transaction/staging/recovery diagnostics to Update Center;
-5. add automated isolated-origin runtime smoke tests for all five official packages;
-6. add a limited native tray adapter;
-7. publish a repeatable self-contained Windows Desktop preview artifact once runtime E2E checks are green.
+## Next host milestones
+
+1. deploy and verify the protected production package/catalog signing roots and key rotation process;
+2. add production Authenticode signing and verification for public Setup/Host executables without committing private signing keys;
+3. add user-facing installer upgrade/uninstall lifecycle and polished localized installer UI while preserving transactional/fail-closed behavior;
+4. continue hardening update/restart recovery with packaged Windows failure-injection tests;
+5. expand isolated-origin runtime smoke coverage and full application localization/accessibility;
+6. reduce remaining build warnings and continue performance/startup profiling before promoting Desktop Edition from preview.
