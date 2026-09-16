@@ -88,7 +88,8 @@ jobs:
           $fixed = Join-Path '${{ runner.temp }}' 'webview2-fixed-fixture'
           New-Item -ItemType Directory -Path $fixed -Force | Out-Null
           Copy-Item -LiteralPath (Join-Path $env:SystemRoot 'System32\where.exe') -Destination (Join-Path $fixed 'msedgewebview2.exe') -Force
-          if (-not (Test-Path (Join-Path $fixed 'msedgewebview2.exe') -PathType Leaf)) { throw 'Could not create executable WebView2 packaging fixture.' }
+          [System.IO.File]::WriteAllText((Join-Path $fixed '.swir-ci-contract-fixture'), 'packaging-topology-only')
+          if (-not (Test-Path (Join-Path $fixed 'msedgewebview2.exe') -PathType Leaf) -or -not (Test-Path (Join-Path $fixed '.swir-ci-contract-fixture') -PathType Leaf)) { throw 'Could not create explicitly marked WebView2 packaging fixture.' }
           "SWIR_WEBVIEW2_FIXED_RUNTIME_DIR=$fixed" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Publish self-contained bundled runtime
