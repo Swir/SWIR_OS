@@ -7,6 +7,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>SWIR.Desktop.Host</AssemblyName>
     <RootNamespace>Swir.Desktop.Host</RootNamespace>
+    <ApplicationIcon>swir-os.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
