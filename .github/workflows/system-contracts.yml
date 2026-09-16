@@ -43,6 +43,8 @@ jobs:
           node --check system/runtime/windows-compat-launcher.mjs
           node --check system/runtime/windows-compat-supervisor.mjs
           node --check system/runtime/windows-compat-supervisor.selftest.mjs
+          node --check system/runtime/application-runtime.mjs
+          node --check system/runtime/application-runtime.selftest.mjs
           node --check system/hardware/hardware-service.mjs
           node --check system/hardware/hardware-probe.mjs
           node --check system/hardware/hardware-service.selftest.mjs
@@ -71,6 +73,9 @@ jobs:
 
       - name: Run Windows compatibility supervisor self-tests
         run: node system/runtime/windows-compat-supervisor.selftest.mjs
+
+      - name: Run unified System application runtime self-tests
+        run: node system/runtime/application-runtime.selftest.mjs
 
       - name: Enforce trusted Hardware Catalog policy
         run: node system/hardware/hardware-catalog.selftest.mjs
