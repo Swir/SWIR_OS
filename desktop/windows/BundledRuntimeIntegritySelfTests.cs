@@ -26,7 +26,14 @@ internal static class BundledRuntimeIntegritySelfTests
             Assert(verified.WebView2Sha256 == Hash(web), "WebView2 SHA must be reported");
 
             File.AppendAllText(web, "tamper");
-            AssertThrows(() => BundledRuntimeIntegrity.Verify(root, true), "SHA-256 mismatch", "runtime tampering must fail closed");
+            AssertThrows(() => BundledRuntimeIntegrity.Verify(root, true), "size mismatch", "runtime size tampering must fail closed");
+            File.WriteAllBytes(web, "webview2-payload"u8.ToArray());
+            WriteManifest(root, host, web, prerequisiteDownloadsRequired: false);
+
+            var sameSizeTamper = File.ReadAllBytes(web);
+            sameSizeTamper[0] ^= 0x01;
+            File.WriteAllBytes(web, sameSizeTamper);
+            AssertThrows(() => BundledRuntimeIntegrity.Verify(root, true), "SHA-256 mismatch", "same-size runtime tampering must fail closed on SHA-256");
             File.WriteAllBytes(web, "webview2-payload"u8.ToArray());
             WriteManifest(root, host, web, prerequisiteDownloadsRequired: false);
 
@@ -45,7 +52,7 @@ internal static class BundledRuntimeIntegritySelfTests
             Assert(!dev.ManifestPresent && !dev.Verified && dev.Mode == "development-unverified", "developer build may run without release manifest");
             AssertThrows(() => BundledRuntimeIntegrity.Verify(root, true), "missing desktop-host-build.json", "bundled release must require manifest");
 
-            Console.WriteLine("SWIR bundled runtime integrity self-tests: OK");
+            Console.WriteLine("SWIR bundled runtime integrity self-tests: OK — size, SHA-256, path containment and no-prerequisite policy verified.");
             return 0;
         }
         finally
