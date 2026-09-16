@@ -15,11 +15,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Self-test and standalone executable sources live beside production sources for focused CI projects.
-         Keep them out of the shipping Desktop Host so newly-added harnesses/tools cannot accidentally
-         introduce a second entry point or ship release-only functionality in the runtime host. -->
+    <!-- Focused CI/test/tool/installer sources live beside production sources.
+         Keep them out of the shipping Desktop Host so harnesses and setup-only
+         lifecycle code cannot accidentally enlarge or change the runtime host. -->
     <Compile Remove="*SelfTests*.cs" />
-    <Compile Remove="DesktopInstallerProgram.cs" />
+    <Compile Remove="DesktopInstaller*.cs" />
     <Compile Remove="UpdaterActivationCrashHarness.cs" />
     <Compile Remove="DesktopUpdateReleaseTool.cs" />
     <Compile Remove="DesktopPackageBuilder.cs" />
