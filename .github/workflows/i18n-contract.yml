@@ -70,6 +70,7 @@ jobs:
           node --check swir-app-locales-west.js
           node --check swir-app-locales-global.js
           node --check swir-app-locales-world.js
+          node --check swir-app-locales-system.js
           node --check swir-app-i18n.js
           node --check swir-app-i18n-host.js
           node --check swir-oobe.js
