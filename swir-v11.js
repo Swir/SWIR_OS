@@ -1,7 +1,16 @@
-/* SWIR OS 1.1 runtime loader — corrected build */
+/* SWIR OS 1.1 runtime loader — corrected build + bundled application i18n */
 (() => {
-  const script = document.createElement('script');
-  script.src = './swir-v11-fixed.js?v=1.1.1';
-  script.defer = true;
-  document.head.appendChild(script);
+  const queue = [
+    './swir-v11-fixed.js?v=1.1.1',
+    './swir-app-locales-west.js?v=0.1.0',
+    './swir-app-locales-global.js?v=0.1.0',
+    './swir-app-locales-world.js?v=0.1.0',
+    './swir-app-i18n-host.js?v=0.1.0'
+  ];
+  for (const src of queue) {
+    const script = document.createElement('script');
+    script.src = src;
+    script.async = false;
+    document.head.appendChild(script);
+  }
 })();

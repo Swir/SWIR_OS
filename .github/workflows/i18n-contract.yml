@@ -6,8 +6,12 @@ on:
     paths:
       - 'swir-i18n.js'
       - 'swir-locale-packs.js'
+      - 'swir-app-locales-*.js'
+      - 'swir-app-i18n.js'
+      - 'swir-app-i18n-host.js'
       - 'swir-oobe.js'
       - 'swir-settings.html'
+      - 'swir-v11.js'
       - 'swir-sdk.js'
       - 'swir-app-bridge.js'
       - 'swir-app-bridge-host.js'
@@ -17,14 +21,19 @@ on:
       - 'desktop/windows/stage-desktop-runtime.ps1'
       - 'scripts/validate-i18n.mjs'
       - 'scripts/test-i18n-runtime.mjs'
+      - 'scripts/test-app-i18n-packs.mjs'
       - 'SWIR-OS-ARCHITECTURE.md'
       - '.github/workflows/i18n-contract.yml'
   pull_request:
     paths:
       - 'swir-i18n.js'
       - 'swir-locale-packs.js'
+      - 'swir-app-locales-*.js'
+      - 'swir-app-i18n.js'
+      - 'swir-app-i18n-host.js'
       - 'swir-oobe.js'
       - 'swir-settings.html'
+      - 'swir-v11.js'
       - 'swir-sdk.js'
       - 'swir-app-bridge.js'
       - 'swir-app-bridge-host.js'
@@ -34,6 +43,7 @@ on:
       - 'desktop/windows/stage-desktop-runtime.ps1'
       - 'scripts/validate-i18n.mjs'
       - 'scripts/test-i18n-runtime.mjs'
+      - 'scripts/test-app-i18n-packs.mjs'
       - 'SWIR-OS-ARCHITECTURE.md'
       - '.github/workflows/i18n-contract.yml'
 
@@ -57,8 +67,15 @@ jobs:
         run: |
           node --check swir-i18n.js
           node --check swir-locale-packs.js
+          node --check swir-app-locales-west.js
+          node --check swir-app-locales-global.js
+          node --check swir-app-locales-world.js
+          node --check swir-app-i18n.js
+          node --check swir-app-i18n-host.js
           node --check swir-oobe.js
+          node --check swir-v11.js
           node --check scripts/test-i18n-runtime.mjs
+          node --check scripts/test-app-i18n-packs.mjs
 
       - name: Check App SDK and bridge syntax
         run: |
@@ -71,6 +88,9 @@ jobs:
 
       - name: Run locale runtime behavior self-tests
         run: node scripts/test-i18n-runtime.mjs
+
+      - name: Run critical application locale pack self-tests
+        run: node scripts/test-app-i18n-packs.mjs
 
       - name: Validate locale runtime integration contract
         run: node scripts/validate-i18n.mjs
