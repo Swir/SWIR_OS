@@ -10,24 +10,26 @@ SWIR OS is designed in three editions sharing platform, package, security and se
 
 **System Edition application rule:** the real bootable OS must not depend on HTML/PWA applications for its essential desktop experience. Core bundled applications must be native Linux applications. Windows desktop applications may run through a controlled Wine/Proton compatibility layer. Web Edition applications remain useful prototypes and design references, but they are not the final System Edition application implementation.
 
+The mandatory end-user application and experience scope is defined in [`SWIR-PRODUCT-BASELINE-1.0.md`](SWIR-PRODUCT-BASELINE-1.0.md). Product-baseline items count as complete only when their edition-specific implementation is real and verified.
+
 <!-- SWIR-ROADMAP-STANDARD:v1 -->
 <!-- ROADMAP-PROGRESS:START -->
 <p align="center">
   <a href="https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml"><img alt="CI" src="https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml/badge.svg"></a>
-  <img alt="Roadmap progress" src="https://img.shields.io/badge/ROADMAP-61.8%25-2ea043?style=for-the-badge">
-  <img alt="Completed" src="https://img.shields.io/badge/DONE-34%2F55-1f6feb?style=for-the-badge">
+  <img alt="Roadmap progress" src="https://img.shields.io/badge/ROADMAP-56.7%25-2ea043?style=for-the-badge">
+  <img alt="Completed" src="https://img.shields.io/badge/DONE-34%2F60-1f6feb?style=for-the-badge">
   <img alt="Status" src="https://img.shields.io/badge/STATUS-IN%20PROGRESS-7c3aed?style=for-the-badge">
 </p>
 
 ## 📊 Overall progress
 
 ```text
-████████████░░░░░░░░ 61.8%
+███████████░░░░░░░░░ 56.7%
 ```
 
 | ✅ Completed | ⏳ Remaining | 📦 Total | 🎯 Progress |
 |---:|---:|---:|---:|
-| **34** | **21** | **55** | **61.8%** |
+| **34** | **26** | **60** | **56.7%** |
 
 > **Progress rule:** the explicit `[x]/[ ]` deliverables in **Version roadmap** are the source of truth for the full Web → Desktop → System plan. Update the checklist first, then badges, numbers, percentage and the 20-segment bar. A prototype does not count as complete until the described deliverable is actually implemented and verified.
 <!-- ROADMAP-PROGRESS:END -->
@@ -302,17 +304,20 @@ Software / Store
 Update Center
 Hardware & Driver Center
 Network Center
+SWIR Browser
 Text Editor / Notes
-Media Player
-Image Viewer
+SWIR Player
+SWIR Photo Studio / Image Viewer
 PDF Viewer
 Archive Manager
 Calculator
+Screenshot Tool
 Task Manager / System Monitor
 Logs / Diagnostics
+Backup / Restore
 ```
 
-These applications must integrate with SWIR locale, accessibility, permissions, file associations, update/recovery, notifications and shared visual design. They must be tested as real daily-use applications rather than placeholder demos.
+These applications must integrate with SWIR locale, accessibility, permissions, file associations, default-app selection, update/recovery, notifications and shared visual design. They must be tested as real daily-use applications rather than placeholder demos.
 
 ### Common Store / Package layer
 
@@ -400,6 +405,7 @@ Active direction:
 - [x] sandboxed permissions
 - [x] native notification adapter
 - [x] guarded update activation, health proof, rollback and restart handoff
+- [ ] signed GitHub-backed stable/preview update feed with Automatic / Notify only / Manual user policy
 
 ### System Edition 3.x
 
@@ -411,6 +417,10 @@ Planned:
 - [ ] NetworkManager integration
 - [ ] native Linux application execution
 - [ ] essential native Linux application suite for dependable daily use
+- [ ] native SWIR Browser with Default Apps integration and one-click approved alternative browser installation
+- [ ] installable SWIR Shell Theme/Skin framework with accessibility-safe recovery to the default theme
+- [ ] native SWIR Player with library/playlists/media-key/notification integration
+- [ ] native SWIR Photo Studio with dependable basic editing, undo/redo and common-format export
 - [ ] common Package Provider layer for distribution packages and later Flatpak/AppImage
 - [ ] managed Wine/Proton compatibility service for Windows user applications
 - [ ] Hardware Service with PCI/USB inventory
