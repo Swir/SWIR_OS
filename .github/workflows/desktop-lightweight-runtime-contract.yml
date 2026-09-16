@@ -11,6 +11,7 @@ on:
       - 'desktop/windows/BundledRuntimeIntegritySelfTests.cs'
       - 'desktop/windows/BundledRuntimeStartup.cs'
       - 'desktop/windows/SWIR.Desktop.BundledRuntimeIntegrity.SelfTests.csproj'
+      - 'desktop/windows/acquire-webview2-fixed-runtime.ps1'
       - 'desktop/windows/publish-desktop-host.ps1'
       - '.github/workflows/desktop-lightweight-runtime-contract.yml'
   pull_request:
@@ -22,6 +23,7 @@ on:
       - 'desktop/windows/BundledRuntimeIntegritySelfTests.cs'
       - 'desktop/windows/BundledRuntimeStartup.cs'
       - 'desktop/windows/SWIR.Desktop.BundledRuntimeIntegrity.SelfTests.csproj'
+      - 'desktop/windows/acquire-webview2-fixed-runtime.ps1'
       - 'desktop/windows/publish-desktop-host.ps1'
       - '.github/workflows/desktop-lightweight-runtime-contract.yml'
 
@@ -42,6 +44,30 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+
+      - name: Validate pinned WebView2 source policy
+        shell: pwsh
+        run: |
+          $hash = ('a' * 64)
+          $policyJson = ./acquire-webview2-fixed-runtime.ps1 -PolicyOnly -SourceUrl 'https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/runtime.cab' -ExpectedSha256 $hash -ExpectedVersion '153.0.4234.32'
+          $policy = $policyJson | ConvertFrom-Json
+          if ($policy.contract -ne 'swir.webview2-fixed-source-policy/0.1' -or $policy.approved -ne $true -or $policy.architecture -ne 'x64') { throw 'WebView2 source policy contract mismatch.' }
+          if ($policy.requireAuthenticode -ne $true -or $policy.requireMicrosoftSigner -ne $true -or $policy.userDownloadRequired -ne $false) { throw 'WebView2 source policy weakened.' }
+
+          $blocked = $false
+          try { ./acquire-webview2-fixed-runtime.ps1 -PolicyOnly -SourceUrl 'https://example.com/runtime.cab' -ExpectedSha256 $hash -ExpectedVersion '153.0.4234.32' | Out-Null } catch { $blocked = $true }
+          if (-not $blocked) { throw 'Non-Microsoft WebView2 source URL was accepted.' }
+          $blocked = $false
+          try { ./acquire-webview2-fixed-runtime.ps1 -PolicyOnly -SourceUrl 'https://download.microsoft.com/runtime.cab' -ExpectedSha256 'bad' -ExpectedVersion '153.0.4234.32' | Out-Null } catch { $blocked = $true }
+          if (-not $blocked) { throw 'Invalid WebView2 SHA-256 pin was accepted.' }
+          $blocked = $false
+          try { ./acquire-webview2-fixed-runtime.ps1 -PolicyOnly -SourceUrl 'http://download.microsoft.com/runtime.cab' -ExpectedSha256 $hash -ExpectedVersion '153.0.4234.32' | Out-Null } catch { $blocked = $true }
+          if (-not $blocked) { throw 'Non-HTTPS WebView2 source URL was accepted.' }
+
+          $source = Get-Content acquire-webview2-fixed-runtime.ps1 -Raw
+          foreach ($marker in @('Get-FileHash','SHA256','MSCF','expand.exe','Get-AuthenticodeSignature','Microsoft Corporation','msedge.dll','icudtl.dat','.swir-webview2-provenance.json')) {
+            if (-not $source.Contains($marker)) { throw "WebView2 acquisition enforcement missing: $marker" }
+          }
 
       - name: Run bundled runtime integrity self-tests
         run: dotnet run --project SWIR.Desktop.BundledRuntimeIntegrity.SelfTests.csproj --configuration Release
