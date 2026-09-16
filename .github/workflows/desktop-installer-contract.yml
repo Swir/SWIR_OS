@@ -1,0 +1,123 @@
+name: Desktop Installer Contract
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'desktop/windows/DesktopInstallerProgram.cs'
+      - 'desktop/windows/SWIR.Desktop.Installer.csproj'
+      - 'desktop/windows/build-desktop-installer.ps1'
+      - 'desktop/windows/BundledRuntimeIntegrity.cs'
+      - 'desktop/windows/publish-desktop-host.ps1'
+      - 'desktop/windows/acquire-webview2-fixed-runtime.ps1'
+      - 'desktop/windows/webview2-fixed-runtime.lock.json'
+      - '.github/workflows/desktop-installer-contract.yml'
+  pull_request:
+    paths:
+      - 'desktop/windows/DesktopInstallerProgram.cs'
+      - 'desktop/windows/SWIR.Desktop.Installer.csproj'
+      - 'desktop/windows/build-desktop-installer.ps1'
+      - 'desktop/windows/BundledRuntimeIntegrity.cs'
+      - 'desktop/windows/publish-desktop-host.ps1'
+      - 'desktop/windows/acquire-webview2-fixed-runtime.ps1'
+      - 'desktop/windows/webview2-fixed-runtime.lock.json'
+      - '.github/workflows/desktop-installer-contract.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  installer-e2e:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: desktop/windows
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Compile installer project
+        run: dotnet build SWIR.Desktop.Installer.csproj --configuration Release
+
+      - name: Build real bundled Desktop payload
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $publish = Join-Path '${{ runner.temp }}' 'swir-installer-publish'
+          & (Join-Path (Get-Location) 'publish-desktop-host.ps1') `
+            -PublishDir $publish `
+            -ReleaseVersion '0.5.7' `
+            -Channel preview `
+            -SourceCommit $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { throw "Desktop Host publish failed with exit code $LASTEXITCODE." }
+          foreach ($required in @('SWIR.Desktop.Host.exe','desktop-host-build.json','WebView2FixedRuntime\msedgewebview2.exe','WebView2FixedRuntime\.swir-webview2-provenance.json')) {
+            $path = Join-Path $publish $required
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Installer payload is missing $required" }
+          }
+          $manifest = Get-Content (Join-Path $publish 'desktop-host-build.json') -Raw | ConvertFrom-Json
+          if ($manifest.deployment.userPrerequisiteDownloadsRequired -ne $false -or $manifest.deployment.webView2.mode -ne 'fixed-version-bundled') {
+            throw 'Desktop payload is not self-contained.'
+          }
+
+      - name: Build one-file setup from bundled payload
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $publish = Join-Path '${{ runner.temp }}' 'swir-installer-publish'
+          $payload = Join-Path '${{ runner.temp }}' 'SWIR-Desktop-0.5.7-preview.zip'
+          if (Test-Path -LiteralPath $payload) { Remove-Item -LiteralPath $payload -Force }
+          [IO.Compression.ZipFile]::CreateFromDirectory($publish, $payload, [IO.Compression.CompressionLevel]::Optimal, $false)
+          $out = Join-Path '${{ runner.temp }}' 'swir-installer-output'
+          & (Join-Path (Get-Location) 'build-desktop-installer.ps1') `
+            -PackageZip $payload `
+            -OutputDir $out `
+            -Version '0.5.7' `
+            -Channel preview
+          if ($LASTEXITCODE -ne 0) { throw "Desktop installer build failed with exit code $LASTEXITCODE." }
+          $setup = Join-Path $out 'SWIR-Desktop-Setup-0.5.7-preview.exe'
+          if (-not (Test-Path -LiteralPath $setup -PathType Leaf) -or (Get-Item $setup).Length -le 0) { throw 'Setup EXE was not produced.' }
+          $build = Get-Content (Join-Path $out 'desktop-installer-build.json') -Raw | ConvertFrom-Json
+          if ($build.schema -ne 'swir.desktop-installer-build/0.1' -or $build.selfContained -ne $true -or $build.singleFile -ne $true -or $build.userPrerequisiteDownloadsRequired -ne $false) {
+            throw 'Installer build manifest does not prove a self-contained single-file setup.'
+          }
+
+      - name: Verify embedded payload and perform clean install
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = Join-Path '${{ runner.temp }}' 'swir-installer-output\SWIR-Desktop-Setup-0.5.7-preview.exe'
+          & $setup --verify-only --quiet
+          if ($LASTEXITCODE -ne 0) { throw "Setup --verify-only failed with exit code $LASTEXITCODE." }
+          $root = Join-Path '${{ runner.temp }}' 'swir-clean-install'
+          & $setup --no-launch --quiet --install-root $root
+          if ($LASTEXITCODE -ne 0) { throw "Setup clean install failed with exit code $LASTEXITCODE." }
+          $currentPath = Join-Path $root 'current.json'
+          if (-not (Test-Path -LiteralPath $currentPath -PathType Leaf)) { throw 'Setup did not write current.json.' }
+          $current = Get-Content $currentPath -Raw | ConvertFrom-Json
+          if ($current.schema -ne 'swir.desktop-current-install/0.1' -or $current.version -ne '0.5.7' -or $current.channel -ne 'preview') { throw 'Current installation pointer is invalid.' }
+          $installed = [string]$current.installDirectory
+          foreach ($required in @('SWIR.Desktop.Host.exe','desktop-host-build.json','install-receipt.json','WebView2FixedRuntime\msedgewebview2.exe')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $installed $required) -PathType Leaf)) { throw "Installed runtime is missing $required" }
+          }
+          $receipt = Get-Content (Join-Path $installed 'install-receipt.json') -Raw | ConvertFrom-Json
+          if ($receipt.Schema -ne 'swir.desktop-install-receipt/0.1' -or $receipt.Version -ne '0.5.7' -or $receipt.Channel -ne 'preview') { throw 'Install receipt is invalid.' }
+
+      - name: Refuse tampered existing installation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = Join-Path '${{ runner.temp }}' 'swir-installer-output\SWIR-Desktop-Setup-0.5.7-preview.exe'
+          $root = Join-Path '${{ runner.temp }}' 'swir-clean-install'
+          $current = Get-Content (Join-Path $root 'current.json') -Raw | ConvertFrom-Json
+          $host = Join-Path ([string]$current.installDirectory) 'SWIR.Desktop.Host.exe'
+          [IO.File]::AppendAllText($host, 'tamper')
+          & $setup --no-launch --quiet --install-root $root
+          if ($LASTEXITCODE -eq 0) { throw 'Setup accepted a tampered existing installation.' }
+          Write-Host "Tampered-install refusal returned expected non-zero exit code $LASTEXITCODE."
