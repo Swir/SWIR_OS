@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>SWIR.Desktop.Setup</AssemblyName>
+    <RootNamespace>Swir.Desktop.Host</RootNamespace>
+    <ApplicationIcon>swir-os.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="BundledRuntimeIntegrity.cs" />
+    <Compile Include="DesktopInstallerProgram.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(SwirInstallerBuild)' == 'true'">
+    <EmbeddedResource Include="$(SwirPayloadZip)" LogicalName="SWIR.Desktop.Payload.zip" />
+    <EmbeddedResource Include="$(SwirPayloadMetadata)" LogicalName="SWIR.Desktop.Payload.json" />
+  </ItemGroup>
+
+  <Target Name="ValidateSwirInstallerPayload" BeforeTargets="PrepareForBuild" Condition="'$(SwirInstallerBuild)' == 'true'">
+    <Error Condition="'$(SwirPayloadZip)' == ''" Text="SwirPayloadZip is required for a SWIR installer build." />
+    <Error Condition="'$(SwirPayloadMetadata)' == ''" Text="SwirPayloadMetadata is required for a SWIR installer build." />
+    <Error Condition="!Exists('$(SwirPayloadZip)')" Text="SWIR installer payload ZIP does not exist: $(SwirPayloadZip)" />
+    <Error Condition="!Exists('$(SwirPayloadMetadata)')" Text="SWIR installer payload metadata does not exist: $(SwirPayloadMetadata)" />
+  </Target>
+</Project>
