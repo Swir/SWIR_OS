@@ -12,6 +12,7 @@ on:
       - 'desktop/windows/BundledRuntimeStartup.cs'
       - 'desktop/windows/SWIR.Desktop.BundledRuntimeIntegrity.SelfTests.csproj'
       - 'desktop/windows/acquire-webview2-fixed-runtime.ps1'
+      - 'desktop/windows/webview2-fixed-runtime.lock.json'
       - 'desktop/windows/publish-desktop-host.ps1'
       - '.github/workflows/desktop-lightweight-runtime-contract.yml'
   pull_request:
@@ -24,6 +25,7 @@ on:
       - 'desktop/windows/BundledRuntimeStartup.cs'
       - 'desktop/windows/SWIR.Desktop.BundledRuntimeIntegrity.SelfTests.csproj'
       - 'desktop/windows/acquire-webview2-fixed-runtime.ps1'
+      - 'desktop/windows/webview2-fixed-runtime.lock.json'
       - 'desktop/windows/publish-desktop-host.ps1'
       - '.github/workflows/desktop-lightweight-runtime-contract.yml'
 
@@ -45,28 +47,36 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Validate pinned WebView2 source policy
+      - name: Validate pinned WebView2 source policy and lock
         shell: pwsh
         run: |
-          $hash = ('a' * 64)
-          $policyJson = ./acquire-webview2-fixed-runtime.ps1 -PolicyOnly -SourceUrl 'https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/runtime.cab' -ExpectedSha256 $hash -ExpectedVersion '153.0.4234.32'
+          $lock = Get-Content webview2-fixed-runtime.lock.json -Raw | ConvertFrom-Json
+          if ($lock.schema -ne 'swir.webview2-fixed-runtime-lock/0.1' -or $lock.architecture -ne 'x64') { throw 'Pinned WebView2 lock contract mismatch.' }
+          if ($lock.version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' -or $lock.sha256 -notmatch '^[a-fA-F0-9]{64}$') { throw 'Pinned WebView2 version/hash format invalid.' }
+          if ($lock.distribution -ne 'fixed-version-bundled' -or $lock.userDownloadRequired -ne $false) { throw 'Pinned WebView2 lock weakened the no-user-download policy.' }
+          $policyJson = ./acquire-webview2-fixed-runtime.ps1 -PolicyOnly -SourceUrl $lock.sourceUrl -ExpectedSha256 $lock.sha256 -ExpectedVersion $lock.version
           $policy = $policyJson | ConvertFrom-Json
           if ($policy.contract -ne 'swir.webview2-fixed-source-policy/0.1' -or $policy.approved -ne $true -or $policy.architecture -ne 'x64') { throw 'WebView2 source policy contract mismatch.' }
+          if ($policy.version -ne $lock.version -or $policy.sha256 -ne $lock.sha256.ToLowerInvariant() -or $policy.source -ne $lock.sourceUrl) { throw 'WebView2 source policy does not match repository lock.' }
           if ($policy.requireAuthenticode -ne $true -or $policy.requireMicrosoftSigner -ne $true -or $policy.userDownloadRequired -ne $false) { throw 'WebView2 source policy weakened.' }
 
           $blocked = $false
-          try { ./acquire-webview2-fixed-runtime.ps1 -PolicyOnly -SourceUrl 'https://example.com/runtime.cab' -ExpectedSha256 $hash -ExpectedVersion '153.0.4234.32' | Out-Null } catch { $blocked = $true }
+          try { ./acquire-webview2-fixed-runtime.ps1 -PolicyOnly -SourceUrl 'https://example.com/runtime.cab' -ExpectedSha256 $lock.sha256 -ExpectedVersion $lock.version | Out-Null } catch { $blocked = $true }
           if (-not $blocked) { throw 'Non-Microsoft WebView2 source URL was accepted.' }
           $blocked = $false
-          try { ./acquire-webview2-fixed-runtime.ps1 -PolicyOnly -SourceUrl 'https://download.microsoft.com/runtime.cab' -ExpectedSha256 'bad' -ExpectedVersion '153.0.4234.32' | Out-Null } catch { $blocked = $true }
+          try { ./acquire-webview2-fixed-runtime.ps1 -PolicyOnly -SourceUrl 'https://download.microsoft.com/runtime.cab' -ExpectedSha256 'bad' -ExpectedVersion $lock.version | Out-Null } catch { $blocked = $true }
           if (-not $blocked) { throw 'Invalid WebView2 SHA-256 pin was accepted.' }
           $blocked = $false
-          try { ./acquire-webview2-fixed-runtime.ps1 -PolicyOnly -SourceUrl 'http://download.microsoft.com/runtime.cab' -ExpectedSha256 $hash -ExpectedVersion '153.0.4234.32' | Out-Null } catch { $blocked = $true }
+          try { ./acquire-webview2-fixed-runtime.ps1 -PolicyOnly -SourceUrl 'http://download.microsoft.com/runtime.cab' -ExpectedSha256 $lock.sha256 -ExpectedVersion $lock.version | Out-Null } catch { $blocked = $true }
           if (-not $blocked) { throw 'Non-HTTPS WebView2 source URL was accepted.' }
 
           $source = Get-Content acquire-webview2-fixed-runtime.ps1 -Raw
           foreach ($marker in @('Get-FileHash','SHA256','MSCF','expand.exe','Get-AuthenticodeSignature','Microsoft Corporation','msedge.dll','icudtl.dat','.swir-webview2-provenance.json')) {
             if (-not $source.Contains($marker)) { throw "WebView2 acquisition enforcement missing: $marker" }
+          }
+          $publisher = Get-Content publish-desktop-host.ps1 -Raw
+          foreach ($marker in @('webview2-fixed-runtime.lock.json','acquire-webview2-fixed-runtime.ps1','swir.webview2-provenance/0.1','webView2Provenance','userDownloadRequired')) {
+            if (-not $publisher.Contains($marker)) { throw "Desktop publisher is not wired to pinned runtime acquisition/provenance: $marker" }
           }
 
       - name: Run bundled runtime integrity self-tests
@@ -93,18 +103,27 @@ jobs:
           if ($manifest.deployment.userPrerequisiteDownloadsRequired -ne $false) { throw 'Desktop release must not require user prerequisite downloads.' }
           if ($manifest.deployment.dotnet.bundled -ne $true -or $manifest.deployment.webView2.bundled -ne $true) { throw '.NET and WebView2 must both be bundled.' }
           if ($manifest.deployment.webView2.mode -ne 'fixed-version-bundled') { throw 'WebView2 must use fixed-version bundled deployment.' }
+          if ($manifest.deployment.webView2.provenanceContract -ne 'swir.webview2-provenance/0.1' -or $manifest.deployment.webView2.provenanceFile -ne '.swir-webview2-provenance.json') { throw 'WebView2 provenance contract missing.' }
+          if ($manifest.deployment.webView2.contractFixture -ne $true -or $manifest.deployment.webView2.sourcePolicy -ne 'ci-contract-fixture') { throw 'Contract packaging fixture must remain explicitly marked.' }
           if ($manifest.deployment.webView2.windows10AppContainerAclPolicy -ne 'host-ensures-read-execute') { throw 'Windows 10 WebView2 AppContainer ACL policy missing.' }
           if ($manifest.deployment.runtimeIdentifier -ne 'win-x64' -or $manifest.deployment.targetFramework -ne 'net8.0-windows') { throw 'Desktop runtime identity mismatch.' }
           if ($manifest.integrity.contract -ne 'swir.desktop-bundled-integrity/0.1' -or $manifest.integrity.algorithm -ne 'SHA-256') { throw 'Bundled integrity contract missing.' }
-          foreach ($file in @('SWIR.Desktop.Host.exe','WebView2FixedRuntime\msedgewebview2.exe')) {
+          foreach ($file in @('SWIR.Desktop.Host.exe','WebView2FixedRuntime\msedgewebview2.exe','WebView2FixedRuntime\.swir-webview2-provenance.json')) {
             if (-not (Test-Path (Join-Path $out $file) -PathType Leaf)) { throw "Published bundled host missing $file" }
           }
           $hostHash = (Get-FileHash -LiteralPath (Join-Path $out 'SWIR.Desktop.Host.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
           $webHash = (Get-FileHash -LiteralPath (Join-Path $out 'WebView2FixedRuntime\msedgewebview2.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+          $provenancePath = Join-Path $out 'WebView2FixedRuntime\.swir-webview2-provenance.json'
+          $provenanceHash = (Get-FileHash -LiteralPath $provenancePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $provenance = Get-Content $provenancePath -Raw | ConvertFrom-Json
+          if ($provenance.schema -ne 'swir.webview2-provenance/0.1' -or $provenance.contractFixture -ne $true -or $provenance.userDownloadRequired -ne $false) { throw 'Fixture provenance contract mismatch.' }
+          if ($provenance.executable.sha256 -ne $webHash) { throw 'Fixture provenance does not bind WebView2 executable hash.' }
           if ($manifest.integrity.entryPoint.sha256 -ne $hostHash) { throw 'Desktop Host integrity hash does not match published bytes.' }
           if ($manifest.integrity.webView2Executable.sha256 -ne $webHash) { throw 'WebView2 integrity hash does not match published bytes.' }
+          if ($manifest.integrity.webView2Provenance.sha256 -ne $provenanceHash) { throw 'WebView2 provenance integrity hash does not match published bytes.' }
           if ([long]$manifest.integrity.entryPoint.size -ne (Get-Item (Join-Path $out 'SWIR.Desktop.Host.exe')).Length) { throw 'Desktop Host integrity size mismatch.' }
           if ([long]$manifest.integrity.webView2Executable.size -ne (Get-Item (Join-Path $out 'WebView2FixedRuntime\msedgewebview2.exe')).Length) { throw 'WebView2 integrity size mismatch.' }
+          if ([long]$manifest.integrity.webView2Provenance.size -ne (Get-Item $provenancePath).Length) { throw 'WebView2 provenance integrity size mismatch.' }
           if (Test-Path (Join-Path $out 'SWIR.Desktop.Host.runtimeconfig.json') -PathType Leaf) { throw 'Single-file self-contained package unexpectedly exposes a runtimeconfig prerequisite.' }
 
       - name: Verify host binds bundled WebView2 path and Windows 10 ACL policy
@@ -117,6 +136,10 @@ jobs:
           $startup = Get-Content BundledRuntimeStartup.cs -Raw
           foreach ($marker in @('SWIR_BUNDLED_RELEASE','requireManifest: true','EnsureRuntimeAccess')) {
             if (-not $startup.Contains($marker)) { throw "Bundled runtime startup enforcement missing: $marker" }
+          }
+          $integrity = Get-Content BundledRuntimeIntegrity.cs -Raw
+          foreach ($marker in @('webView2Provenance','swir.webview2-provenance/0.1','Microsoft Corporation','userDownloadRequired','ValidateMicrosoftHttpsUrl')) {
+            if (-not $integrity.Contains($marker)) { throw "Bundled provenance startup verification missing: $marker" }
           }
 
       - name: Build shipping Desktop Host
