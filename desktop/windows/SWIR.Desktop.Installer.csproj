@@ -13,6 +13,10 @@
 
   <ItemGroup>
     <Compile Include="BundledRuntimeIntegrity.cs" />
+    <Compile Include="DesktopInstallerModels.cs" />
+    <Compile Include="DesktopInstallerLocalization.cs" />
+    <Compile Include="DesktopInstallerPackage.cs" />
+    <Compile Include="DesktopInstallerLifecycle.cs" />
     <Compile Include="DesktopInstallerProgram.cs" />
   </ItemGroup>
 

@@ -5,7 +5,13 @@ on:
     branches: [main]
     paths:
       - 'desktop/windows/DesktopInstallerProgram.cs'
+      - 'desktop/windows/DesktopInstallerModels.cs'
+      - 'desktop/windows/DesktopInstallerPackage.cs'
+      - 'desktop/windows/DesktopInstallerLifecycle.cs'
+      - 'desktop/windows/DesktopInstallerLocalization.cs'
+      - 'desktop/windows/DesktopInstallerLocalizationSelfTests.cs'
       - 'desktop/windows/SWIR.Desktop.Installer.csproj'
+      - 'desktop/windows/SWIR.Desktop.InstallerLocalization.SelfTests.csproj'
       - 'desktop/windows/build-desktop-installer.ps1'
       - 'desktop/windows/attach-desktop-installer-to-bundle.ps1'
       - 'desktop/windows/BundledRuntimeIntegrity.cs'
@@ -16,7 +22,13 @@ on:
   pull_request:
     paths:
       - 'desktop/windows/DesktopInstallerProgram.cs'
+      - 'desktop/windows/DesktopInstallerModels.cs'
+      - 'desktop/windows/DesktopInstallerPackage.cs'
+      - 'desktop/windows/DesktopInstallerLifecycle.cs'
+      - 'desktop/windows/DesktopInstallerLocalization.cs'
+      - 'desktop/windows/DesktopInstallerLocalizationSelfTests.cs'
       - 'desktop/windows/SWIR.Desktop.Installer.csproj'
+      - 'desktop/windows/SWIR.Desktop.InstallerLocalization.SelfTests.csproj'
       - 'desktop/windows/build-desktop-installer.ps1'
       - 'desktop/windows/attach-desktop-installer-to-bundle.ps1'
       - 'desktop/windows/BundledRuntimeIntegrity.cs'
@@ -31,7 +43,7 @@ permissions:
 jobs:
   installer-e2e:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: desktop/windows
@@ -44,14 +56,16 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Compile installer project
-        run: dotnet build SWIR.Desktop.Installer.csproj --configuration Release
+      - name: Compile installer and run localization self-tests
+        run: |
+          dotnet build SWIR.Desktop.Installer.csproj --configuration Release
+          dotnet run --project SWIR.Desktop.InstallerLocalization.SelfTests.csproj --configuration Release
 
-      - name: Build real bundled Desktop payload
+      - name: Build real bundled Desktop payload 0.5.7
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $publish = Join-Path '${{ runner.temp }}' 'swir-installer-publish'
+          $publish = Join-Path '${{ runner.temp }}' 'swir-installer-publish-057'
           & (Join-Path (Get-Location) 'publish-desktop-host.ps1') `
             -PublishDir $publish `
             -ReleaseVersion '0.5.7' `
@@ -63,20 +77,20 @@ jobs:
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Installer payload is missing $required" }
           }
           $manifest = Get-Content (Join-Path $publish 'desktop-host-build.json') -Raw | ConvertFrom-Json
-          if ($manifest.deployment.userPrerequisiteDownloadsRequired -ne $false -or $manifest.deployment.webView2.mode -ne 'fixed-version-bundled') {
-            throw 'Desktop payload is not self-contained.'
+          if ($manifest.releaseVersion -ne '0.5.7' -or $manifest.channel -ne 'preview' -or $manifest.deployment.userPrerequisiteDownloadsRequired -ne $false -or $manifest.deployment.webView2.mode -ne 'fixed-version-bundled') {
+            throw 'Desktop payload is not self-contained or has the wrong release identity.'
           }
 
-      - name: Build one-file setup from bundled payload
+      - name: Build one-file setup 0.5.7 from bundled payload
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $publish = Join-Path '${{ runner.temp }}' 'swir-installer-publish'
+          $publish = Join-Path '${{ runner.temp }}' 'swir-installer-publish-057'
           $payload = Join-Path '${{ runner.temp }}' 'SWIR-Desktop-0.5.7-preview.zip'
           if (Test-Path -LiteralPath $payload) { Remove-Item -LiteralPath $payload -Force }
           [IO.Compression.ZipFile]::CreateFromDirectory($publish, $payload, [IO.Compression.CompressionLevel]::Optimal, $false)
-          $out = Join-Path '${{ runner.temp }}' 'swir-installer-output'
+          $out = Join-Path '${{ runner.temp }}' 'swir-installer-output-057'
           & (Join-Path (Get-Location) 'build-desktop-installer.ps1') `
             -PackageZip $payload `
             -OutputDir $out `
@@ -98,14 +112,15 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $setup = Join-Path '${{ runner.temp }}' 'swir-installer-output\SWIR-Desktop-Setup-0.5.7-preview.exe'
-          $verify = Start-Process -FilePath $setup -ArgumentList @('--verify-only','--quiet') -Wait -PassThru
+          $setup = Join-Path '${{ runner.temp }}' 'swir-installer-output-057\SWIR-Desktop-Setup-0.5.7-preview.exe'
+          $verify = Start-Process -FilePath $setup -ArgumentList @('--verify-only','--quiet','--lang','pl-PL') -Wait -PassThru
           if ($verify.ExitCode -ne 0) { throw "Setup --verify-only failed with exit code $($verify.ExitCode)." }
           $root = Join-Path '${{ runner.temp }}' 'swir-clean-install'
-          $install = Start-Process -FilePath $setup -ArgumentList @('--no-launch','--quiet','--install-root',$root) -Wait -PassThru
+          $install = Start-Process -FilePath $setup -ArgumentList @('--no-launch','--quiet','--lang','nb-NO','--install-root',$root) -Wait -PassThru
           if ($install.ExitCode -ne 0) { throw "Setup clean install failed with exit code $($install.ExitCode)." }
           $currentPath = Join-Path $root 'current.json'
           if (-not (Test-Path -LiteralPath $currentPath -PathType Leaf)) { throw 'Setup did not write current.json.' }
+          if (Test-Path -LiteralPath (Join-Path $root 'previous.json')) { throw 'A clean install must not create previous.json.' }
           $current = Get-Content $currentPath -Raw | ConvertFrom-Json
           if ($current.schema -ne 'swir.desktop-current-install/0.1' -or $current.version -ne '0.5.7' -or $current.channel -ne 'preview') { throw 'Current installation pointer is invalid.' }
           $installed = [IO.Path]::GetFullPath([string]$current.installDirectory).TrimEnd('\')
@@ -118,15 +133,75 @@ jobs:
             throw 'Install receipt is invalid or still points at the staging directory.'
           }
 
-      - name: Refuse tampered existing installation
+      - name: Refuse tampered existing installation then repair explicitly
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $setup = Join-Path '${{ runner.temp }}' 'swir-installer-output\SWIR-Desktop-Setup-0.5.7-preview.exe'
+          $setup = Join-Path '${{ runner.temp }}' 'swir-installer-output-057\SWIR-Desktop-Setup-0.5.7-preview.exe'
           $root = Join-Path '${{ runner.temp }}' 'swir-clean-install'
           $current = Get-Content (Join-Path $root 'current.json') -Raw | ConvertFrom-Json
           $hostPath = Join-Path ([string]$current.installDirectory) 'SWIR.Desktop.Host.exe'
+          $cleanHash = (Get-FileHash -LiteralPath $hostPath -Algorithm SHA256).Hash.ToLowerInvariant()
           [IO.File]::AppendAllText($hostPath, 'tamper')
           $tampered = Start-Process -FilePath $setup -ArgumentList @('--no-launch','--quiet','--install-root',$root) -Wait -PassThru
           if ($tampered.ExitCode -eq 0) { throw 'Setup accepted a tampered existing installation.' }
-          Write-Host "Tampered-install refusal returned expected non-zero exit code $($tampered.ExitCode)."
+          $repair = Start-Process -FilePath $setup -ArgumentList @('--repair','--no-launch','--quiet','--lang','de-DE','--install-root',$root) -Wait -PassThru
+          if ($repair.ExitCode -ne 0) { throw "Explicit repair failed with exit code $($repair.ExitCode)." }
+          $current = Get-Content (Join-Path $root 'current.json') -Raw | ConvertFrom-Json
+          $repairedHost = Join-Path ([string]$current.installDirectory) 'SWIR.Desktop.Host.exe'
+          if ((Get-FileHash -LiteralPath $repairedHost -Algorithm SHA256).Hash.ToLowerInvariant() -ne $cleanHash) { throw 'Repair did not restore the verified Host bytes.' }
+          if (@(Get-ChildItem -LiteralPath $root -Directory -Filter '.repair-backup-*').Count -ne 0) { throw 'Repair left a backup directory after successful commit.' }
+
+      - name: Build verified 0.5.8 upgrade setup
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $publish = Join-Path '${{ runner.temp }}' 'swir-installer-publish-058'
+          & (Join-Path (Get-Location) 'publish-desktop-host.ps1') `
+            -PublishDir $publish `
+            -ReleaseVersion '0.5.8' `
+            -Channel preview `
+            -SourceCommit $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { throw "0.5.8 Desktop Host publish failed with exit code $LASTEXITCODE." }
+          $payload = Join-Path '${{ runner.temp }}' 'SWIR-Desktop-0.5.8-preview.zip'
+          if (Test-Path -LiteralPath $payload) { Remove-Item -LiteralPath $payload -Force }
+          [IO.Compression.ZipFile]::CreateFromDirectory($publish, $payload, [IO.Compression.CompressionLevel]::Optimal, $false)
+          $out = Join-Path '${{ runner.temp }}' 'swir-installer-output-058'
+          & (Join-Path (Get-Location) 'build-desktop-installer.ps1') -PackageZip $payload -OutputDir $out -Version '0.5.8' -Channel preview
+          if ($LASTEXITCODE -ne 0) { throw "0.5.8 Desktop installer build failed with exit code $LASTEXITCODE." }
+          $setup = Join-Path $out 'SWIR-Desktop-Setup-0.5.8-preview.exe'
+          $verify = Start-Process -FilePath $setup -ArgumentList @('--verify-only','--quiet') -Wait -PassThru
+          if ($verify.ExitCode -ne 0) { throw "0.5.8 Setup verification failed with exit code $($verify.ExitCode)." }
+
+      - name: Verify transactional upgrade rollback and uninstall lifecycle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path '${{ runner.temp }}' 'swir-clean-install'
+          $setup = Join-Path '${{ runner.temp }}' 'swir-installer-output-058\SWIR-Desktop-Setup-0.5.8-preview.exe'
+
+          $upgrade = Start-Process -FilePath $setup -ArgumentList @('--no-launch','--quiet','--lang','ja-JP','--install-root',$root) -Wait -PassThru
+          if ($upgrade.ExitCode -ne 0) { throw "Upgrade failed with exit code $($upgrade.ExitCode)." }
+          $current = Get-Content (Join-Path $root 'current.json') -Raw | ConvertFrom-Json
+          $previous = Get-Content (Join-Path $root 'previous.json') -Raw | ConvertFrom-Json
+          if ($current.version -ne '0.5.8' -or $previous.version -ne '0.5.7') { throw 'Upgrade did not preserve the previous verified installation.' }
+          if (-not (Test-Path -LiteralPath ([string]$current.installDirectory) -PathType Container) -or -not (Test-Path -LiteralPath ([string]$previous.installDirectory) -PathType Container)) { throw 'Upgrade deployment directories are missing.' }
+
+          $rollback = Start-Process -FilePath $setup -ArgumentList @('--rollback','--quiet','--lang','ar-SA','--install-root',$root) -Wait -PassThru
+          if ($rollback.ExitCode -ne 0) { throw "Rollback failed with exit code $($rollback.ExitCode)." }
+          $current = Get-Content (Join-Path $root 'current.json') -Raw | ConvertFrom-Json
+          $previous = Get-Content (Join-Path $root 'previous.json') -Raw | ConvertFrom-Json
+          if ($current.version -ne '0.5.7' -or $previous.version -ne '0.5.8') { throw 'Rollback did not atomically swap current/previous installation pointers.' }
+
+          $uninstall = Start-Process -FilePath $setup -ArgumentList @('--uninstall','--quiet','--lang','fr-FR','--install-root',$root) -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw "Current-version uninstall failed with exit code $($uninstall.ExitCode)." }
+          $current = Get-Content (Join-Path $root 'current.json') -Raw | ConvertFrom-Json
+          if ($current.version -ne '0.5.8' -or (Test-Path -LiteralPath (Join-Path $root 'previous.json'))) { throw 'Uninstall did not restore the verified previous version as current.' }
+          if (Test-Path -LiteralPath (Join-Path $root '0_5_7-preview')) { throw 'Uninstall left the removed current version directory behind.' }
+
+          $uninstallLast = Start-Process -FilePath $setup -ArgumentList @('--uninstall','--quiet','--install-root',$root) -Wait -PassThru
+          if ($uninstallLast.ExitCode -ne 0) { throw "Final uninstall failed with exit code $($uninstallLast.ExitCode)." }
+          if ((Test-Path -LiteralPath (Join-Path $root 'current.json')) -or (Test-Path -LiteralPath (Join-Path $root 'previous.json')) -or (Test-Path -LiteralPath (Join-Path $root '0_5_8-preview'))) {
+            throw 'Final uninstall left an active pointer or versioned runtime directory.'
+          }
