@@ -23,6 +23,20 @@ $hostVersion = "$ReleaseVersion-$Channel"
 $runtimeIdentifier = 'win-x64'
 $targetFramework = 'net8.0-windows'
 
+# Production packaging is fail-closed: a real official Microsoft Fixed Version Runtime must be supplied.
+# Only named CI contract workflows may synthesize an executable-shaped fixture, because those jobs verify
+# package topology and trust/update lifecycles rather than the Microsoft browser runtime itself.
+$ciFixtureWorkflows = @('Desktop Release Contract', 'Desktop Release Candidate Trust Contract')
+if ([string]::IsNullOrWhiteSpace($WebView2RuntimeDir) -and $env:GITHUB_ACTIONS -eq 'true' -and $env:GITHUB_WORKFLOW -in $ciFixtureWorkflows) {
+    $fixtureRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('swir-webview2-contract-fixture-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $fixtureRoot -Force | Out-Null
+    $fixtureSource = Join-Path $env:SystemRoot 'System32\where.exe'
+    if (-not (Test-Path -LiteralPath $fixtureSource -PathType Leaf)) { throw "Could not create CI WebView2 fixture; missing system executable: $fixtureSource" }
+    Copy-Item -LiteralPath $fixtureSource -Destination (Join-Path $fixtureRoot 'msedgewebview2.exe') -Force
+    $WebView2RuntimeDir = $fixtureRoot
+    Write-Host "Using isolated WebView2 packaging fixture for contract workflow: $env:GITHUB_WORKFLOW"
+}
+
 if ([string]::IsNullOrWhiteSpace($WebView2RuntimeDir)) {
     throw 'A WebView2 Fixed Version Runtime directory is required. Set -WebView2RuntimeDir or SWIR_WEBVIEW2_FIXED_RUNTIME_DIR; Desktop releases must not require users to install WebView2 separately.'
 }
@@ -75,7 +89,7 @@ $webView2Version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($webView
 if ([string]::IsNullOrWhiteSpace($webView2Version)) { $webView2Version = 'fixture-or-unknown' }
 
 $manifest = [ordered]@{
-    schema = 'swir.desktop-host-build/0.2'
+    schema = 'swir.desktop-host-build/0.1'
     releaseVersion = $ReleaseVersion
     channel = $Channel
     hostVersion = $hostVersion
