@@ -2,55 +2,53 @@
 
 ## Project direction
 
-SWIR OS is designed in three editions sharing one application model and platform contracts:
+SWIR OS is designed in three editions sharing platform, package, security and service contracts where that reuse is appropriate:
 
-1. **SWIR OS Web Edition** — current `swir.github.io` prototype and design laboratory.
-2. **SWIR OS Desktop Edition** — native desktop build with real files, processes, networking and OS integrations.
+1. **SWIR OS Web Edition** — browser/PWA prototype and design laboratory.
+2. **SWIR OS Desktop Edition** — executable Windows desktop bridge with real files, processes, networking and OS integrations.
 3. **SWIR OS System Edition** — future bootable Linux-based system with the SWIR shell, services, accounts, native Linux applications and a managed Windows compatibility layer.
+
+**System Edition application rule:** the real bootable OS must not depend on HTML/PWA applications for its essential desktop experience. Core bundled applications must be native Linux applications. Windows desktop applications may run through a controlled Wine/Proton compatibility layer. Web Edition applications remain useful prototypes and design references, but they are not the final System Edition application implementation.
 
 <!-- SWIR-ROADMAP-STANDARD:v1 -->
 <!-- ROADMAP-PROGRESS:START -->
 <p align="center">
   <a href="https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml"><img alt="CI" src="https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml/badge.svg"></a>
-  <img alt="Roadmap progress" src="https://img.shields.io/badge/ROADMAP-63.0%25-2ea043?style=for-the-badge">
-  <img alt="Completed" src="https://img.shields.io/badge/DONE-34%2F54-1f6feb?style=for-the-badge">
+  <img alt="Roadmap progress" src="https://img.shields.io/badge/ROADMAP-61.8%25-2ea043?style=for-the-badge">
+  <img alt="Completed" src="https://img.shields.io/badge/DONE-34%2F55-1f6feb?style=for-the-badge">
   <img alt="Status" src="https://img.shields.io/badge/STATUS-IN%20PROGRESS-7c3aed?style=for-the-badge">
 </p>
 
 ## 📊 Overall progress
 
 ```text
-█████████████░░░░░░░ 63.0%
+████████████░░░░░░░░ 61.8%
 ```
 
 | ✅ Completed | ⏳ Remaining | 📦 Total | 🎯 Progress |
 |---:|---:|---:|---:|
-| **34** | **20** | **54** | **63.0%** |
+| **34** | **21** | **55** | **61.8%** |
 
 > **Progress rule:** the explicit `[x]/[ ]` deliverables in **Version roadmap** are the source of truth for the full Web → Desktop → System plan. Update the checklist first, then badges, numbers, percentage and the 20-segment bar. A prototype does not count as complete until the described deliverable is actually implemented and verified.
 <!-- ROADMAP-PROGRESS:END -->
 
 ```text
-SWIR Application
-      |
-      v
-SWIR App SDK
-      |
-      v
-SWIR Platform API / SwirRuntime
+SWIR contracts / package metadata / service APIs
       |
       +------------------+------------------+
       |                  |                  |
       v                  v                  v
- Web Adapter        Desktop Adapter       System Adapter
+ Web Edition        Desktop Edition       System Edition
+ Browser/PWA        Native Windows        Native Linux
  IndexedDB          Native filesystem     Linux filesystem
  Browser APIs       Native processes      Linux processes
  Local profiles     Native accounts       Linux accounts
  Browser network    Native adapters       NetworkManager
- PWA cache          Native packages       Linux/SWIR packages
+ Prototype apps     Transitional host     Native Linux apps
+                                           + Wine/Proton
 ```
 
-The UI should not need to know which edition it runs on. Privileged behavior remains behind replaceable brokers and permission checks.
+Portable contracts can be shared, but System Edition must remain usable without a browser/PWA runtime for essential desktop functions.
 
 ---
 
@@ -72,7 +70,7 @@ SwirPlatform.processes
 SwirPlatform.system
 ```
 
-Web Edition currently maps these to browser APIs, IndexedDB/localStorage and the SWIR window manager. Desktop/System editions replace adapters with native implementations while preserving portable call shapes where practical.
+Web Edition maps these to browser APIs, IndexedDB/localStorage and the SWIR window manager. Desktop/System editions replace privileged and persistent behavior with native implementations while preserving portable call shapes where that does not weaken the native design.
 
 ---
 
@@ -104,6 +102,8 @@ SWIR OS 1.6 introduced **SWIR App SDK 1.0** and **SWIR App Package 1.0** using s
 
 The specification lives in `SWIR-APP-PACKAGE-1.0.md`.
 
+The Web/Desktop package work is a reusable contract foundation. System Edition may reuse metadata, dependency, permission, trust and transaction concepts, but a final System Edition application payload must resolve to supported native Linux software or an explicitly managed Windows compatibility payload rather than an HTML-only core application.
+
 ---
 
 ## Files, Associations, Notifications & Dependency Core — 1.7
@@ -131,7 +131,7 @@ SwirAppSDK.files.open(...)
 application receives SWIR_OPEN_FILE payload
 ```
 
-Initial handlers:
+Initial Web/Desktop prototype handlers:
 
 ```text
 swir.code          -> .txt .html .htm .css .js .json .md .log
@@ -139,6 +139,8 @@ swir.image-studio  -> .png .jpg .jpeg .webp .gif
 swir.archive       -> .zip
 swir.pdf-viewer    -> .pdf
 ```
+
+System Edition must replace the essential HTML-based prototype handlers with native Linux applications or controlled native integrations.
 
 ### App Data
 
@@ -152,7 +154,7 @@ SWIR://APPDATA/PDF
 SWIR://APPDATA/CHAT
 ```
 
-Web Edition maps this to namespaced SWIR Platform storage. Desktop Edition maps it to a native application-data directory. System Edition maps it to a native per-user/per-application filesystem location.
+Web Edition maps this to namespaced SWIR Platform storage. Desktop Edition maps it to a native application-data directory. System Edition maps native applications to real per-user/per-application filesystem locations and native OS permissions.
 
 ### Application Notification Service
 
@@ -172,20 +174,21 @@ SwirAppSDK.notifications.send(appId, options)
 SWIR Notification Service
 ```
 
+System Edition maps notifications to its native notification service; native applications do not require a browser runtime to publish system notifications.
+
 ### Package Dependency Core
 
 The package resolver implements `swir.dependencies/1.0` and is intentionally independent from the web Store UI.
 
 ```text
-SWIR App Package
+SWIR package metadata
       |
       v
 SWIR Package Resolver
       |
       +--> min SWIR OS version
-      +--> min App SDK version
-      +--> min Platform API
-      +--> supported editions
+      +--> provider compatibility
+      +--> architecture / edition support
       +--> required package versions
       +--> optional dependency warnings
       |
@@ -193,7 +196,7 @@ SWIR Package Resolver
 INSTALL / REMOVE PLAN
 ```
 
-Supported portable package APIs:
+Supported portable package APIs in the current Web/Desktop line:
 
 ```text
 SwirAppSDK.packages.check(id)
@@ -206,11 +209,11 @@ SwirAppSDK.packages.compareVersions(a, b)
 
 **SWIR Store 2.2** enforces resolver results before install and remove actions. A package that requires a newer OS/SDK/API, unsupported edition, or missing dependency is blocked. Removal is blocked if an installed dependent package would break.
 
-Desktop/System editions can reuse the resolver before native payload download/unpack, signature verification and service/file-association registration.
+Desktop/System editions can reuse the resolver concepts before native payload download/unpack, signature verification and service/file-association registration.
 
 ### Package transaction journal
 
-Package mutations use `swir.package-transaction/1.0`. Install, update and remove operations journal their rollback state before mutation. Package state and permissions are treated as one logical transaction: a partial failure automatically restores the previous package/permission snapshot, while committed operations retain user-approved manual rollback metadata. The Web journal is bounded and edition-neutral so Desktop `.swirapp` and later System providers can reuse the same lifecycle with stronger native snapshots.
+Package mutations use `swir.package-transaction/1.0`. Install, update and remove operations journal their rollback state before mutation. Package state and permissions are treated as one logical transaction: a partial failure automatically restores the previous package/permission snapshot, while committed operations retain user-approved manual rollback metadata. The Web journal is bounded and edition-neutral so Desktop `.swirapp` and later System providers can reuse the lifecycle with stronger native snapshots.
 
 ### Signed catalog metadata
 
@@ -225,7 +228,7 @@ SwirAppSDK.packages.*
 SwirAppSDK.locale.*
 ```
 
-The locale surface is backed by the edition-neutral `swir.i18n/1.0` contract. System Settings accepts standards-valid BCP-47 locale tags and propagates language, regional formatting and LTR/RTL direction to the shell. Isolated packages receive read-only locale/formatting APIs through the App Bridge; changing the system locale remains a privileged shell/user action.
+The locale surface is backed by the edition-neutral `swir.i18n/1.0` contract. System Settings accepts standards-valid BCP-47 locale tags and propagates language, regional formatting and LTR/RTL direction to the shell. System Edition native applications should consume equivalent native locale services; they must not require the Web App Bridge to obtain essential locale state.
 
 ---
 
@@ -256,6 +259,8 @@ Desktop/System editions map these to native services/daemons where privileged or
 
 ## SWIR Chat service
 
+Current Web prototype:
+
 ```text
 SWIR Chat client
       |
@@ -266,7 +271,7 @@ SWIR Chat API
 MySQL / MariaDB
 ```
 
-The Web client lives in SWIR OS. Chat Server Kit supplies the downloadable PHP backend for separate hosting. Future transport can move from polling to WebSockets without replacing the client application model.
+The Web client and Chat Server Kit can remain useful during development. A chat client bundled with the final System Edition must be a native Linux application or a separately installed Windows application running through the managed compatibility layer.
 
 ---
 
@@ -277,19 +282,44 @@ System Edition is deliberately Linux-based and hybrid rather than pretending tha
 ### Execution classes
 
 ```text
-swir-web       -> SWIR App SDK / runtime
-linux-native   -> approved Linux package provider
-windows-compat -> Wine / Proton managed compatibility profile
+linux-native   -> primary System Edition application class
+windows-compat -> Windows desktop application in managed Wine/Proton profile
 ```
 
+HTML/PWA-only applications are a Web Edition development target, not a final System Edition execution class for bundled core applications.
+
 Windows user applications are planned through Wine/Proton-style compatibility prefixes. Windows kernel drivers are not a general Linux hardware solution and must not be treated as one.
+
+### Native application baseline
+
+A dependable System Edition requires a coherent native Linux application suite, not just an ability to launch arbitrary Linux programs. The planned baseline includes:
+
+```text
+File Manager
+Settings / Control Center
+Terminal
+Software / Store
+Update Center
+Hardware & Driver Center
+Network Center
+Text Editor / Notes
+Media Player
+Image Viewer
+PDF Viewer
+Archive Manager
+Calculator
+Task Manager / System Monitor
+Logs / Diagnostics
+```
+
+These applications must integrate with SWIR locale, accessibility, permissions, file associations, update/recovery, notifications and shared visual design. They must be tested as real daily-use applications rather than placeholder demos.
 
 ### Common Store / Package layer
 
 The future common provider layer can resolve and plan installation across:
 
 ```text
-SWIR packages
+SWIR native package metadata
 base-distribution packages
 Flatpak
 AppImage (after explicit sandbox/update policy)
@@ -297,7 +327,7 @@ Wine compatibility profiles
 Proton compatibility profiles
 ```
 
-Provider mechanics remain separate from Store UI policy. Privileged mutations require a structured plan, trusted source policy and transaction journal.
+Provider mechanics remain separate from Store UI policy. Privileged mutations require a structured plan, trusted source policy and transaction journal. A System Edition package entry must resolve to a supported native Linux payload or an explicitly managed Windows compatibility payload; an HTML-only payload does not satisfy the native System Edition application requirement.
 
 ### Hardware / Driver architecture
 
@@ -380,6 +410,7 @@ Planned:
 - [ ] SWIR desktop shell
 - [ ] NetworkManager integration
 - [ ] native Linux application execution
+- [ ] essential native Linux application suite for dependable daily use
 - [ ] common Package Provider layer for distribution packages and later Flatpak/AppImage
 - [ ] managed Wine/Proton compatibility service for Windows user applications
 - [ ] Hardware Service with PCI/USB inventory
@@ -395,4 +426,8 @@ Planned:
 
 ## Development rule
 
-Applications should prefer **SwirAppSDK**, **SwirPlatform** and **SwirRuntime** over direct edition-specific APIs. Anything that cannot yet be represented by a portable contract stays behind a replaceable adapter until that contract is formalized. Privileged operations remain fail-closed until the corresponding broker, identity binding, permission model and recovery path exist.
+Web Edition may continue to use HTML/CSS/JavaScript for prototyping portable behavior. Desktop Edition may use transitional WebView-hosted surfaces while native brokers are being validated.
+
+**System Edition core applications are different:** essential bundled applications must be native Linux applications. Windows desktop applications are supported only through the managed compatibility service. Browser/PWA availability must not be required for the OS to provide files, settings, terminal, software/update management, hardware/driver management, networking, media/document basics, process monitoring or recovery.
+
+Shared contracts such as package identity, permissions, dependency resolution, locale, notifications and update metadata should be reused where practical, but they must not force native System Edition applications back into a browser-only runtime. Privileged operations remain fail-closed until the corresponding broker/service, identity binding, permission model and recovery path exist.
