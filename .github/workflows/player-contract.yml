@@ -1,0 +1,39 @@
+name: SWIR Player Contract
+
+on:
+  push:
+    paths:
+      - 'swir-media-core.js'
+      - 'swir-player.html'
+      - 'sw.js'
+      - 'swir-apps.js'
+      - 'scripts/validate-player.mjs'
+      - '.github/workflows/player-contract.yml'
+  pull_request:
+    paths:
+      - 'swir-media-core.js'
+      - 'swir-player.html'
+      - 'sw.js'
+      - 'swir-apps.js'
+      - 'scripts/validate-player.mjs'
+      - '.github/workflows/player-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Parse Media Core
+        run: node --check swir-media-core.js
+      - name: Parse Player contract validator
+        run: node --check scripts/validate-player.mjs
+      - name: Verify Player 2.0 integration
+        run: node scripts/validate-player.mjs
