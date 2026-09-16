@@ -5,11 +5,13 @@ on:
     branches: [main]
     paths:
       - 'swir-i18n.js'
+      - 'swir-locale-packs.js'
       - 'swir-settings.html'
       - 'swir-sdk.js'
       - 'swir-app-bridge.js'
       - 'swir-app-bridge-host.js'
       - 'index.html'
+      - 'manifest.webmanifest'
       - 'sw.js'
       - 'desktop/windows/stage-desktop-runtime.ps1'
       - 'scripts/validate-i18n.mjs'
@@ -18,11 +20,13 @@ on:
   pull_request:
     paths:
       - 'swir-i18n.js'
+      - 'swir-locale-packs.js'
       - 'swir-settings.html'
       - 'swir-sdk.js'
       - 'swir-app-bridge.js'
       - 'swir-app-bridge-host.js'
       - 'index.html'
+      - 'manifest.webmanifest'
       - 'sw.js'
       - 'desktop/windows/stage-desktop-runtime.ps1'
       - 'scripts/validate-i18n.mjs'
@@ -46,7 +50,9 @@ jobs:
           node-version: '22'
 
       - name: Check locale runtime syntax
-        run: node --check swir-i18n.js
+        run: |
+          node --check swir-i18n.js
+          node --check swir-locale-packs.js
 
       - name: Check App SDK and bridge syntax
         run: |

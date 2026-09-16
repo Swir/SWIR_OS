@@ -1,4 +1,4 @@
-name: Desktop Lightweight Runtime Contract
+name: Desktop Bundled Runtime Contract
 
 on:
   push:
@@ -6,12 +6,14 @@ on:
     paths:
       - 'desktop/windows/SWIR.Desktop.Host.csproj'
       - 'desktop/windows/Program.cs'
+      - 'desktop/windows/BundledWebView2Policy.cs'
       - 'desktop/windows/publish-desktop-host.ps1'
       - '.github/workflows/desktop-lightweight-runtime-contract.yml'
   pull_request:
     paths:
       - 'desktop/windows/SWIR.Desktop.Host.csproj'
       - 'desktop/windows/Program.cs'
+      - 'desktop/windows/BundledWebView2Policy.cs'
       - 'desktop/windows/publish-desktop-host.ps1'
       - '.github/workflows/desktop-lightweight-runtime-contract.yml'
 
@@ -32,21 +34,40 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-      - name: Publish lightweight runtime
+
+      - name: Create fixed-runtime packaging fixture
         shell: pwsh
         run: |
-          $out = Join-Path '${{ runner.temp }}' 'swir-lightweight-runtime'
+          $fixed = Join-Path '${{ runner.temp }}' 'webview2-fixed-fixture'
+          New-Item -ItemType Directory -Path $fixed -Force | Out-Null
+          [System.IO.File]::WriteAllBytes((Join-Path $fixed 'msedgewebview2.exe'), [byte[]](77,90,0,0))
+          "SWIR_WEBVIEW2_FIXED_RUNTIME_DIR=$fixed" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Publish self-contained bundled runtime
+        shell: pwsh
+        run: |
+          $out = Join-Path '${{ runner.temp }}' 'swir-bundled-runtime'
           ./publish-desktop-host.ps1 -PublishDir $out -ReleaseVersion '0.5.7' -Channel preview -SourceCommit '${{ github.sha }}'
           $manifest = Get-Content (Join-Path $out 'desktop-host-build.json') -Raw | ConvertFrom-Json
-          if ($manifest.schema -ne 'swir.desktop-host-build/0.1') { throw 'Unexpected host build schema.' }
-          if ($manifest.deployment.contract -ne 'swir.desktop-lightweight-runtime/0.1') { throw 'Lightweight runtime contract missing.' }
-          if ($manifest.deployment.mode -ne 'framework-dependent' -or $manifest.deployment.selfContained -ne $false) { throw 'Desktop Host must remain explicitly framework-dependent.' }
+          if ($manifest.schema -ne 'swir.desktop-host-build/0.2') { throw 'Unexpected host build schema.' }
+          if ($manifest.deployment.contract -ne 'swir.desktop-bundled-runtime/0.1') { throw 'Bundled runtime contract missing.' }
+          if ($manifest.deployment.mode -ne 'self-contained-bundled' -or $manifest.deployment.selfContained -ne $true -or $manifest.deployment.singleFile -ne $true) { throw 'Desktop Host must be self-contained and single-file.' }
+          if ($manifest.deployment.userPrerequisiteDownloadsRequired -ne $false) { throw 'Desktop release must not require user prerequisite downloads.' }
+          if ($manifest.deployment.dotnet.bundled -ne $true -or $manifest.deployment.webView2.bundled -ne $true) { throw '.NET and WebView2 must both be bundled.' }
+          if ($manifest.deployment.webView2.mode -ne 'fixed-version-bundled') { throw 'WebView2 must use fixed-version bundled deployment.' }
           if ($manifest.deployment.runtimeIdentifier -ne 'win-x64' -or $manifest.deployment.targetFramework -ne 'net8.0-windows') { throw 'Desktop runtime identity mismatch.' }
-          $requirements = @($manifest.deployment.requirements)
-          if (@($requirements | Where-Object id -eq 'Microsoft.WindowsDesktop.App').Count -ne 1) { throw '.NET Desktop Runtime requirement missing.' }
-          if (@($requirements | Where-Object id -eq 'Microsoft.Edge.WebView2.Runtime').Count -ne 1) { throw 'WebView2 Evergreen Runtime requirement missing.' }
-          foreach ($file in @('SWIR.Desktop.Host.exe','SWIR.Desktop.Host.dll','SWIR.Desktop.Host.runtimeconfig.json')) {
-            if (-not (Test-Path (Join-Path $out $file) -PathType Leaf)) { throw "Published host missing $file" }
+          foreach ($file in @('SWIR.Desktop.Host.exe','WebView2FixedRuntime\msedgewebview2.exe')) {
+            if (-not (Test-Path (Join-Path $out $file) -PathType Leaf)) { throw "Published bundled host missing $file" }
           }
+          if (Test-Path (Join-Path $out 'SWIR.Desktop.Host.runtimeconfig.json') -PathType Leaf) { throw 'Single-file self-contained package unexpectedly exposes a runtimeconfig prerequisite.' }
+
+      - name: Verify host binds bundled WebView2 path
+        shell: pwsh
+        run: |
+          $source = Get-Content BundledWebView2Policy.cs -Raw
+          foreach ($marker in @('WebView2FixedRuntime','msedgewebview2.exe','WEBVIEW2_BROWSER_EXECUTABLE_FOLDER','EnvironmentVariableTarget.Process')) {
+            if (-not $source.Contains($marker)) { throw "Bundled WebView2 host binding missing: $marker" }
+          }
+
       - name: Build shipping Desktop Host
         run: dotnet build SWIR.Desktop.Host.csproj --configuration Release
