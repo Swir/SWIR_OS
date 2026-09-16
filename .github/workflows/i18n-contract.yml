@@ -6,6 +6,7 @@ on:
     paths:
       - 'swir-i18n.js'
       - 'swir-locale-packs.js'
+      - 'swir-oobe.js'
       - 'swir-settings.html'
       - 'swir-sdk.js'
       - 'swir-app-bridge.js'
@@ -22,6 +23,7 @@ on:
     paths:
       - 'swir-i18n.js'
       - 'swir-locale-packs.js'
+      - 'swir-oobe.js'
       - 'swir-settings.html'
       - 'swir-sdk.js'
       - 'swir-app-bridge.js'
@@ -51,10 +53,11 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Check locale runtime syntax
+      - name: Check locale and first-boot runtime syntax
         run: |
           node --check swir-i18n.js
           node --check swir-locale-packs.js
+          node --check swir-oobe.js
           node --check scripts/test-i18n-runtime.mjs
 
       - name: Check App SDK and bridge syntax
