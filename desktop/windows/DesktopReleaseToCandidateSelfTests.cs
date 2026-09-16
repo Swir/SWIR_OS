@@ -81,7 +81,11 @@ internal static class DesktopReleaseToCandidateSelfTests
             var plan = RunWorker(workerExe, "plan", state.JournalPath, transactionsRoot, deploymentRoot);
             Expect(plan.ExitCode == 0, "standalone updater worker accepts signed release transaction");
 
-            var prepare = RunWorker(workerExe, "prepare-candidate", state.JournalPath, transactionsRoot, deploymentRoot);
+            var candidateTimeoutMs = DesktopReleaseTestTiming.CandidatePreparationTimeoutMs(verified.PackageSize);
+            Expect(candidateTimeoutMs >= DesktopReleaseTestTiming.MinimumCandidatePreparationTimeoutMs
+                && candidateTimeoutMs <= DesktopReleaseTestTiming.MaximumCandidatePreparationTimeoutMs,
+                "Candidate extraction timeout remains bounded for bundled release size");
+            var prepare = RunWorker(workerExe, "prepare-candidate", state.JournalPath, transactionsRoot, deploymentRoot, candidateTimeoutMs);
             Expect(prepare.ExitCode == 0, "standalone updater worker prepares Candidate from release ZIP");
 
             var candidateRoot = Path.Combine(deploymentRoot, "Candidate", transactionId);
@@ -141,7 +145,7 @@ internal static class DesktopReleaseToCandidateSelfTests
         }
     }
 
-    private static ProcessResult RunWorker(string workerExe, string command, string journalPath, string transactionsRoot, string deploymentRoot)
+    private static ProcessResult RunWorker(string workerExe, string command, string journalPath, string transactionsRoot, string deploymentRoot, int timeoutMs = 15000)
     {
         var start = new ProcessStartInfo(workerExe)
         {
@@ -156,10 +160,10 @@ internal static class DesktopReleaseToCandidateSelfTests
         using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start standalone updater worker.");
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
-        if (!process.WaitForExit(15000))
+        if (!process.WaitForExit(timeoutMs))
         {
             try { process.Kill(true); } catch { }
-            throw new TimeoutException("Updater worker exceeded signed release Candidate preparation timeout.");
+            throw new TimeoutException($"Updater worker exceeded {timeoutMs}ms timeout during {command}.");
         }
         Task.WaitAll(stdout, stderr);
         if (process.ExitCode != 0)
