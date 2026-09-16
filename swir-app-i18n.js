@@ -18,6 +18,12 @@
       ['h1','system.settings'],['#saveAll','settings.save'],['[data-tab="general"]','settings.general'],['[data-tab="language"]','settings.languageRegion'],['[data-tab="appearance"]','settings.appearance'],['[data-tab="audio"]','settings.audio'],['[data-tab="session"]','settings.session'],['[data-tab="storage"]','settings.storage'],['[data-tab="system"]','settings.system'],
       ['[data-section="general"] h2','settings.general'],['[data-section="language"] h2','settings.languageRegion'],['[data-section="appearance"] h2','settings.appearance'],['[data-section="audio"] h2','settings.audio'],['[data-section="session"] h2','settings.session'],['[data-section="storage"] h2','settings.storage'],['[data-section="system"] h2','settings.system'],
       ['[data-section="general"] .field label','settings.deviceName'],['[data-section="language"] .field label','settings.systemLocale'],['#useBrowserLocale','settings.useDeviceLocale'],['#previewLocale','settings.preview']
+    ],
+    'swir-device.html':[
+      ['h1','device.title'],['#refresh','common.refresh'],['body > section.section:nth-of-type(2) h2','device.identity'],['#saveName','device.saveHostname'],['#copyReport','device.copyReport'],['body > section.section:nth-of-type(3) h2','device.hardwareReport'],['body > section.section:nth-of-type(4) h2','device.nativeInventory']
+    ],
+    'swir-network.html':[
+      ['h1','network.title'],['#refresh','common.refresh'],['main .panel:nth-of-type(1) h2','network.nativeAdapters'],['main .panel:nth-of-type(2) h2','network.profiles'],['aside.panel h2','network.createProfile'],['aside.panel .field:nth-of-type(1) label','network.profileName'],['aside.panel .field:nth-of-type(2) label','network.type'],['aside.panel .field:nth-of-type(3) label','network.notes'],['#add','network.addProfile']
     ]
   };
 
@@ -48,5 +54,5 @@
   }
   addEventListener('pagehide',()=>{try{unsubscribe?.()}catch{}},{once:true});
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',start,{once:true}); else start();
-  window.SwirAppI18n=Object.freeze({contract:'swir.app-i18n/0.1',page,apply,bindings:Object.freeze(Object.keys(bindings))});
+  window.SwirAppI18n=Object.freeze({contract:'swir.app-i18n/0.2',page,apply,bindings:Object.freeze(Object.keys(bindings))});
 })();
