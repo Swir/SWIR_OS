@@ -1,6 +1,7 @@
-/* SWIR OS 1.1 runtime loader — corrected build + bundled application i18n */
+/* SWIR OS 1.1 runtime loader — corrected build + appearance engine + bundled application i18n */
 (() => {
   const queue = [
+    './swir-theme-engine.js?v=1.0.0',
     './swir-v11-fixed.js?v=1.1.1',
     './swir-app-locales-west.js?v=0.1.0',
     './swir-app-locales-global.js?v=0.1.0',

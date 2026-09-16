@@ -28,6 +28,7 @@
     { id:"projects", title:"GitHub Projects", subtitle:"Live repository dashboard", icon:"</>", category:"Developer", type:"internal", accent:"#48a8ff", desktop:true, system:true },
     { id:"browser", title:"SWIR Browser", subtitle:"Quick web launcher", icon:"◎", category:"Internet", type:"internal", accent:"#00d4ff", system:true },
     { id:"github", title:"GitHub", subtitle:"github.com/Swir", icon:"GH", category:"Internet", type:"external", url:"https://github.com/Swir", accent:"#ffffff", desktop:true, system:true },
+    { id:"themes", title:"Themes & Shell Skins", subtitle:"SWIR appearance profiles and safe theme packs", icon:"◐", category:"System", type:"iframe", url:"./swir-themes.html", accent:"#8fe8ff", desktop:true, system:true },
     { id:"settings", title:"System Settings", subtitle:"Device, appearance, session and storage settings", icon:"⚙", category:"System", type:"iframe", url:"./swir-settings.html", accent:"#7cc7ff", desktop:true, system:true },
     { id:"about", title:"About SWIR OS", subtitle:"NEON CORE build information", icon:"i", category:"System", type:"internal", accent:"#00a6ff", system:true }
   ];

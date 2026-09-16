@@ -1,0 +1,41 @@
+name: SWIR Appearance Contract
+
+on:
+  push:
+    paths:
+      - 'swir-theme-engine.js'
+      - 'swir-themes.html'
+      - 'swir-v11.js'
+      - 'swir-apps.js'
+      - 'sw.js'
+      - 'scripts/validate-theme-engine.mjs'
+      - '.github/workflows/theme-contract.yml'
+  pull_request:
+    paths:
+      - 'swir-theme-engine.js'
+      - 'swir-themes.html'
+      - 'swir-v11.js'
+      - 'swir-apps.js'
+      - 'sw.js'
+      - 'scripts/validate-theme-engine.mjs'
+      - '.github/workflows/theme-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Parse Appearance Engine
+        run: node --check swir-theme-engine.js
+      - name: Parse appearance contract validator
+        run: node --check scripts/validate-theme-engine.mjs
+      - name: Verify safe theme engine integration
+        run: node scripts/validate-theme-engine.mjs
