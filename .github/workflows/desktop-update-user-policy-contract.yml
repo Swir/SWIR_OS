@@ -1,0 +1,43 @@
+name: Desktop Update User Policy Contract
+
+on:
+  push:
+    paths:
+      - 'swir-update-user-policy.js'
+      - 'swir-update-policy-frame.js'
+      - 'swir-v11.js'
+      - 'sw.js'
+      - 'scripts/validate-update-user-policy.mjs'
+      - '.github/workflows/desktop-update-user-policy-contract.yml'
+      - 'SWIR-PRODUCT-BASELINE-1.0.md'
+  pull_request:
+    paths:
+      - 'swir-update-user-policy.js'
+      - 'swir-update-policy-frame.js'
+      - 'swir-v11.js'
+      - 'sw.js'
+      - 'scripts/validate-update-user-policy.mjs'
+      - '.github/workflows/desktop-update-user-policy-contract.yml'
+      - 'SWIR-PRODUCT-BASELINE-1.0.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Parse update user policy runtime
+        run: node --check swir-update-user-policy.js
+      - name: Parse trusted Update Center frame controller
+        run: node --check swir-update-policy-frame.js
+      - name: Parse policy contract validator
+        run: node --check scripts/validate-update-user-policy.mjs
+      - name: Verify Automatic Notify Manual policy semantics
+        run: node scripts/validate-update-user-policy.mjs
