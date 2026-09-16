@@ -236,7 +236,7 @@ internal static class DesktopInstallerProgram
     private static void Launch(string installationDirectory, string entryPoint)
     {
         var executable = ResolveInside(installationDirectory, entryPoint);
-        Process.Start(new ProcessStartInfo
+        _ = Process.Start(new ProcessStartInfo
         {
             FileName = executable,
             WorkingDirectory = installationDirectory,
