@@ -43,7 +43,8 @@ requireText(program, "new Set(['check','preparationStatus','prepare','cancelPrep
 requireText(program, "msg.name === 'updates.preparationCompleted'", 'Preparation completion must be forwarded as a native host event.');
 requireText(program, "msg.name === 'updates.preparationFailed'", 'Preparation failure must be forwarded as a native host event.');
 
-requireText(preparationHost, 'swir.desktop-update-preparation-host/0.3', 'Preparation host schema must describe the integrated bridge contract.');
+requireText(preparationHost, 'swir.desktop-update-preparation-host/0.4', 'Preparation host schema must describe the current build-identity-aware integrated bridge contract.');
+requireText(preparationHost, 'DesktopInstalledBuildIdentity.ResolveCurrentVersion', 'Preparation host must derive the installed release version from packaged build identity instead of a stale hard-coded updater version.');
 requireText(preparationHost, 'ResetTerminalState(bool trustedShell)', 'Host service reset must require a trusted-shell assertion.');
 requireText(preparationHost, 'UPDATE_BRIDGE_TRUST_REQUIRED', 'Preparation host must fail closed for untrusted reset callers.');
 
@@ -95,4 +96,4 @@ for (const [index, script] of scripts.entries()) {
   }
 }
 
-console.log('Update Center Desktop workflow validated (signed check + guarded preparation + cancel/reset + deferred mutation + guarded restart).');
+console.log('Update Center Desktop workflow validated (signed check + guarded preparation + cancel/reset + deferred mutation + guarded restart + packaged build identity).');
