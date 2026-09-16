@@ -45,7 +45,10 @@ internal static class DesktopInstallerProgram
             try
             {
                 if (options.VerifyOnly)
+                {
+                    VerifyPayloadStructure(packagePath, metadata);
                     return 0;
+                }
 
                 var installRoot = options.InstallRoot ?? Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -127,6 +130,23 @@ internal static class DesktopInstallerProgram
         return temp;
     }
 
+    private static void VerifyPayloadStructure(string packagePath, PayloadMetadata metadata)
+    {
+        var staging = Path.Combine(Path.GetTempPath(), $"swir-desktop-verify-{Guid.NewGuid():N}");
+        try
+        {
+            Directory.CreateDirectory(staging);
+            ExtractSafely(packagePath, staging);
+            _ = BundledRuntimeIntegrity.Verify(staging, requireManifest: true);
+            var entryPoint = ResolveInside(staging, metadata.EntryPoint);
+            if (!File.Exists(entryPoint)) throw new InvalidOperationException("Verified Desktop payload entry point is missing.");
+        }
+        finally
+        {
+            try { if (Directory.Exists(staging)) Directory.Delete(staging, true); } catch { }
+        }
+    }
+
     private static string Install(string packagePath, PayloadMetadata metadata, string installRoot)
     {
         var root = Path.GetFullPath(installRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
@@ -148,7 +168,7 @@ internal static class DesktopInstallerProgram
             _ = BundledRuntimeIntegrity.Verify(staging, requireManifest: true);
             var entryPoint = ResolveInside(staging, metadata.EntryPoint);
             if (!File.Exists(entryPoint)) throw new InvalidOperationException("Installed Desktop entry point is missing.");
-            WriteReceipt(staging, metadata);
+            WriteReceipt(staging, final, metadata);
             Directory.Move(staging, final);
             WriteCurrentPointer(root, final, metadata);
             return final;
@@ -167,11 +187,14 @@ internal static class DesktopInstallerProgram
         if (!File.Exists(receiptPath)) throw new InvalidOperationException("Existing SWIR Desktop installation has no install receipt.");
         using var receiptDoc = JsonDocument.Parse(File.ReadAllBytes(receiptPath));
         var receipt = receiptDoc.RootElement;
+        var expectedDirectory = Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var receiptDirectory = Path.GetFullPath(receipt.GetProperty("InstallDirectory").GetString() ?? string.Empty).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         if (receipt.GetProperty("Schema").GetString() != ReceiptSchema
             || receipt.GetProperty("Version").GetString() != metadata.Version
             || receipt.GetProperty("Channel").GetString() != metadata.Channel
-            || receipt.GetProperty("PackageSha256").GetString() != metadata.PackageSha256)
-            throw new InvalidOperationException("An existing installation uses different package bytes for this version; refusing overwrite.");
+            || receipt.GetProperty("PackageSha256").GetString() != metadata.PackageSha256
+            || !string.Equals(receiptDirectory, expectedDirectory, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("An existing installation receipt does not match the installed package; refusing overwrite.");
     }
 
     private static void ExtractSafely(string packagePath, string destinationRoot)
@@ -202,10 +225,11 @@ internal static class DesktopInstallerProgram
         }
     }
 
-    private static void WriteReceipt(string directory, PayloadMetadata metadata)
+    private static void WriteReceipt(string stagingDirectory, string installedDirectory, PayloadMetadata metadata)
     {
-        var receipt = new InstallReceipt(ReceiptSchema, metadata.Version, metadata.Channel, metadata.PackageSha256, directory, DateTimeOffset.UtcNow);
-        WriteJsonAtomic(Path.Combine(directory, "install-receipt.json"), receipt);
+        var finalDirectory = Path.GetFullPath(installedDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var receipt = new InstallReceipt(ReceiptSchema, metadata.Version, metadata.Channel, metadata.PackageSha256, finalDirectory, DateTimeOffset.UtcNow);
+        WriteJsonAtomic(Path.Combine(stagingDirectory, "install-receipt.json"), receipt);
     }
 
     private static void WriteCurrentPointer(string root, string directory, PayloadMetadata metadata)
