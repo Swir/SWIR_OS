@@ -11,10 +11,12 @@ SWIR OS is an actively developed operating-system platform designed to become a 
 [![System Edition Contracts](https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml/badge.svg)](https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml)
 [![Desktop Windows Build](https://github.com/Swir/SWIR_OS/actions/workflows/desktop-windows-build.yml/badge.svg)](https://github.com/Swir/SWIR_OS/actions/workflows/desktop-windows-build.yml)
 [![Release Trust Chain](https://github.com/Swir/SWIR_OS/actions/workflows/desktop-release-trust-chain-contract.yml/badge.svg)](https://github.com/Swir/SWIR_OS/actions/workflows/desktop-release-trust-chain-contract.yml)
+[![GitHub Update Contract](https://github.com/Swir/SWIR_OS/actions/workflows/desktop-github-update-contract.yml/badge.svg)](https://github.com/Swir/SWIR_OS/actions/workflows/desktop-github-update-contract.yml)
+[![Roadmap Contract](https://github.com/Swir/SWIR_OS/actions/workflows/roadmap-contract.yml/badge.svg)](https://github.com/Swir/SWIR_OS/actions/workflows/roadmap-contract.yml)
 [![Native Notifications](https://github.com/Swir/SWIR_OS/actions/workflows/desktop-native-notification-contract.yml/badge.svg)](https://github.com/Swir/SWIR_OS/actions/workflows/desktop-native-notification-contract.yml)
 
-![Roadmap](https://img.shields.io/badge/ROADMAP-61.8%25-2ea043?style=for-the-badge)
-![Completed](https://img.shields.io/badge/DONE-34%2F55-1f6feb?style=for-the-badge)
+![Roadmap](https://img.shields.io/badge/ROADMAP-56.7%25-2ea043?style=for-the-badge)
+![Completed](https://img.shields.io/badge/DONE-34%2F60-1f6feb?style=for-the-badge)
 ![Status](https://img.shields.io/badge/STATUS-IN%20PROGRESS-7c3aed?style=for-the-badge)
 
 </div>
@@ -51,14 +53,16 @@ Windows kernel drivers are **not** treated as a general hardware solution for Li
 ### Overall roadmap
 
 ```text
-████████████░░░░░░░░ 61.8%
+███████████░░░░░░░░░ 56.7%
 ```
 
-**34 of 55 measurable roadmap deliverables are complete.**
+**34 of 60 measurable roadmap deliverables are complete.**
 
-The percentage is based on implemented and verified roadmap items. CI-only prototypes do not count as completed functionality. The roadmap now explicitly includes the essential native application suite required for a dependable daily-use System Edition.
+The percentage is based on implemented and verified roadmap items. CI-only prototypes do not count as completed functionality. The scope now explicitly includes the required SWIR Browser, installable shell themes/skins, SWIR Player, SWIR Photo Studio, GitHub-backed update policy and the complete native application baseline. Adding real required scope can reduce the percentage until those deliverables are implemented and verified.
 
 ➡️ Full architecture and measurable roadmap: [`SWIR-OS-ARCHITECTURE.md`](SWIR-OS-ARCHITECTURE.md)
+
+➡️ Mandatory end-user product baseline: [`SWIR-PRODUCT-BASELINE-1.0.md`](SWIR-PRODUCT-BASELINE-1.0.md)
 
 ---
 
@@ -112,6 +116,8 @@ Implemented native foundations include:
 
 The release host uses **self-contained .NET 8 Windows Desktop + a pinned Microsoft WebView2 Fixed Version Runtime bundled inside the SWIR Desktop package**. A release package is designed so the end user does not manually install .NET or WebView2. The packaging pipeline obtains the repository-pinned WebView2 runtime from an approved Microsoft HTTPS source, checks its pinned SHA-256, exact version and Microsoft Authenticode signer, records acquisition provenance, bundles the runtime, and the Desktop Host verifies the bundled integrity/provenance chain before release startup.
 
+The Desktop updater is being moved to a repository-owned signed release channel. Official package URLs are immutable assets under `Swir/SWIR_OS` GitHub Releases, signed update metadata is promoted through `updates/<channel>/`, and downloaded bytes remain subject to signed size/SHA-256 verification, guarded Candidate activation, startup health proof and rollback. `swir.github.io` is presentation only and is not an operating-system update authority.
+
 Privileged operating-system actions remain behind explicit native brokers and permission checks. Desktop Edition may still host portable Web Edition surfaces during the transition. That transitional architecture does **not** define the final System Edition application model.
 
 ---
@@ -126,7 +132,7 @@ Planned architecture includes:
 Linux kernel / maintained base
         │
         ├── SWIR boot + session layer
-        ├── SWIR desktop shell
+        ├── SWIR desktop shell + theme/skin system
         ├── SWIR services
         ├── NetworkManager integration
         ├── native Linux application suite
@@ -152,18 +158,24 @@ The minimum dependable native application set is planned to include:
 - File Manager,
 - Settings / Control Center,
 - Terminal,
-- Software / Store,
+- Software / SWIR Store,
 - Update Center,
 - Hardware & Driver Center,
 - Network Center,
+- **SWIR Browser**,
 - Text Editor / Notes,
-- Media Player,
-- Image Viewer,
+- **SWIR Player**,
+- **SWIR Photo Studio / Image Viewer**,
 - PDF Viewer,
 - Archive Manager,
 - Calculator,
+- Screenshot Tool,
+- Clock / alarms / calendar basics,
 - Task Manager / System Monitor,
-- log/diagnostics tools.
+- Logs / Diagnostics,
+- Backup / Restore and recovery entry points.
+
+The shell is also planned to support safe installable **SWIR Themes / Shell Skins** with accessibility overrides and a guaranteed recovery path to the default theme. Alternative browsers, media players and other supported applications should be installable through SWIR Store and selectable through Default Apps.
 
 These applications must share coherent SWIR design, accessibility, locale support, file associations, permissions, update integration and crash-safe data handling. They should not be treated as placeholder demos.
 
@@ -231,6 +243,8 @@ Wine compatibility profiles
 Proton compatibility profiles
 ```
 
+Microsoft Store is not copied, impersonated or bypassed. Any future Microsoft Store integration requires an official, licensable Microsoft-supported path; otherwise Store-only Windows applications remain tied to their legitimate Windows environment, account and licensing model.
+
 ---
 
 ## 🛡️ Security model
@@ -288,9 +302,11 @@ Repository documentation and development files are maintained in **English**.
 |---|---|
 | `desktop/windows/` | Windows Desktop Host, native brokers, updater, self-tests and pinned bundled-runtime policy |
 | `system/` | System Edition architecture, Hardware Service and Driver Center contracts |
-| `scripts/` | package, catalog, trust-chain and release validators |
-| `.github/workflows/` | CI contracts for Desktop, System, security, packages and i18n |
+| `updates/` | repository-owned signed Desktop update channel metadata; binaries stay in immutable GitHub Releases |
+| `scripts/` | package, catalog, trust-chain, roadmap and release validators |
+| `.github/workflows/` | CI contracts for Desktop, System, security, packages, updates, roadmap and i18n |
 | `SWIR-OS-ARCHITECTURE.md` | canonical measurable project roadmap |
+| `SWIR-PRODUCT-BASELINE-1.0.md` | mandatory end-user application and experience baseline |
 | `SWIR-ROADMAP-STANDARD.md` | locked roadmap dashboard format |
 | `swir-*.js` | Web Edition portable runtime, i18n and prototype services |
 | `swir-*.html` | Web Edition applications and prototype system UI; not the final System Edition app implementation |
@@ -354,13 +370,14 @@ A local build is **not** equivalent to an official verified release. Official re
 Development is currently focused on the highest-value steps toward a dependable Desktop/System platform:
 
 1. complete the production package-signing trust cutover,
-2. keep hardening the Windows Desktop Host, self-contained packaging and update lifecycle,
-3. expand Hardware Service and Driver Center foundations,
-4. define and implement the native Linux application framework and essential native application suite,
-5. build the common System Package Provider architecture,
-6. prepare native Linux process/network/filesystem adapters,
-7. move toward the first controlled bootable System Edition image,
-8. finish full-system i18n, reliability, recovery, accessibility and daily-use workflows before calling System Edition stable.
+2. finish the signed GitHub Desktop update channel with user-selectable Automatic / Notify only / Manual behavior,
+3. keep hardening the Windows Desktop Host, self-contained packaging and update lifecycle,
+4. expand Hardware Service and Driver Center foundations,
+5. implement the native Linux application framework and mandatory SWIR Browser / Player / Photo Studio application baseline,
+6. implement the safe installable SWIR Themes / Shell Skins framework,
+7. build the common System Package Provider architecture,
+8. prepare native Linux process/network/filesystem adapters and move toward the first controlled bootable System Edition image,
+9. finish full-system i18n, reliability, recovery, accessibility and daily-use workflows before calling System Edition stable.
 
 Roadmap boxes are checked only after the functionality is actually implemented and verified.
 
@@ -373,8 +390,10 @@ SWIR OS is under active development.
 - System Edition is not yet a finished bootable distribution,
 - Desktop Edition is still a preview line,
 - production package-signing provisioning is not yet fully cut over,
+- the signed GitHub update channel has secure feed/release plumbing but the complete Automatic / Notify only / Manual user policy is not yet finished,
 - hardware catalog coverage is intentionally limited while the safety model is being validated,
-- the essential native Linux application suite is not yet implemented,
+- the essential native Linux application suite — including the native SWIR Browser, SWIR Player and SWIR Photo Studio — is not yet implemented,
+- the installable System Edition shell theme/skin framework is not yet implemented,
 - Windows application compatibility through Wine/Proton belongs to the System Edition roadmap and is not yet a completed subsystem,
 - full localization of every application screen is still being expanded beyond the bundled core/OOBE/critical application UI coverage.
 
@@ -394,7 +413,8 @@ These limitations are intentionally kept visible instead of marking unfinished p
 8. Make the default application set complete enough for real daily use before calling the system stable.
 9. Bundle end-user runtime prerequisites with SWIR releases instead of requiring manual prerequisite downloads.
 10. Bundle core locale resources and keep English as a safe fallback while expanding complete worldwide localization.
-11. Never commit production private signing keys.
+11. Treat `Swir/SWIR_OS` as the authoritative operating-system development and update source; keep `swir.github.io` presentation-only.
+12. Never commit production private signing keys.
 
 ---
 

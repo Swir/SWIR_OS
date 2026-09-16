@@ -69,21 +69,35 @@ const canonicalRequired = [
   'The text bar always has exactly 20 segments.',
   'If major scope is added, add it as unchecked deliverables first so the denominator remains honest.',
 ];
-const standardPath = path.resolve(path.dirname(roadmapPath), 'SWIR-ROADMAP-STANDARD.md');
+const repositoryRoot = path.dirname(roadmapPath);
+const standardPath = path.resolve(repositoryRoot, 'SWIR-ROADMAP-STANDARD.md');
 if (!fs.existsSync(standardPath)) fail('canonical SWIR-ROADMAP-STANDARD.md is missing.');
 const standard = fs.readFileSync(standardPath, 'utf8');
 for (const required of canonicalRequired) {
   if (!standard.includes(required)) fail(`canonical roadmap standard is missing required rule: ${required}`);
 }
 
+const readmePath = path.resolve(repositoryRoot, 'README.md');
+if (!fs.existsSync(readmePath)) fail('README.md is missing; visible project progress cannot be synchronized.');
+const readme = fs.readFileSync(readmePath, 'utf8');
+for (const [needle, message] of [
+  [`ROADMAP-${percent}%25-`, 'README ROADMAP badge'],
+  [`DONE-${completed}%2F${total}-`, 'README DONE badge'],
+  [`${expectedBar} ${percent}%`, 'README 20-segment progress bar'],
+  [`**${completed} of ${total} measurable roadmap deliverables are complete.**`, 'README measurable-progress sentence'],
+]) {
+  if (!readme.includes(needle)) fail(`${message} is stale; synchronize README.md with the authoritative roadmap.`);
+}
+
 console.log(JSON.stringify({
-  schema: 'swir.roadmap-contract/1.0',
+  schema: 'swir.roadmap-contract/1.1',
   roadmap: path.basename(roadmapPath),
   completed,
   remaining,
   total,
   percent: Number(percent),
   bar: expectedBar,
+  readmeSynchronized: true,
   styleLock: 'SWIR-ROADMAP-STANDARD:v1',
   valid: true,
 }));

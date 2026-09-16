@@ -3,6 +3,7 @@ name: SWIR Roadmap Contract
 on:
   push:
     paths:
+      - 'README.md'
       - 'SWIR-OS-ARCHITECTURE.md'
       - 'SWIR-ROADMAP-STANDARD.md'
       - 'SWIR-PRODUCT-BASELINE-1.0.md'
@@ -10,6 +11,7 @@ on:
       - '.github/workflows/roadmap-contract.yml'
   pull_request:
     paths:
+      - 'README.md'
       - 'SWIR-OS-ARCHITECTURE.md'
       - 'SWIR-ROADMAP-STANDARD.md'
       - 'SWIR-PRODUCT-BASELINE-1.0.md'
@@ -29,5 +31,5 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Validate SWIR Roadmap Style Lock v1 and progress math
+      - name: Validate SWIR Roadmap Style Lock v1, progress math and README sync
         run: node scripts/validate-roadmap-progress.mjs SWIR-OS-ARCHITECTURE.md
