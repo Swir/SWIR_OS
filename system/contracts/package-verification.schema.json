@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://swir.github.io/system/contracts/package-verification.schema.json",
+  "title": "SWIR Package Verification Attestation 0.1",
+  "type": "object",
+  "required": [
+    "schema",
+    "packageId",
+    "manifestSha256",
+    "provider",
+    "executionClass",
+    "sourceClass",
+    "transactionId",
+    "verifiedAt",
+    "trustVerified",
+    "signatureVerified",
+    "artifactVerified"
+  ],
+  "properties": {
+    "schema": { "const": "swir.package-verification/0.1" },
+    "packageId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]+$" },
+    "manifestSha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" },
+    "provider": {
+      "enum": [
+        "swir.package.system",
+        "swir.package.flatpak",
+        "swir.package.appimage",
+        "swir.compat.wine",
+        "swir.compat.proton"
+      ]
+    },
+    "executionClass": { "enum": ["linux-native", "windows-compat"] },
+    "sourceClass": {
+      "enum": [
+        "swir-signed",
+        "distribution-repository",
+        "flatpak-remote",
+        "vendor-official-repository",
+        "local-user-selected"
+      ]
+    },
+    "repositoryId": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "transactionId": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{2,127}$" },
+    "verifiedAt": { "type": "string", "format": "date-time" },
+    "trustVerified": { "const": true },
+    "signatureVerified": { "const": true },
+    "artifactVerified": { "const": true }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "sourceClass": {
+            "enum": ["distribution-repository", "flatpak-remote", "vendor-official-repository"]
+          }
+        }
+      },
+      "then": { "required": ["repositoryId"] }
+    }
+  ],
+  "additionalProperties": false
+}
