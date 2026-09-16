@@ -33,6 +33,7 @@ if ([string]::IsNullOrWhiteSpace($WebView2RuntimeDir) -and $env:GITHUB_ACTIONS -
     $fixtureSource = Join-Path $env:SystemRoot 'System32\where.exe'
     if (-not (Test-Path -LiteralPath $fixtureSource -PathType Leaf)) { throw "Could not create CI WebView2 fixture; missing system executable: $fixtureSource" }
     Copy-Item -LiteralPath $fixtureSource -Destination (Join-Path $fixtureRoot 'msedgewebview2.exe') -Force
+    [System.IO.File]::WriteAllText((Join-Path $fixtureRoot '.swir-ci-contract-fixture'), 'packaging-topology-only')
     $WebView2RuntimeDir = $fixtureRoot
     Write-Host "Using isolated WebView2 packaging fixture for contract workflow: $env:GITHUB_WORKFLOW"
 }
@@ -87,6 +88,7 @@ $commit = if ([string]::IsNullOrWhiteSpace($SourceCommit)) { 'local-unpinned' } 
 if ($commit -ne 'local-unpinned' -and $commit -notmatch '^[0-9a-f]{40}$') { throw "SourceCommit must be a 40-character Git SHA when supplied. Got: $SourceCommit" }
 $webView2Version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($webView2Exe).FileVersion
 if ([string]::IsNullOrWhiteSpace($webView2Version)) { $webView2Version = 'fixture-or-unknown' }
+$isContractFixture = Test-Path -LiteralPath (Join-Path $webView2Source '.swir-ci-contract-fixture') -PathType Leaf
 
 $manifest = [ordered]@{
     schema = 'swir.desktop-host-build/0.1'
@@ -116,6 +118,7 @@ $manifest = [ordered]@{
             executable = 'msedgewebview2.exe'
             version = $webView2Version
             sourcePolicy = 'microsoft-official-fixed-version-runtime'
+            contractFixture = [bool]$isContractFixture
         }
     }
 }
