@@ -55,10 +55,6 @@ verify_trusted_regular_file() {
   fi
 }
 
-# System packages are allowed to pre-create well-known systemd symlinks. Do not
-# weaken safe_target for that case: accept only an exact, audited link name and
-# exact target. The optional third argument is used only for a known previous
-# systemd default target that this provisioner intentionally replaces.
 ensure_exact_symlink() {
   local rel="$1" expected="$2" replaceable="${3:-}" parent dest current
   parent="$(dirname "$rel")"
@@ -83,13 +79,13 @@ ensure_exact_symlink() {
   [[ -L "$dest" && "$(readlink "$dest")" == "$expected" ]] || { echo "failed to install trusted symlink: $rel" >&2; exit 70; }
 }
 
-for pkg in greetd weston plymouth plymouth-themes wayland-utils dbus-user-session; do
+for pkg in greetd weston plymouth plymouth-themes wayland-utils dbus-user-session python3 python3-gi gir1.2-gtk-4.0; do
   chroot "$ROOTFS" dpkg-query -W -f='${db:Status-Abbrev}' "$pkg" 2>/dev/null | grep -qx 'ii ' || {
     echo "required graphical package is not installed: $pkg" >&2
     exit 69
   }
 done
-for file in /usr/sbin/greetd /usr/sbin/agreety /usr/bin/weston /usr/bin/wayland-info /usr/bin/plymouth /usr/sbin/plymouth-set-default-theme; do
+for file in /usr/sbin/greetd /usr/sbin/agreety /usr/bin/weston /usr/bin/wayland-info /usr/bin/plymouth /usr/sbin/plymouth-set-default-theme /usr/bin/python3; do
   verify_trusted_regular_file "$file" yes
 done
 verify_trusted_regular_file /usr/lib/systemd/system/greetd.service no
@@ -104,13 +100,15 @@ install -d -m 0755 \
   "$(safe_target /etc/systemd/system/graphical.target.wants)"
 
 install -m 0755 "$SOURCE_ROOT/system/session/swir-session-launcher.sh" "$(safe_target /usr/local/bin/swir-session)"
+install -m 0755 "$SOURCE_ROOT/system/session/swir-shell.py" "$(safe_target /usr/local/bin/swir-shell)"
 install -m 0644 "$SOURCE_ROOT/system/boot/plymouth/swir.plymouth" "$(safe_target /usr/share/plymouth/themes/swir/swir.plymouth)"
 install -m 0644 "$SOURCE_ROOT/system/boot/plymouth/swir.script" "$(safe_target /usr/share/plymouth/themes/swir/swir.script)"
+chroot "$ROOTFS" /usr/bin/python3 -m py_compile /usr/local/bin/swir-shell
 
 cat > "$(safe_target /usr/share/wayland-sessions/swir.desktop)" <<'EOF'
 [Desktop Entry]
 Name=SWIR OS
-Comment=SWIR OS System Edition Wayland session
+Comment=SWIR OS System Edition native Wayland session
 Exec=/usr/local/bin/swir-session
 TryExec=/usr/local/bin/swir-session
 Type=Application
@@ -128,8 +126,6 @@ command = "/usr/sbin/agreety --cmd /usr/local/bin/swir-session"
 user = "_greetd"
 EOF
 else
-  # The E2E image exercises greetd IPC and PAM with a disposable account. No
-  # auto-login section is used; the session must pass the real auth exchange.
   if ! chroot "$ROOTFS" /usr/bin/id -u swir-e2e >/dev/null 2>&1; then
     chroot "$ROOTFS" /usr/sbin/useradd --create-home --shell /bin/bash --user-group swir-e2e
   fi
@@ -151,12 +147,10 @@ ensure_exact_symlink /etc/systemd/system/display-manager.service /usr/lib/system
 ensure_exact_symlink /etc/systemd/system/graphical.target.wants/greetd.service /usr/lib/systemd/system/greetd.service
 ensure_exact_symlink /etc/systemd/system/default.target /usr/lib/systemd/system/graphical.target "/lib/systemd/system/graphical.target|/usr/lib/systemd/system/multi-user.target|/lib/systemd/system/multi-user.target"
 
-# Install the SWIR theme into initramfs using Debian's packaged tooling.
 chroot "$ROOTFS" /usr/sbin/plymouth-set-default-theme swir
 [[ "$(chroot "$ROOTFS" /usr/sbin/plymouth-set-default-theme)" == swir ]] || { echo "SWIR Plymouth theme was not selected" >&2; exit 70; }
 chroot "$ROOTFS" /usr/sbin/update-initramfs -u -k all
 
-# Production retains an authenticated greeter path and never embeds test creds.
 if [[ "$MODE" == production ]]; then
   grep -Fq '/usr/sbin/agreety --cmd /usr/local/bin/swir-session' "$ROOTFS/etc/greetd/config.toml" || {
     echo "production greetd configuration lost authenticated greeter path" >&2; exit 70;
@@ -166,4 +160,4 @@ fi
 ! grep -Fq '[initial_session]' "$ROOTFS/etc/greetd/config.toml" || { echo "autologin initial_session is forbidden" >&2; exit 70; }
 [[ -f "$ROOTFS/etc/pam.d/greetd" && ! -L "$ROOTFS/etc/pam.d/greetd" ]] || { echo "greetd PAM policy missing" >&2; exit 70; }
 
-echo "SWIR graphical session foundation staged: mode=$MODE theme=swir login=greetd compositor=weston"
+echo "SWIR graphical session staged: mode=$MODE theme=swir login=greetd compositor=weston native-shell=gtk4"
