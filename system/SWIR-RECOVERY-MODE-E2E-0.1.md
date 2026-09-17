@@ -31,7 +31,8 @@ systemd-boot
           +--> verify root remains read-only
           +--> resolve SWIR_ROOT block label
           +--> verify ext4 + fstab root/ESP integration
-          +--> inventory pending package/firmware journals read-only
+          +--> inspect canonical package transaction journals read-only
+          +--> inspect canonical firmware transaction journals read-only
           +--> verify no non-loopback network device exists in the E2E guest
           +--> write diagnostics only to /run tmpfs
 ```
@@ -39,6 +40,28 @@ systemd-boot
 The normal System Edition fstab remains present and is inspected by the diagnostics agent. `fstab=no` is used only by the recovery boot entry so the recovery environment does not automatically mount additional persistent filesystems while it is diagnosing the machine.
 
 The recovery entry also masks `apt-daily.timer`, `apt-daily-upgrade.timer`, `dpkg-db-backup.timer`, `fstrim.timer`, and `fwupd-refresh.timer`. The guest E2E requires every one of those units to remain inactive and runtime-masked. This prevents the recovery target from opportunistically starting package, firmware, trim, or package-database maintenance while the machine is being diagnosed.
+
+## Canonical transaction journal integration
+
+Recovery diagnostics use the exact production journal roots and schemas rather than test-only paths:
+
+```text
+Packages:
+  /var/lib/swir/package-transactions
+  schema = swir.system-package-transaction/0.1
+  status field = state
+
+Firmware:
+  /var/lib/swir/transactions/firmware
+  schema = swir.firmware-transaction-journal/0.1
+  status field = status
+```
+
+The package scanner recognizes real package lifecycle states including `prepared`, `mutating`, `verifying`, `rolling-back`, and `failed-needs-recovery`. The firmware scanner follows the production firmware journal model and recognizes `planned`, `authorized`, `executing`, `staged-reboot-required`, and `failed-needs-recovery` as states requiring attention.
+
+The UEFI E2E seeds one diagnostic pending record at each canonical production root before the rootfs is copied into the VM image. Recovery must find both records while the root filesystem is mounted read-only, preserve them unchanged, and report that manual recovery is required. The fixture records are test evidence only; they do not claim that an actual package or firmware mutation occurred during this recovery test.
+
+Journal directories and files are required to be root-owned, regular/non-symlink objects and not group/world writable. Invalid JSON/schema records are counted as corrupt and cause recovery to report that operator attention is required rather than silently ignoring them.
 
 ## Production recovery foundation
 
@@ -65,14 +88,16 @@ A successful exact-revision run proves all of the following:
 7. The normal fstab still maps `/` to `LABEL=SWIR_ROOT`/ext4 and `/boot/efi` to `LABEL=SWIR_ESP`/vfat.
 8. The live `SWIR_ROOT` label resolves to a real ext4 block device.
 9. The disposable recovery VM has no non-loopback network interface because QEMU is launched without a NIC.
-10. Package and firmware transaction directories are scanned read-only when present.
-11. APT/dpkg/fwupd/fstrim maintenance timers are masked by the recovery boot entry and verified inactive in the guest.
-12. No filesystem repair, package mutation, or firmware mutation is performed automatically.
-13. The guest emits a machine-readable recovery report and a deterministic success marker before powering off.
+10. The recovery agent reads the production package journal root/schema/state model and detects a pending package recovery fixture.
+11. The recovery agent reads the production firmware journal root/schema/status model and detects a pending firmware recovery fixture.
+12. Recovery reports that manual recovery is required when either pending transaction is present.
+13. APT/dpkg/fwupd/fstrim maintenance timers are masked by the recovery boot entry and verified inactive in the guest.
+14. No filesystem repair, package mutation, or firmware mutation is performed automatically.
+15. The guest emits a machine-readable `swir.system-recovery-mode-e2e/0.2` evidence record and a deterministic success marker before powering off.
 
 ## Safety boundary
 
-The recovery path deliberately distinguishes **bootable recovery diagnostics** from **automatic repair**. The following remain outside this 0.1 claim:
+The recovery path deliberately distinguishes **bootable recovery diagnostics** from **automatic repair**. The following remain outside this 0.1 architecture claim:
 
 - online or offline destructive filesystem repair,
 - restoring a prior filesystem snapshot,
@@ -87,6 +112,6 @@ Those operations need separate authorization, recovery evidence, and hardware/fi
 
 ## Roadmap interpretation
 
-Once this exact UEFI recovery gate is green, it is sufficient evidence for the scoped roadmap deliverable **filesystem integration and recovery mode**: the System Edition has a real filesystem layout plus a dedicated bootable recovery target that is exercised end-to-end.
+Once the exact final UEFI recovery gate is green, it is sufficient evidence for the scoped roadmap deliverable **filesystem integration and recovery mode**: the System Edition has a real filesystem layout plus a dedicated bootable recovery target exercised end-to-end, and that target can discover the actual package/firmware journal locations without writing to the diagnosed root filesystem.
 
-It is **not** sufficient for **journaled driver/firmware/package transactions** or **hardware/firmware rollback or documented manual recovery path**. Those remain separate roadmap gates until their mutation/recovery behavior is implemented and verified.
+It is **not** sufficient for **journaled driver/firmware/package transactions**, **fwupd/LVFS firmware updates where supported**, or any automatic hardware/firmware rollback claim. Those remain separate roadmap gates until their mutation/recovery behavior is implemented and verified.
