@@ -62,7 +62,8 @@ jobs:
           grep -F 'command = "/usr/sbin/agreety --cmd /usr/local/bin/swir-session"' system/session/provision-graphical-session.sh >/dev/null
           grep -F "'desktopShellClaim': True" system/session/swir-session-launcher.sh >/dev/null
           grep -F "'desktopShellClaim': True" system/e2e/debian13-graphical-session-vm-e2e.sh >/dev/null
-          grep -F "'nativeToolkit': 'gtk4'" system/session/swir-session-launcher.sh >/dev/null
+          grep -F "assert shell.get('nativeToolkit') == 'gtk4'" system/session/swir-session-launcher.sh >/dev/null
+          grep -F "assert shell.get('launcherProbePassed') is True" system/session/swir-session-launcher.sh >/dev/null
           grep -F 'interactivePamAuthenticationPassed' system/e2e/debian13-graphical-session-vm-e2e.sh >/dev/null
           grep -F 'activeDuringBoot' system/e2e/debian13-graphical-session-vm-e2e.sh >/dev/null
           grep -F 'privilegedOperationsInShell' system/session/swir-shell.py >/dev/null
@@ -119,7 +120,7 @@ jobs:
           assert e['session']['waylandCompositor'] == 'weston' and e['session']['waylandClientHandshakePassed'] is True
           assert e['shell']['applicationId'] == 'dev.swir.Shell' and e['shell']['nativeToolkit'] == 'gtk4'
           assert e['shell']['displayProtocol'] == 'wayland' and e['shell']['windowMapped'] is True
-          assert e['shell']['privilegedOperationsInShell'] is False
+          assert e['shell']['launcherProbePassed'] is True and e['shell']['privilegedOperationsInShell'] is False
           assert e['productionDefaults']['testCredentialEmbeddedInProductionImage'] is False
           assert e['desktopShellClaim'] is True and e['secureBootClaim'] is False and e['hardwareQualificationClaim'] is False
           PY
