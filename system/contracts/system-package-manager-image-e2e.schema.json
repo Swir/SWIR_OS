@@ -1,20 +1,22 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://swir.github.io/system/contracts/system-package-manager-image-e2e.schema.json",
-  "title": "SWIR System Package Manager Image E2E 0.1",
+  "title": "SWIR System Package Manager Image E2E 0.2",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "schema", "generatedAt", "selectedBase", "distribution", "packageManager", "fixturePackage",
-    "aptBinary", "dpkgQueryBinary", "repositoryPolicy", "repositoryId", "repositorySignaturesRequired",
+    "aptBinary", "dpkgQueryBinary", "dpkgAdminBinary", "repositoryPolicy", "repositoryId", "repositorySignaturesRequired",
     "arbitraryRepositoryUrlsAllowed", "dependencyResolutionMode", "dependencyAffectedPackages",
     "dependencyClosureObserved", "dependencyPlanPersistedBeforeMutation", "mutationAuthorized",
     "authorizationHarness", "packageMutationPerformed", "preMutationInstalled", "transactionState",
     "journalMode", "journalCommitted", "nativeHealthVerified", "installVerified", "updatePlanVerified",
-    "removePlanVerified", "interruptedUpdateRecoveryProven", "passed"
+    "removePlanVerified", "interruptedTransactionRecoveryProven", "interruptedStateBeforeRecovery",
+    "recoveredTransactionState", "recoveryAuthorizationBound", "recoveryNoPackageMutation",
+    "desiredStateVerifiedDuringRecovery", "dpkgAuditClean", "aptCheckClean", "failClosedRecoveryMode", "passed"
   ],
   "properties": {
-    "schema": { "const": "swir.system-package-manager-image-e2e/0.1" },
+    "schema": { "const": "swir.system-package-manager-image-e2e/0.2" },
     "generatedAt": { "type": "string", "format": "date-time" },
     "selectedBase": { "const": "debian-13-trixie" },
     "distribution": {
@@ -25,6 +27,7 @@
     "fixturePackage": { "const": "cowsay" },
     "aptBinary": { "$ref": "#/$defs/rootFile" },
     "dpkgQueryBinary": { "$ref": "#/$defs/rootFile" },
+    "dpkgAdminBinary": { "$ref": "#/$defs/rootFile" },
     "repositoryPolicy": { "$ref": "#/$defs/rootFile" },
     "repositoryId": { "const": "debian-main" },
     "repositorySignaturesRequired": { "const": true },
@@ -44,7 +47,15 @@
     "installVerified": { "const": true },
     "updatePlanVerified": { "const": true },
     "removePlanVerified": { "const": true },
-    "interruptedUpdateRecoveryProven": { "const": false },
+    "interruptedTransactionRecoveryProven": { "const": true },
+    "interruptedStateBeforeRecovery": { "const": "failed-needs-recovery" },
+    "recoveredTransactionState": { "const": "committed" },
+    "recoveryAuthorizationBound": { "const": true },
+    "recoveryNoPackageMutation": { "const": true },
+    "desiredStateVerifiedDuringRecovery": { "const": true },
+    "dpkgAuditClean": { "const": true },
+    "aptCheckClean": { "const": true },
+    "failClosedRecoveryMode": { "const": "read-only-state-reconciliation" },
     "passed": { "const": true }
   },
   "$defs": {
