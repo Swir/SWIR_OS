@@ -7,6 +7,10 @@ on:
       - 'SWIR-OS-ARCHITECTURE.md'
       - 'SWIR-ROADMAP-STANDARD.md'
       - 'SWIR-PRODUCT-BASELINE-1.0.md'
+      - 'assets/readme/progress-card.svg'
+      - 'assets/readme/progress-mini.svg'
+      - 'assets/readme/progress-template.svg'
+      - 'scripts/generate-readme-progress.mjs'
       - 'scripts/validate-roadmap-progress.mjs'
       - '.github/workflows/roadmap-contract.yml'
   pull_request:
@@ -15,6 +19,10 @@ on:
       - 'SWIR-OS-ARCHITECTURE.md'
       - 'SWIR-ROADMAP-STANDARD.md'
       - 'SWIR-PRODUCT-BASELINE-1.0.md'
+      - 'assets/readme/progress-card.svg'
+      - 'assets/readme/progress-mini.svg'
+      - 'assets/readme/progress-template.svg'
+      - 'scripts/generate-readme-progress.mjs'
       - 'scripts/validate-roadmap-progress.mjs'
       - '.github/workflows/roadmap-contract.yml'
   workflow_dispatch:
@@ -33,3 +41,27 @@ jobs:
           node-version: '22'
       - name: Validate SWIR Roadmap Style Lock v1, progress math and README sync
         run: node scripts/validate-roadmap-progress.mjs SWIR-OS-ARCHITECTURE.md
+      - name: Verify SWIR Progress SVG PRO assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/generate-readme-progress.mjs --self-test
+          node scripts/generate-readme-progress.mjs --check
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+
+          paths = [
+              'assets/readme/progress-card.svg',
+              'assets/readme/progress-mini.svg',
+              'assets/readme/progress-template.svg',
+          ]
+          for path in paths:
+              root = ET.parse(path).getroot()
+              view_box = root.attrib.get('viewBox', '').split()
+              if len(view_box) != 4:
+                  raise SystemExit(f'{path}: invalid viewBox')
+              numbers = [float(value) for value in view_box]
+              if not all(value == value and abs(value) != float('inf') for value in numbers):
+                  raise SystemExit(f'{path}: non-finite viewBox')
+          print('SWIR Progress SVG PRO XML validation passed')
+          PY

@@ -1,0 +1,116 @@
+name: System Graphical Installer Full E2E
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'system/installer/**'
+      - 'system/e2e/debian13-graphical-installer-vm-e2e.sh'
+      - 'system/image/build-live-usb-img.sh'
+      - 'system/image/build-debian-trixie-rootfs.sh'
+      - 'system/image/system-base-debian-trixie.json'
+      - 'system/image/validate-graphical-installer-e2e.mjs'
+      - 'system/contracts/system-graphical-installer-e2e.schema.json'
+      - 'system/session/**'
+      - 'system/SWIR-GRAPHICAL-INSTALLER-0.1.md'
+      - 'SWIR-OS-ARCHITECTURE.md'
+      - 'README.md'
+      - '.github/workflows/system-graphical-installer-e2e.yml'
+  pull_request:
+    paths:
+      - 'system/installer/**'
+      - 'system/e2e/debian13-graphical-installer-vm-e2e.sh'
+      - 'system/image/build-live-usb-img.sh'
+      - 'system/image/build-debian-trixie-rootfs.sh'
+      - 'system/image/system-base-debian-trixie.json'
+      - 'system/image/validate-graphical-installer-e2e.mjs'
+      - 'system/contracts/system-graphical-installer-e2e.schema.json'
+      - 'system/session/**'
+      - 'system/SWIR-GRAPHICAL-INSTALLER-0.1.md'
+      - 'SWIR-OS-ARCHITECTURE.md'
+      - 'README.md'
+      - '.github/workflows/system-graphical-installer-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: system-graphical-installer-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate graphical installer E2E sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n system/e2e/debian13-graphical-installer-vm-e2e.sh
+          bash -n system/installer/provision-graphical-installer.sh
+          bash -n system/installer/swir-install-engine.sh
+          python3 -m py_compile system/installer/swir-installer.py system/installer/swir-installer-helper.py
+          node --check system/image/validate-graphical-installer-e2e.mjs
+          python3 -m json.tool system/contracts/system-graphical-installer-e2e.schema.json >/dev/null
+      - name: Enforce graphical installer safety boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'E2E_MARKER = pathlib.Path("/run/swir/installer-e2e-enabled")' system/installer/swir-installer.py >/dev/null
+          grep -F 'graphical installer E2E automation is not enabled by the trusted VM harness' system/installer/swir-installer.py >/dev/null
+          grep -F 'passwordStoredInEvidence' system/installer/swir-installer.py >/dev/null
+          grep -F 'uiWrongTokenBlocked' system/installer/swir-installer.py >/dev/null
+          grep -F 'dev.swir.installer.install' system/e2e/debian13-graphical-installer-vm-e2e.sh >/dev/null
+          grep -F 'subject.user == "swir-e2e"' system/e2e/debian13-graphical-installer-vm-e2e.sh >/dev/null
+          grep -F 'source-media-not-rejected' system/e2e/debian13-graphical-installer-vm-e2e.sh >/dev/null
+          grep -F 'live-usb-detached=true' system/e2e/debian13-graphical-installer-vm-e2e.sh >/dev/null
+          grep -F 'physicalHardwareQualificationClaim": False' system/e2e/debian13-graphical-installer-vm-e2e.sh >/dev/null
+          grep -F 'secureBootClaim": False' system/e2e/debian13-graphical-installer-vm-e2e.sh >/dev/null
+          ! grep -E 'curl |wget |--no-check-gpg|AllowUnauthenticated|trusted=yes' \
+            system/e2e/debian13-graphical-installer-vm-e2e.sh \
+            system/installer/swir-install-engine.sh \
+            system/installer/provision-graphical-installer.sh
+      - name: Validate locked roadmap math
+        run: node scripts/validate-roadmap-progress.mjs
+
+  graphical-installer-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install controlled image and VM dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            mmdebstrap debian-archive-keyring qemu-system-x86 qemu-utils ovmf \
+            e2fsprogs dosfstools rsync parted util-linux udev
+      - name: Drive GTK installer from Live USB through detached installed boot
+        env:
+          SWIR_GRAPHICAL_INSTALL_WORK_ROOT: ${{ runner.temp }}/swir-graphical-installer-e2e
+          SWIR_GRAPHICAL_INSTALL_ARTIFACT_DIR: ${{ runner.temp }}/swir-graphical-installer-e2e-artifacts
+        run: sudo --preserve-env=SWIR_GRAPHICAL_INSTALL_WORK_ROOT,SWIR_GRAPHICAL_INSTALL_ARTIFACT_DIR bash system/e2e/debian13-graphical-installer-vm-e2e.sh
+      - name: Export readable diagnostics
+        if: always()
+        run: sudo chown -R "$USER:$USER" "${{ runner.temp }}/swir-graphical-installer-e2e-artifacts" 2>/dev/null || true
+      - name: Validate graphical installer evidence
+        if: success()
+        run: node system/image/validate-graphical-installer-e2e.mjs "${{ runner.temp }}/swir-graphical-installer-e2e-artifacts/graphical-installer-e2e.json"
+      - name: Upload compact graphical installer evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swir-graphical-installer-e2e-${{ github.run_id }}
+          path: ${{ runner.temp }}/swir-graphical-installer-e2e-artifacts
+          if-no-files-found: warn
+          retention-days: 7
