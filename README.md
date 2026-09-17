@@ -11,12 +11,12 @@
 **Linux foundation • Native Linux applications • Managed Windows compatibility • Secure packages • Hardware & Driver Center**
 
 [![System Edition Contracts](https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml/badge.svg)](https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml)
+[![Package Provider Image E2E](https://github.com/Swir/SWIR_OS/actions/workflows/system-package-provider-image-e2e.yml/badge.svg)](https://github.com/Swir/SWIR_OS/actions/workflows/system-package-provider-image-e2e.yml)
 [![Desktop Windows Build](https://github.com/Swir/SWIR_OS/actions/workflows/desktop-windows-build.yml/badge.svg)](https://github.com/Swir/SWIR_OS/actions/workflows/desktop-windows-build.yml)
 [![Roadmap Contract](https://github.com/Swir/SWIR_OS/actions/workflows/roadmap-contract.yml/badge.svg)](https://github.com/Swir/SWIR_OS/actions/workflows/roadmap-contract.yml)
-[![Release Trust Chain](https://github.com/Swir/SWIR_OS/actions/workflows/desktop-release-trust-chain-contract.yml/badge.svg)](https://github.com/Swir/SWIR_OS/actions/workflows/desktop-release-trust-chain-contract.yml)
 
-![Roadmap](https://img.shields.io/badge/ROADMAP-70.0%25-02050A?style=for-the-badge&logoColor=62E5FF)
-![Completed](https://img.shields.io/badge/DONE-42%2F60-02050A?style=for-the-badge&logoColor=62E5FF)
+![Roadmap](https://img.shields.io/badge/ROADMAP-71.7%25-02050A?style=for-the-badge&logoColor=62E5FF)
+![Completed](https://img.shields.io/badge/DONE-43%2F60-02050A?style=for-the-badge&logoColor=62E5FF)
 ![Status](https://img.shields.io/badge/STATUS-IN%20PROGRESS-02050A?style=for-the-badge&logoColor=62E5FF)
 
 **Canonical source repository:** `Swir/SWIR_OS`
@@ -33,15 +33,15 @@ SWIR OS is actively being developed toward a real installable Linux-based hybrid
 |---|---|---|
 | **Web Edition** | Portable shell, applications and API laboratory | `1.7.13` |
 | **Desktop Edition** | Windows host with native OS adapters and guarded update/recovery foundations | `0.5.7-preview` |
-| **System Edition** | Bootable Debian 13 foundation with verified native/runtime/hardware integration | In development |
+| **System Edition** | Bootable Debian 13 foundation with verified native/runtime/hardware/package integration | In development |
 
 ### Overall roadmap
 
 ```text
-██████████████░░░░░░ 70.0%
+██████████████░░░░░░ 71.7%
 ```
 
-**42 of 60 measurable roadmap deliverables are complete.** The authoritative checklist and progress math live in [`SWIR-OS-ARCHITECTURE.md`](SWIR-OS-ARCHITECTURE.md). A prototype, contract skeleton or CI job alone does not count as a completed roadmap item.
+**43 of 60 measurable roadmap deliverables are complete.** The authoritative checklist and progress math live in [`SWIR-OS-ARCHITECTURE.md`](SWIR-OS-ARCHITECTURE.md). A prototype, contract skeleton or CI job alone does not count as a completed roadmap item.
 
 ---
 
@@ -76,7 +76,7 @@ Windows kernel drivers are **not** treated as a general solution for Linux hardw
 | 🐧 **Linux System foundation** | Debian 13 base, kernel, UEFI boot path and systemd foundation are covered by System Edition gates. |
 | 🖥️ **Desktop bridge** | Windows Desktop Host exposes native filesystem, app-data, account/session, process/service, device/network, clipboard, tray, shortcuts, file-association and notification adapters. |
 | 🍷 **Windows compatibility** | Managed Wine compatibility has a live E2E that launches a deterministic Win64 application through controlled per-app compatibility state. Broader application compatibility is still being expanded. |
-| 📦 **Packages** | Shared package metadata, dependency resolution, transactions, signed-catalog foundations and a System Package Provider architecture separate Store policy from provider security boundaries. |
+| 📦 **Packages** | The production distribution Package Provider is verified inside the selected Debian 13 System rootfs; Flatpak/AppImage remain explicit experimental adapters behind separate trust boundaries. |
 | 🔧 **Hardware & drivers** | PCI/USB inventory, Hardware Catalog, Driver Center runtime, Linux in-tree drivers and `linux-firmware` are verified foundations. |
 | 🌐 **Networking** | NetworkManager integration is exercised through a real isolated live E2E path. |
 | 🔐 **Security** | Privileged operations are designed around explicit brokers, Polkit/session identity binding, trusted repository policy, journals and fail-closed validation. |
@@ -122,14 +122,14 @@ System Edition keeps software sources behind a common provider boundary instead 
 ```text
 SWIR package metadata
         │
-        ├── distribution packages
-        ├── Flatpak                (experimental / later production gate)
-        ├── AppImage               (experimental / later production gate)
+        ├── distribution packages  -> production provider verified in Debian 13 image
+        ├── Flatpak                -> experimental / later production gate
+        ├── AppImage               -> experimental / later production gate
         ├── Wine compatibility profiles
         └── Proton compatibility profiles
 ```
 
-Distribution package plans require trusted source metadata, signature verification, a structured operation plan and privileged transaction boundaries. Flatpak/AppImage support remains deliberately gated until their production lifecycle, rollback/update policy and System-image integration satisfy the corresponding roadmap requirements.
+Distribution package plans require trusted source metadata, signature verification, a structured operation plan and privileged transaction boundaries. The image E2E verifies APT selection, signed/allowlisted repository binding and fail-closed provider separation without performing package mutation. Flatpak/AppImage stay deliberately gated until their production lifecycle, rollback/update policy and System-image integration satisfy their own requirements.
 
 Microsoft Store is not copied, impersonated or bypassed. Any future integration would require an official Microsoft-supported and licensable path.
 
@@ -254,7 +254,7 @@ A local build is not equivalent to an official verified release. Release pipelin
 Development currently prioritizes the highest-impact path to a dependable Desktop/System platform:
 
 1. harden the Desktop host/update/signing lifecycle,
-2. complete the common System package/provider lifecycle and dependency-aware updater,
+2. complete dependency-aware System package updating and journaled recovery on top of the verified common provider boundary,
 3. build the native SWIR desktop shell and mandatory native application suite,
 4. finish firmware/vendor-source transaction and recovery paths,
 5. complete installer/recovery, full-system i18n, reliability, accessibility and physical-hardware qualification.
