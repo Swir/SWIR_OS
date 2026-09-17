@@ -96,12 +96,22 @@ jobs:
           done
           [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]]
 
-          SWIR_APP_E2E=1 SWIR_APP_EVIDENCE_PATH="$RUNTIME/files.json" python3 system/apps/swir-files.py
-          SWIR_APP_E2E=1 SWIR_APP_EVIDENCE_PATH="$RUNTIME/network.json" python3 system/apps/swir-network-center.py
-          SWIR_APP_E2E=1 SWIR_APP_EVIDENCE_PATH="$RUNTIME/notes.json" python3 system/apps/swir-notes.py
-          SWIR_APP_E2E=1 SWIR_APP_EVIDENCE_PATH="$RUNTIME/settings.json" python3 system/apps/swir-settings.py
-          SWIR_APP_E2E=1 SWIR_APP_EVIDENCE_PATH="$RUNTIME/system-monitor.json" python3 system/apps/swir-system-monitor.py
-          SWIR_APP_E2E=1 SWIR_APP_EVIDENCE_PATH="$RUNTIME/terminal.json" python3 system/apps/swir-terminal.py
+          run_app() {
+            local label="$1"
+            local evidence="$2"
+            local script="$3"
+            echo "Running ${label} runtime evidence"
+            timeout --signal=TERM --kill-after=5s 25s \
+              env SWIR_APP_E2E=1 SWIR_APP_EVIDENCE_PATH="$evidence" \
+              python3 "$script"
+          }
+
+          run_app "SWIR Files" "$RUNTIME/files.json" system/apps/swir-files.py
+          run_app "SWIR Network Center" "$RUNTIME/network.json" system/apps/swir-network-center.py
+          run_app "SWIR Notes" "$RUNTIME/notes.json" system/apps/swir-notes.py
+          run_app "SWIR Settings" "$RUNTIME/settings.json" system/apps/swir-settings.py
+          run_app "SWIR System Monitor" "$RUNTIME/system-monitor.json" system/apps/swir-system-monitor.py
+          run_app "SWIR Terminal" "$RUNTIME/terminal.json" system/apps/swir-terminal.py
 
           python3 - "$RUNTIME/files.json" "$RUNTIME/network.json" "$RUNTIME/notes.json" "$RUNTIME/settings.json" "$RUNTIME/system-monitor.json" "$RUNTIME/terminal.json" "$CONFIG/swir/settings.json" "$DATA/swir/notes.txt" <<'PY'
           import json, pathlib, stat, sys
@@ -157,4 +167,7 @@ jobs:
           assert terminal['windowMapped'] is True and terminal['ptyAttached'] is True
           assert terminal['privilegedOperations'] is False and terminal['shellCommandInterpolation'] is False
           assert terminal['scrollbackLines'] == 10000
+          assert terminal['spawnApi'] in {'annotated-keyword', 'vte076-positional'}
+          assert terminal['spawnError'] == ''
+          assert terminal['vteRuntimeVersion']
           PY
