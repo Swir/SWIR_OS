@@ -50,14 +50,16 @@ parted -s "$LOOP" mkpart SWIR_LIVE_ROOT ext4 513MiB 100%
 partprobe "$LOOP"; udevadm settle
 ESP_PART="${LOOP}p1"; ROOT_PART="${LOOP}p2"
 [[ -b "$ESP_PART" && -b "$ROOT_PART" ]] || fail "partition nodes were not created"
-mkfs.vfat -F 32 -n SWIR_LIVE_ESP "$ESP_PART" >/dev/null
+# FAT volume labels are limited to 11 characters. Keep this distinct from the
+# installed-system ESP while remaining valid on firmware and dosfstools.
+mkfs.vfat -F 32 -n SWIRLIVEESP "$ESP_PART" >/dev/null
 mkfs.ext4 -q -F -L SWIR_LIVE_ROOT "$ROOT_PART"
 mount "$ROOT_PART" "$ROOT_MOUNT"; ROOT_MOUNTED=1
 mkdir -p "$ROOT_MOUNT/boot/efi"
 mount "$ESP_PART" "$ROOT_MOUNT/boot/efi"; ESP_MOUNTED=1
 rsync -aHAX --numeric-ids --exclude='/boot/efi/*' "$ROOTFS/" "$ROOT_MOUNT/"
 chown 0:0 "$ROOT_MOUNT"; chmod 0755 "$ROOT_MOUNT"
-printf 'LABEL=SWIR_LIVE_ROOT / ext4 defaults 0 1\nLABEL=SWIR_LIVE_ESP /boot/efi vfat umask=0077 0 2\n' > "$ROOT_MOUNT/etc/fstab"
+printf 'LABEL=SWIR_LIVE_ROOT / ext4 defaults 0 1\nLABEL=SWIRLIVEESP /boot/efi vfat umask=0077 0 2\n' > "$ROOT_MOUNT/etc/fstab"
 mkdir -p "$ROOT_MOUNT/var/lib/swir/live"
 printf '%s\n' 'swir-live-media/0.1' > "$ROOT_MOUNT/var/lib/swir/live/media-version"
 chmod 0644 "$ROOT_MOUNT/var/lib/swir/live/media-version"
