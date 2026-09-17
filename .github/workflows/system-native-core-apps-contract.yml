@@ -1,0 +1,107 @@
+name: System Native Core Apps Contract
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'system/apps/**'
+      - 'system/session/swir-shell.py'
+      - 'system/session/provision-graphical-session.sh'
+      - 'system/SWIR-NATIVE-CORE-APPS-0.1.md'
+      - '.github/workflows/system-native-core-apps-contract.yml'
+  pull_request:
+    paths:
+      - 'system/apps/**'
+      - 'system/session/swir-shell.py'
+      - 'system/session/provision-graphical-session.sh'
+      - 'system/SWIR-NATIVE-CORE-APPS-0.1.md'
+      - '.github/workflows/system-native-core-apps-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: system-native-core-apps-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and test unprivileged app runtime policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            system/apps/core_runtime.py \
+            system/apps/core_runtime.selftest.py \
+            system/apps/swir-files.py \
+            system/apps/swir-settings.py
+          PYTHONPATH=system/apps python3 system/apps/core_runtime.selftest.py
+          ! grep -RE 'shell *= *True|os\.system\(|subprocess\.(run|Popen)\([^\n]*shell *= *True' system/apps
+          ! grep -RE 'sudo |pkexec |/usr/bin/su |/bin/su ' system/apps
+          grep -F 'fileOpenDelegationEnabled": False' system/apps/swir-files.py >/dev/null
+          grep -F 'ownerOnlySettingsFile' system/apps/swir-settings.py >/dev/null
+
+  wayland-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install controlled GTK4 and Wayland runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends weston python3-gi gir1.2-gtk-4.0
+      - name: Map SWIR Files and Settings on headless Wayland
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUNTIME="${{ runner.temp }}/swir-runtime"
+          CONFIG="${{ runner.temp }}/swir-config"
+          mkdir -p "$RUNTIME" "$CONFIG"
+          chmod 0700 "$RUNTIME" "$CONFIG"
+          export XDG_RUNTIME_DIR="$RUNTIME"
+          export XDG_CONFIG_HOME="$CONFIG"
+          export WAYLAND_DISPLAY=wayland-swir-apps
+          export GDK_BACKEND=wayland
+          export PYTHONPATH="$GITHUB_WORKSPACE/system/apps"
+
+          weston --backend=headless-backend.so --socket="$WAYLAND_DISPLAY" --idle-time=0 --log="$RUNTIME/weston.log" &
+          WESTON_PID=$!
+          cleanup() { kill "$WESTON_PID" 2>/dev/null || true; wait "$WESTON_PID" 2>/dev/null || true; }
+          trap cleanup EXIT
+
+          for _ in $(seq 1 80); do
+            [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]] && break
+            kill -0 "$WESTON_PID"
+            sleep 0.25
+          done
+          [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]]
+
+          SWIR_APP_E2E=1 SWIR_APP_EVIDENCE_PATH="$RUNTIME/files.json" python3 system/apps/swir-files.py
+          SWIR_APP_E2E=1 SWIR_APP_EVIDENCE_PATH="$RUNTIME/settings.json" python3 system/apps/swir-settings.py
+
+          python3 - "$RUNTIME/files.json" "$RUNTIME/settings.json" "$CONFIG/swir/settings.json" <<'PY'
+          import json, pathlib, stat, sys
+          files = json.load(open(sys.argv[1], encoding='utf-8'))
+          settings = json.load(open(sys.argv[2], encoding='utf-8'))
+          stored = json.load(open(sys.argv[3], encoding='utf-8'))
+          assert files['schema'] == 'swir.native-files-runtime-evidence/0.1'
+          assert files['passed'] is True and files['applicationId'] == 'dev.swir.Files'
+          assert files['nativeToolkit'] == 'gtk4' and files['displayProtocol'] == 'wayland'
+          assert files['windowMapped'] is True and files['privilegedOperations'] is False
+          assert files['currentDirectoryReadable'] is True and files['fileOpenDelegationEnabled'] is False
+          assert settings['schema'] == 'swir.native-settings-runtime-evidence/0.1'
+          assert settings['passed'] is True and settings['applicationId'] == 'dev.swir.Settings'
+          assert settings['nativeToolkit'] == 'gtk4' and settings['displayProtocol'] == 'wayland'
+          assert settings['windowMapped'] is True and settings['privilegedOperations'] is False
+          assert settings['ownerOnlySettingsFile'] is True and settings['settingsSchema'] == 'swir.user-settings/0.1'
+          assert stored['schema'] == 'swir.user-settings/0.1'
+          mode = stat.S_IMODE(pathlib.Path(sys.argv[3]).stat().st_mode)
+          assert mode == 0o600, oct(mode)
+          PY
