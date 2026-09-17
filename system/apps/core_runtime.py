@@ -130,9 +130,11 @@ class UserSettingsStore:
         os.chmod(self.directory, 0o700)
 
     def load(self) -> dict[str, object]:
+        if self.path.is_symlink():
+            raise RuntimeError("refusing symlinked settings file")
         if not self.path.exists():
             return default_settings()
-        if self.path.is_symlink() or not self.path.is_file():
+        if not self.path.is_file():
             raise RuntimeError("refusing non-regular settings file")
         data = self.path.read_bytes()
         if len(data) > MAX_SETTINGS_BYTES:
@@ -156,6 +158,8 @@ class UserSettingsStore:
                 os.fsync(handle.fileno())
             if tmp_path.is_symlink():
                 raise RuntimeError("temporary settings path became a symlink")
+            if self.path.is_symlink():
+                raise RuntimeError("refusing to replace symlinked settings file")
             os.replace(tmp_path, self.path)
             os.chmod(self.path, 0o600)
             dir_fd = os.open(self.directory, os.O_RDONLY | os.O_DIRECTORY)
