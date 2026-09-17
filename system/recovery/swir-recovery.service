@@ -12,6 +12,7 @@ Group=root
 UMask=0077
 RuntimeDirectory=swir/recovery
 RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
 PrivateTmp=yes
 ProtectHome=yes
 ProtectSystem=strict
