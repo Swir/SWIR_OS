@@ -27,6 +27,18 @@ fi
 [[ "$SOURCE_ROOT" = /* && -d "$SOURCE_ROOT" && ! -L "$SOURCE_ROOT" ]] || { echo "source root invalid" >&2; exit 64; }
 SOURCE_ROOT="$(readlink -f "$SOURCE_ROOT")"
 
+for source_file in \
+  system/session/swir-session-launcher.sh \
+  system/session/swir-shell.py \
+  system/apps/core_runtime.py \
+  system/apps/swir-files.py \
+  system/apps/swir-settings.py; do
+  [[ -f "$SOURCE_ROOT/$source_file" && ! -L "$SOURCE_ROOT/$source_file" ]] || {
+    echo "required trusted source file missing or symlinked: $source_file" >&2
+    exit 69
+  }
+done
+
 safe_target() {
   local rel="$1" dest current part
   [[ "$rel" == /* && "$rel" != / ]] || { echo "unsafe managed path: $rel" >&2; exit 73; }
@@ -105,9 +117,16 @@ install -d -m 0755 \
 
 install -m 0755 "$SOURCE_ROOT/system/session/swir-session-launcher.sh" "$(safe_target /usr/local/bin/swir-session)"
 install -m 0755 "$SOURCE_ROOT/system/session/swir-shell.py" "$(safe_target /usr/local/bin/swir-shell)"
+install -m 0644 "$SOURCE_ROOT/system/apps/core_runtime.py" "$(safe_target /usr/local/lib/swir/core_runtime.py)"
+install -m 0755 "$SOURCE_ROOT/system/apps/swir-files.py" "$(safe_target /usr/local/bin/swir-files)"
+install -m 0755 "$SOURCE_ROOT/system/apps/swir-settings.py" "$(safe_target /usr/local/bin/swir-settings)"
 install -m 0644 "$SOURCE_ROOT/system/boot/plymouth/swir.plymouth" "$(safe_target /usr/share/plymouth/themes/swir/swir.plymouth)"
 install -m 0644 "$SOURCE_ROOT/system/boot/plymouth/swir.script" "$(safe_target /usr/share/plymouth/themes/swir/swir.script)"
-chroot "$ROOTFS" /usr/bin/python3 -m py_compile /usr/local/bin/swir-shell
+chroot "$ROOTFS" /usr/bin/python3 -m py_compile \
+  /usr/local/bin/swir-shell \
+  /usr/local/bin/swir-files \
+  /usr/local/bin/swir-settings \
+  /usr/local/lib/swir/core_runtime.py
 
 cat > "$(safe_target /usr/share/wayland-sessions/swir.desktop)" <<'EOF'
 [Desktop Entry]
@@ -164,4 +183,9 @@ fi
 ! grep -Fq '[initial_session]' "$ROOTFS/etc/greetd/config.toml" || { echo "autologin initial_session is forbidden" >&2; exit 70; }
 [[ -f "$ROOTFS/etc/pam.d/greetd" && ! -L "$ROOTFS/etc/pam.d/greetd" ]] || { echo "greetd PAM policy missing" >&2; exit 70; }
 
-echo "SWIR graphical session staged: mode=$MODE theme=swir login=greetd compositor=weston native-shell=gtk4"
+verify_trusted_regular_file /usr/local/bin/swir-shell yes
+verify_trusted_regular_file /usr/local/bin/swir-files yes
+verify_trusted_regular_file /usr/local/bin/swir-settings yes
+verify_trusted_regular_file /usr/local/lib/swir/core_runtime.py no
+
+echo "SWIR graphical session staged: mode=$MODE theme=swir login=greetd compositor=weston native-shell=gtk4 native-apps=files,settings"
