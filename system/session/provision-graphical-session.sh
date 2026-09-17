@@ -85,9 +85,13 @@ for pkg in greetd weston plymouth plymouth-themes wayland-utils dbus-user-sessio
     exit 69
   }
 done
-for file in /usr/sbin/greetd /usr/sbin/agreety /usr/bin/weston /usr/bin/wayland-info /usr/bin/plymouth /usr/sbin/plymouth-set-default-theme /usr/bin/python3; do
+for file in /usr/sbin/greetd /usr/sbin/agreety /usr/bin/weston /usr/bin/wayland-info /usr/bin/plymouth /usr/sbin/plymouth-set-default-theme /usr/bin/python3.13; do
   verify_trusted_regular_file "$file" yes
 done
+[[ -L "$ROOTFS/usr/bin/python3" && "$(readlink "$ROOTFS/usr/bin/python3")" == python3.13 ]] || {
+  echo "unexpected Debian 13 python3 interpreter symlink" >&2
+  exit 69
+}
 verify_trusted_regular_file /usr/lib/systemd/system/greetd.service no
 verify_trusted_regular_file /usr/lib/systemd/system/graphical.target no
 
