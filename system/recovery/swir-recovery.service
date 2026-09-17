@@ -1,0 +1,26 @@
+[Unit]
+Description=SWIR System Edition read-only recovery diagnostics
+Documentation=https://github.com/Swir/SWIR_OS
+ConditionPathExists=/opt/swir/system/recovery/recovery-mode-agent.mjs
+After=systemd-tmpfiles-setup.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/node /opt/swir/system/recovery/recovery-mode-agent.mjs --output /run/swir/recovery/recovery-report.json --compact
+User=root
+Group=root
+UMask=0077
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/run/swir/recovery
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+TimeoutStartSec=30
+StandardOutput=journal+console
+StandardError=journal+console
