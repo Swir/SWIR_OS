@@ -19,7 +19,7 @@ USAGE
 fail() { echo "swir-install-engine: $*" >&2; exit 2; }
 command_required() { command -v "$1" >/dev/null 2>&1 || fail "missing required command: $1"; }
 
-for cmd in findmnt lsblk readlink blockdev sha256sum python3; do command_required "$cmd"; done
+for cmd in findmnt lsblk readlink sha256sum python3; do command_required "$cmd"; done
 
 MODE="${1:-}"
 [[ "$MODE" == preview || "$MODE" == cancel || "$MODE" == install ]] || { usage >&2; exit 2; }
@@ -63,7 +63,11 @@ if lsblk -nrpo MOUNTPOINTS "$TARGET" | grep -Eq '[^[:space:]]'; then
   fail "target disk or one of its partitions is mounted or active"
 fi
 
-SIZE_BYTES="$(blockdev --getsize64 "$TARGET")"
+# Preview/cancel are intentionally usable by the unprivileged GTK session. Read
+# size from sysfs through lsblk rather than opening the block device via blockdev;
+# the destructive install path is still root-only below.
+SIZE_BYTES="$(lsblk -bdno SIZE "$TARGET" | tr -d '[:space:]')"
+[[ "$SIZE_BYTES" =~ ^[0-9]+$ ]] || fail "cannot determine target size"
 MIN_BYTES=$((6 * 1024 * 1024 * 1024))
 (( SIZE_BYTES >= MIN_BYTES )) || fail "target is smaller than 6 GiB"
 SERIAL="$(lsblk -ndo SERIAL "$TARGET" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
