@@ -33,13 +33,13 @@ safe_target() {
   printf '%s\n' "$ROOTFS$rel"
 }
 
-for pkg in python3 python3-gi gir1.2-gtk-4.0 polkitd; do
+for pkg in python3 python3-gi gir1.2-gtk-4.0 polkitd locales; do
   chroot "$ROOTFS" dpkg-query -W -f='${db:Status-Abbrev}' "$pkg" 2>/dev/null | grep -qx 'ii ' || {
     echo "required graphical installer package is not installed: $pkg" >&2
     exit 69
   }
 done
-[[ -x "$ROOTFS/usr/bin/python3" && -x "$ROOTFS/usr/bin/pkexec" ]] || { echo "python3/pkexec missing" >&2; exit 69; }
+[[ -x "$ROOTFS/usr/bin/python3" && -x "$ROOTFS/usr/bin/pkexec" && -x "$ROOTFS/usr/sbin/locale-gen" ]] || { echo "python3/pkexec/locale-gen missing" >&2; exit 69; }
 
 install -d -m 0755 \
   "$(safe_target /usr/local/bin)" \
@@ -56,7 +56,6 @@ install -m 0644 "$SOURCE_ROOT/system/installer/swir-installer.desktop" "$(safe_t
 install -m 0644 "$SOURCE_ROOT/system/installer/dev.swir.installer.policy" "$(safe_target /usr/share/polkit-1/actions/dev.swir.installer.policy)"
 install -m 0644 "$SOURCE_ROOT/assets/branding/swir-os-logo.svg" "$(safe_target /usr/share/icons/hicolor/scalable/apps/swir-installer.svg)"
 
-# Fail closed if the helper/policy was broadened into a generic root execution path.
 python3 -m py_compile "$ROOTFS/usr/local/bin/swir-installer" "$ROOTFS/usr/local/libexec/swir-installer-helper"
 grep -Fq '<action id="dev.swir.installer.install">' "$ROOTFS/usr/share/polkit-1/actions/dev.swir.installer.policy"
 grep -Fq '<allow_any>no</allow_any>' "$ROOTFS/usr/share/polkit-1/actions/dev.swir.installer.policy"
@@ -67,4 +66,4 @@ grep -Fq '/usr/local/libexec/swir-installer-helper' "$ROOTFS/usr/share/polkit-1/
 chroot "$ROOTFS" /usr/bin/python3 /usr/local/bin/swir-installer --self-test
 chroot "$ROOTFS" /usr/bin/python3 /usr/local/libexec/swir-installer-helper --self-test
 
-echo "SWIR graphical installer staged: gtk4=true helper=narrow-polkit engine=guarded"
+echo "SWIR graphical installer staged: gtk4=true helper=narrow-polkit engine=guarded locales=true"
