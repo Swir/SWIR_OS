@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="320" viewBox="0 0 1200 320" role="img" aria-labelledby="title desc">
+  <title id="title">SWIR OS project hero</title>
+  <desc id="desc">Electric-cyan SWIR project banner for SWIR OS, a hybrid Linux desktop operating-system platform.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#02050A"/><stop offset="0.6" stop-color="#07111C"/><stop offset="1" stop-color="#02050A"/></linearGradient>
+    <linearGradient id="cyan" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#0088FF"/><stop offset="0.52" stop-color="#62E5FF"/><stop offset="1" stop-color="#0088FF"/></linearGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="#62E5FF" stroke-opacity="0.05"/></pattern>
+  </defs>
+  <rect width="1200" height="320" rx="26" fill="url(#bg)"/>
+  <rect x="1" y="1" width="1198" height="318" rx="25" fill="none" stroke="#62E5FF" stroke-opacity="0.25"/>
+  <rect width="1200" height="320" rx="26" fill="url(#grid)"/>
+  <path d="M0 255 C190 220 300 294 470 255 S735 218 900 250 S1085 282 1200 235" fill="none" stroke="url(#cyan)" stroke-width="2" stroke-opacity="0.22"/>
+
+  <g transform="translate(68 65)">
+    <rect width="170" height="170" rx="34" fill="#06101A" stroke="#62E5FF" stroke-opacity="0.5"/>
+    <rect x="34" y="38" width="102" height="78" rx="12" fill="none" stroke="#62E5FF" stroke-width="5" filter="url(#glow)"/>
+    <path d="M53 61h24M53 80h48M53 99h34" stroke="#62E5FF" stroke-width="5" stroke-linecap="round"/>
+    <path d="M57 133h56" stroke="#0088FF" stroke-width="6" stroke-linecap="round"/>
+    <circle cx="139" cy="34" r="7" fill="#0088FF" filter="url(#glow)"/>
+  </g>
+
+  <text x="280" y="70" font-family="Segoe UI, Arial, sans-serif" font-size="18" font-weight="700" letter-spacing="4" fill="#62E5FF">SWIR PROJECT</text>
+  <text x="280" y="145" font-family="Segoe UI, Arial, sans-serif" font-size="60" font-weight="800" fill="#F4FAFF">SWIR OS</text>
+  <text x="282" y="190" font-family="Segoe UI, Arial, sans-serif" font-size="24" font-weight="500" fill="#B8D2E0">Hybrid Linux desktop platform built toward a real System Edition</text>
+  <text x="282" y="232" font-family="Segoe UI, Arial, sans-serif" font-size="16" font-weight="650" letter-spacing="1.3" fill="#62E5FF">LINUX • DESKTOP • SYSTEM EDITION • WINE / PROTON</text>
+
+  <g transform="translate(1035 245)"><circle r="4" fill="#62E5FF" filter="url(#glow)"/><circle cx="25" r="4" fill="#0088FF"/><circle cx="50" r="4" fill="#62E5FF" opacity="0.5"/></g>
+</svg>
