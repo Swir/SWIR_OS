@@ -1,0 +1,97 @@
+name: One-time canonical System Edition migration
+
+on:
+  push:
+    branches:
+      - migration/system-edition-canonical-20260917
+    paths:
+      - '.github/workflows/one-time-canonical-system-migration.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: canonical-system-migration-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    if: ${{ !contains(github.event.head_commit.message || '', '[canonical-migration]') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout canonical target branch
+        uses: actions/checkout@v4
+        with:
+          ref: migration/system-edition-canonical-20260917
+          fetch-depth: 0
+
+      - name: Checkout accidental System Edition source
+        uses: actions/checkout@v4
+        with:
+          repository: Swir/swir.github.io
+          ref: a9b25d36637b614ac654377a9fea38dc6442514d
+          path: _migration_source
+          persist-credentials: false
+
+      - name: Overlay only System Edition implementation and CI
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d _migration_source/system
+          mkdir -p system .github/workflows
+
+          # The canonical SWIR_OS roadmap, product baseline, README, Desktop Edition,
+          # Web Edition and release/update implementation are intentionally preserved.
+          # Only the System Edition subtree and its dedicated system-* CI are migrated.
+          rsync -a _migration_source/system/ system/
+          find _migration_source/.github/workflows -maxdepth 1 -type f -name 'system-*.yml' -print0 |
+            while IFS= read -r -d '' workflow; do
+              cp "$workflow" ".github/workflows/$(basename "$workflow")"
+            done
+
+          rm -rf _migration_source
+
+          # Never import the obsolete 54-item roadmap or presentation-repo ownership.
+          git diff --exit-code -- SWIR-OS-ARCHITECTURE.md README.md SWIR-PRODUCT-BASELINE-1.0.md || {
+            echo 'Canonical product/roadmap files were unexpectedly modified.' >&2
+            exit 1
+          }
+
+      - name: Static migration sanity checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f system/image/system-base-debian-trixie.json
+          test -f system/e2e/debian13-uefi-vm-e2e.sh
+          test -f system/session/provision-graphical-session.sh
+          test -f system/runtime/windows-compat-live-e2e.mjs
+          test -f system/hardware/driver-center-runtime.mjs
+          test -f system/hardware/linux-driver-foundation-e2e.mjs
+          test -f .github/workflows/system-debian-uefi-boot-vm-e2e.yml
+          test -f .github/workflows/system-graphical-session-vm-e2e.yml
+          test -f .github/workflows/system-windows-compat-live-e2e.yml
+          test -f .github/workflows/system-linux-driver-foundation-e2e.yml
+          bash -n system/image/build-debian-trixie-rootfs.sh
+          bash -n system/e2e/debian13-uefi-vm-e2e.sh
+          bash -n system/e2e/debian13-graphical-session-vm-e2e.sh
+          python3 -m py_compile system/ipc/swir-peer-authorization-broker.py system/session/greetd-e2e-greeter.py
+          node --check system/validate-system-contracts.mjs
+          node --check system/runtime/windows-compat-live-e2e.mjs
+          node --check system/hardware/driver-center-runtime.mjs
+          node --check system/hardware/linux-driver-foundation-e2e.mjs
+
+      - name: Commit imported System Edition foundation
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet && git diff --cached --quiet; then
+            echo 'No migration changes detected.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add system .github/workflows/system-*.yml
+          git commit -m '[canonical-migration] Import verified System Edition foundation into SWIR_OS'
+          git push origin HEAD:migration/system-edition-canonical-20260917
