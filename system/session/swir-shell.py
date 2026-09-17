@@ -23,6 +23,7 @@ from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
 APP_ID: Final = "dev.swir.Shell"
 EVIDENCE_SCHEMA: Final = "swir.native-shell-runtime-evidence/0.1"
+E2E_PROBE: Final = "/usr/local/lib/swir/shell-e2e-probe"
 
 CSS = b"""
 window.swir-shell {
@@ -74,6 +75,7 @@ class SwirShell(Gtk.Application):
         self.status_label: Gtk.Label | None = None
         self.window: Gtk.ApplicationWindow | None = None
         self.evidence_path = os.environ.get("SWIR_SHELL_EVIDENCE_PATH", "")
+        self.e2e = os.environ.get("SWIR_SHELL_E2E", "0") == "1"
         self.evidence_written = False
 
     def do_startup(self) -> None:
@@ -186,6 +188,25 @@ class SwirShell(Gtk.Application):
             if self.status_label is not None:
                 self.status_label.set_text(f"Could not open {label}: {exc.strerror or 'launch failed'}")
 
+    def _run_e2e_launcher_probe(self, runtime: pathlib.Path) -> bool:
+        if not self.e2e:
+            return False
+        probe = pathlib.Path(E2E_PROBE)
+        if not probe.is_file() or not os.access(probe, os.X_OK):
+            raise RuntimeError("SWIR shell E2E launcher probe is missing")
+        output = runtime / "swir-shell-launch-probe.txt"
+        output.unlink(missing_ok=True)
+        subprocess.run(
+            (str(probe), str(output)),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            check=True,
+            timeout=5,
+        )
+        return output.read_text(encoding="utf-8").strip() == "PASS"
+
     def _on_mapped(self, _window: Gtk.Window) -> None:
         if self.evidence_written or not self.evidence_path:
             return
@@ -198,6 +219,7 @@ class SwirShell(Gtk.Application):
         if path.parent.resolve() != runtime:
             print("refusing shell evidence path outside XDG_RUNTIME_DIR", file=sys.stderr)
             return
+        launcher_probe_passed = self._run_e2e_launcher_probe(runtime)
         payload = {
             "schema": EVIDENCE_SCHEMA,
             "passed": True,
@@ -207,6 +229,7 @@ class SwirShell(Gtk.Application):
             "windowMapped": True,
             "fullscreenRequested": True,
             "launcherEntries": [item[0] for item in LAUNCHERS],
+            "launcherProbePassed": launcher_probe_passed,
             "privilegedOperationsInShell": False,
         }
         path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
