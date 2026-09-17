@@ -59,10 +59,11 @@ chmod 0755 "$ROOTFS/usr/sbin/policy-rc.d"
 chroot "$ROOTFS" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get update
 chroot "$ROOTFS" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   systemd-boot-efi greetd weston plymouth plymouth-themes wayland-utils dbus-user-session \
+  python3-gi gir1.2-gtk-4.0 \
   parted dosfstools e2fsprogs rsync util-linux udev
 chroot "$ROOTFS" /usr/bin/systemd-machine-id-setup
 bash "$REPO_ROOT/system/session/provision-graphical-session.sh" --rootfs "$ROOTFS" --source-root "$REPO_ROOT" --e2e
-install -D -m 0755 "$REPO_ROOT/system/installer/swir-install-engine.sh" "$ROOTFS/usr/local/sbin/swir-install-engine"
+bash "$REPO_ROOT/system/installer/provision-graphical-installer.sh" --rootfs "$ROOTFS" --source-root "$REPO_ROOT"
 install -d -m 0700 "$ROOTFS/var/lib/swir/live-install-e2e"
 printf 'SWIR-LIVE-INSTALL-PERSISTENCE-v1\n' > "$ROOTFS/var/lib/swir/live-install-e2e/source-marker.txt"
 chmod 0600 "$ROOTFS/var/lib/swir/live-install-e2e/source-marker.txt"
@@ -93,6 +94,29 @@ wait_session() {
   done
   return 1
 }
+smoke_graphical_installer() {
+  uid="$(id -u swir-e2e)"
+  runtime="/run/user/$uid"
+  socket="$runtime/wayland-swir"
+  i=0
+  while [ "$i" -lt 60 ] && [ ! -S "$socket" ]; do i=$((i + 1)); sleep 1; done
+  [ -S "$socket" ] || return 1
+  runuser -u swir-e2e -- env \
+    XDG_RUNTIME_DIR="$runtime" WAYLAND_DISPLAY=wayland-swir GDK_BACKEND=wayland \
+    /usr/local/bin/swir-installer --smoke-window --evidence "$runtime/swir-installer-ui-smoke.json" || return 1
+  [ -s "$runtime/swir-installer-ui-smoke.json" ] || return 1
+  cp "$runtime/swir-installer-ui-smoke.json" "$OUT/installer-ui-smoke.json"
+  chmod 0600 "$OUT/installer-ui-smoke.json"
+  python3 - "$OUT/installer-ui-smoke.json" <<'PY'
+import json, pathlib, sys
+p = pathlib.Path(sys.argv[1])
+d = json.loads(p.read_text(encoding='utf-8'))
+assert d['schema'] == 'swir.graphical-installer-ui-smoke/0.1'
+assert d['gtkWindowCreated'] is True
+assert d['liveMutationPerformed'] is False
+assert d['waylandDisplay'] == 'wayland-swir'
+PY
+}
 rootdev="$(findmnt -n -o SOURCE /)"
 rootlabel="$(lsblk -ndo LABEL "$rootdev" | tr -d '[:space:]')"
 mkdir -p "$OUT"
@@ -101,6 +125,8 @@ if [ "$rootlabel" = SWIR_LIVE_ROOT ]; then
   serial 'SWIR_LIVE_USB_PHASE booted=true transport=usb-storage'
   systemctl is-active --quiet greetd.service || fail live-greetd-inactive
   wait_session live || fail live-graphical-session-timeout
+  smoke_graphical_installer || fail graphical-installer-ui-smoke
+  serial 'SWIR_GRAPHICAL_INSTALLER_UI_SMOKE passed=true mutation=false'
   i=0; while [ "$i" -lt 60 ] && [ ! -e "$TARGET" ]; do i=$((i + 1)); sleep 1; done
   [ -b "$TARGET" ] || fail target-by-id-missing
   target_real="$(readlink -f "$TARGET")"
@@ -151,7 +177,7 @@ EOF_CANCEL
   grep -Fxq 'SWIR-LIVE-INSTALL-PERSISTENCE-v1' /mnt/swir-target/var/lib/swir/live-install-e2e/source-marker.txt || fail persistence-copy
   umount /mnt/swir-target
   printf 'PHASE1_PASS\n' > "$STATUS"
-  serial 'SWIR_LIVE_INSTALL_PHASE1_PASS live-graphical=true preview-no-write=true cancel-no-write=true wrong-token-no-write=true source-protected=true install=true'
+  serial 'SWIR_LIVE_INSTALL_PHASE1_PASS live-graphical=true installer-ui-smoke=true preview-no-write=true cancel-no-write=true wrong-token-no-write=true source-protected=true install=true'
   sync
   systemctl --no-block poweroff
   exit 0
@@ -218,7 +244,10 @@ timeout --signal=TERM --kill-after=15s 360s qemu-system-x86_64 \
 qemu_live=${PIPESTATUS[0]}
 set -e
 [[ $qemu_live -eq 0 || $qemu_live -eq 124 ]] || { echo "live QEMU failed: $qemu_live" >&2; exit 10; }
-grep -F 'SWIR_LIVE_INSTALL_PHASE1_PASS live-graphical=true preview-no-write=true cancel-no-write=true wrong-token-no-write=true source-protected=true install=true' "$SERIAL_LIVE" >/dev/null || {
+grep -F 'SWIR_LIVE_INSTALL_PHASE1_PASS live-graphical=true installer-ui-smoke=true preview-no-write=true cancel-no-write=true wrong-token-no-write=true source-protected=true install=true' "$SERIAL_LIVE" >/dev/null || {
+  tail -n 260 "$SERIAL_LIVE" >&2 || true; exit 11;
+}
+grep -F 'SWIR_GRAPHICAL_INSTALLER_UI_SMOKE passed=true mutation=false' "$SERIAL_LIVE" >/dev/null || {
   tail -n 260 "$SERIAL_LIVE" >&2 || true; exit 11;
 }
 
@@ -256,6 +285,7 @@ report = {
   "installedDiskSha256": target_sha,
   "liveUsbBooted": True,
   "liveGraphicalSessionPassed": True,
+  "graphicalInstallerUiSmokePassed": True,
   "internalDiskUnchangedBeforeExplicitInstall": True,
   "installerPreviewReadOnly": True,
   "installerCancellationReadOnly": True,

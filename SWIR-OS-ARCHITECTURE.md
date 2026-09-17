@@ -16,20 +16,20 @@ The mandatory end-user application and experience scope is defined in [`SWIR-PRO
 <!-- ROADMAP-PROGRESS:START -->
 <p align="center">
   <a href="https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml"><img alt="CI" src="https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml/badge.svg"></a>
-  <img alt="Roadmap progress" src="https://img.shields.io/badge/ROADMAP-76.7%25-2ea043?style=for-the-badge">
-  <img alt="Completed" src="https://img.shields.io/badge/DONE-46%2F60-1f6feb?style=for-the-badge">
+  <img alt="Roadmap progress" src="https://img.shields.io/badge/ROADMAP-75.4%25-2ea043?style=for-the-badge">
+  <img alt="Completed" src="https://img.shields.io/badge/DONE-49%2F65-1f6feb?style=for-the-badge">
   <img alt="Status" src="https://img.shields.io/badge/STATUS-IN%20PROGRESS-7c3aed?style=for-the-badge">
 </p>
 
 ## 📊 Overall progress
 
 ```text
-███████████████░░░░░ 76.7%
+███████████████░░░░░ 75.4%
 ```
 
 | ✅ Completed | ⏳ Remaining | 📦 Total | 🎯 Progress |
 |---:|---:|---:|---:|
-| **46** | **14** | **60** | **76.7%** |
+| **49** | **16** | **65** | **75.4%** |
 
 > **Progress rule:** the explicit `[x]/[ ]` deliverables in **Version roadmap** are the source of truth for the full Web → Desktop → System plan. Update the checklist first, then badges, numbers, percentage and the 20-segment bar. A prototype does not count as complete until the described deliverable is actually implemented and verified.
 <!-- ROADMAP-PROGRESS:END -->
@@ -319,6 +319,38 @@ Backup / Restore
 
 These applications must integrate with SWIR locale, accessibility, permissions, file associations, default-app selection, update/recovery, notifications and shared visual design. They must be tested as real daily-use applications rather than placeholder demos.
 
+### Live USB and installation path
+
+System Edition is required to support a real removable-media path rather than only VM boot or developer rootfs execution:
+
+```text
+verified raw/hybrid media + SHA-256
+        |
+        v
+firmware boot from USB
+        |
+        v
+usable SWIR Live graphical session
+        |
+        +--> try without automatic internal-disk writes
+        |
+        v
+native SWIR installer
+        |
+        v
+explicit target + partition review + destructive confirmation
+        |
+        v
+installed SSD/NVMe/HDD
+        |
+        v
+source USB removed -> standalone boot + persistent user data
+```
+
+The current VM gate boots the final raw image as QEMU USB mass storage under OVMF, verifies the graphical Live session, proves the separate target remains unchanged through idle/preview/cancel/wrong-token paths, installs to the separate disk, detaches the source USB and verifies the installed disk boots graphically with persistent data. This is VM evidence only: physical USB qualification, Secure Boot and legacy BIOS remain separate claims.
+
+The native GTK4 installer is being integrated into the final Live image through a narrow Polkit helper and the already verified guarded install engine. Its complete destructive path remains an open deliverable until the UI itself drives the full disposable-disk install E2E with account, locale, keyboard and time-zone configuration verified after detached boot.
+
 ### Common Store / Package layer
 
 The common provider layer resolves and plans native software across reviewed provider classes while keeping provider security separate from Store UI policy:
@@ -435,6 +467,11 @@ Planned:
 - [x] dependency-aware system package manager/updater
 - [x] journaled driver/firmware/package transactions
 - [x] filesystem integration and recovery mode
+- [x] UEFI Live USB raw-image + SHA-256 path verified as USB mass storage with graphical session in disposable VM
+- [x] guarded disk-install engine with read-only preview/cancel, source-media rejection and separate-disk install verified in disposable VM
+- [x] detached installed-disk UEFI boot + graphical session + persistence after source USB removal verified in disposable VM
+- [ ] native graphical Live installer drives the complete install path including target review, account, locale, keyboard, time zone and final destructive confirmation
+- [ ] physical Live USB boot/install qualification on dedicated test hardware, tracked separately from VM evidence
 
 ---
 

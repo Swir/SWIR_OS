@@ -25,6 +25,7 @@ for (const key of ['liveImageSha256', 'installedDiskSha256']) {
 for (const key of [
   'liveUsbBooted',
   'liveGraphicalSessionPassed',
+  'graphicalInstallerUiSmokePassed',
   'internalDiskUnchangedBeforeExplicitInstall',
   'installerPreviewReadOnly',
   'installerCancellationReadOnly',

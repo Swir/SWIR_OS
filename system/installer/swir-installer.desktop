@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Install SWIR OS
+GenericName=System Installer
+Comment=Install SWIR OS System Edition from the Live environment
+Exec=/usr/local/bin/swir-installer
+Icon=swir-installer
+Terminal=false
+Type=Application
+Categories=System;Settings;
+Keywords=install;system;disk;live;
+StartupNotify=true
+OnlyShowIn=SWIR;

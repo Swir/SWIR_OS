@@ -7,11 +7,12 @@
   "required": [
     "schema", "generatedAt", "distribution", "architecture", "firmware",
     "liveMediaFormat", "liveUsbTransport", "liveImageSha256", "installedDiskSha256",
-    "liveUsbBooted", "liveGraphicalSessionPassed", "internalDiskUnchangedBeforeExplicitInstall",
-    "installerPreviewReadOnly", "installerCancellationReadOnly", "wrongConfirmationRejectedWithoutWrite",
-    "sourceMediaTargetRejected", "explicitConfirmationRequired", "installToSeparateDiskPassed",
-    "sourceUsbDetachedBeforeInstalledBoot", "installedDiskBooted", "installedGraphicalSessionPassed",
-    "persistencePassed", "secureBootClaim", "physicalHardwareQualificationClaim", "graphicalInstallerClaim"
+    "liveUsbBooted", "liveGraphicalSessionPassed", "graphicalInstallerUiSmokePassed",
+    "internalDiskUnchangedBeforeExplicitInstall", "installerPreviewReadOnly", "installerCancellationReadOnly",
+    "wrongConfirmationRejectedWithoutWrite", "sourceMediaTargetRejected", "explicitConfirmationRequired",
+    "installToSeparateDiskPassed", "sourceUsbDetachedBeforeInstalledBoot", "installedDiskBooted",
+    "installedGraphicalSessionPassed", "persistencePassed", "secureBootClaim",
+    "physicalHardwareQualificationClaim", "graphicalInstallerClaim"
   ],
   "properties": {
     "schema": { "const": "swir.system-live-usb-install-e2e/0.1" },
@@ -25,6 +26,7 @@
     "installedDiskSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
     "liveUsbBooted": { "const": true },
     "liveGraphicalSessionPassed": { "const": true },
+    "graphicalInstallerUiSmokePassed": { "const": true },
     "internalDiskUnchangedBeforeExplicitInstall": { "const": true },
     "installerPreviewReadOnly": { "const": true },
     "installerCancellationReadOnly": { "const": true },
