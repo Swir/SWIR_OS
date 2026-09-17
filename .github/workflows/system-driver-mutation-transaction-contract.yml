@@ -1,0 +1,93 @@
+name: System Driver Mutation Transaction Contract
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'system/hardware/driver-mutation-transaction-service.mjs'
+      - 'system/hardware/driver-mutation-transaction-service.selftest.mjs'
+      - 'system/hardware/driver-resolver.mjs'
+      - 'system/firmware/fwupd-firmware-transaction-service.mjs'
+      - 'system/firmware/fwupd-firmware-transaction-service.selftest.mjs'
+      - 'system/packages/package-transaction-service.mjs'
+      - 'system/contracts/driver-mutation-transaction.schema.json'
+      - 'system/contracts/firmware-transaction-journal.schema.json'
+      - 'system/contracts/package-transaction-journal.schema.json'
+      - 'system/SWIR-DRIVER-MUTATION-TRANSACTIONS-0.1.md'
+      - 'SWIR-OS-ARCHITECTURE.md'
+      - '.github/workflows/system-driver-mutation-transaction-contract.yml'
+  pull_request:
+    paths:
+      - 'system/hardware/driver-mutation-transaction-service.mjs'
+      - 'system/hardware/driver-mutation-transaction-service.selftest.mjs'
+      - 'system/hardware/driver-resolver.mjs'
+      - 'system/firmware/fwupd-firmware-transaction-service.mjs'
+      - 'system/firmware/fwupd-firmware-transaction-service.selftest.mjs'
+      - 'system/packages/package-transaction-service.mjs'
+      - 'system/contracts/driver-mutation-transaction.schema.json'
+      - 'system/contracts/firmware-transaction-journal.schema.json'
+      - 'system/contracts/package-transaction-journal.schema.json'
+      - 'system/SWIR-DRIVER-MUTATION-TRANSACTIONS-0.1.md'
+      - 'SWIR-OS-ARCHITECTURE.md'
+      - '.github/workflows/system-driver-mutation-transaction-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: system-driver-mutation-transactions-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Validate transaction source syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check system/hardware/driver-mutation-transaction-service.mjs
+          node --check system/hardware/driver-mutation-transaction-service.selftest.mjs
+          node --check system/firmware/fwupd-firmware-transaction-service.mjs
+          node --check system/firmware/fwupd-firmware-transaction-service.selftest.mjs
+          node --check system/packages/package-transaction-service.mjs
+
+      - name: Validate journal contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m json.tool system/contracts/driver-mutation-transaction.schema.json >/dev/null
+          python3 -m json.tool system/contracts/firmware-transaction-journal.schema.json >/dev/null
+          python3 -m json.tool system/contracts/package-transaction-journal.schema.json >/dev/null
+
+      - name: Verify firmware child transaction lifecycle
+        run: node system/firmware/fwupd-firmware-transaction-service.selftest.mjs
+
+      - name: Verify package child transaction lifecycle
+        run: node system/packages/package-transaction-service.selftest.mjs
+
+      - name: Verify Driver Center parent transaction routing
+        run: node system/hardware/driver-mutation-transaction-service.selftest.mjs
+
+      - name: Enforce mutation safety invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F "directKernelModuleMutation: false" system/hardware/driver-mutation-transaction-service.mjs >/dev/null
+          grep -F "arbitraryDriverDownloads: false" system/hardware/driver-mutation-transaction-service.mjs >/dev/null
+          grep -F "windowsKernelDriversAsLinuxDrivers: false" system/hardware/driver-mutation-transaction-service.mjs >/dev/null
+          grep -F "parentJournalBeforeDelegation: true" system/hardware/driver-mutation-transaction-service.mjs >/dev/null
+          grep -F "childJournalRequired: true" system/hardware/driver-mutation-transaction-service.mjs >/dev/null
+          grep -F "automaticMutation: false" system/hardware/driver-mutation-transaction-service.mjs >/dev/null
+          ! grep -E 'exec\(|spawn\(|shell:[[:space:]]*true|https?://' system/hardware/driver-mutation-transaction-service.mjs
+
+      - name: Validate locked roadmap math
+        run: node scripts/validate-roadmap-progress.mjs

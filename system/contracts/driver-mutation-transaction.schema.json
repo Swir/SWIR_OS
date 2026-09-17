@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://swir.github.io/system/contracts/driver-mutation-transaction.schema.json",
+  "title": "SWIR Driver Mutation Transaction 0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "transactionId", "state", "createdAt", "updatedAt", "actorId", "request", "requestDigest", "child", "recovery", "error"],
+  "properties": {
+    "schema": { "const": "swir.driver-mutation-transaction/0.1" },
+    "transactionId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{7,159}$" },
+    "state": { "enum": ["prepared", "delegating", "committed", "staged-reboot-required", "failed-needs-recovery"] },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "actorId": { "type": ["string", "null"] },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "driverPlanGeneratedAt", "operation", "binding", "route"],
+      "properties": {
+        "schema": { "const": "swir.driver-mutation-request/0.1" },
+        "driverPlanGeneratedAt": { "type": "string", "format": "date-time" },
+        "operation": { "type": "object" },
+        "binding": { "type": "object" },
+        "route": { "enum": ["system-package-transaction", "fwupd-firmware-transaction"] }
+      }
+    },
+    "requestDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "child": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["class", "transactionId", "state", "journalOwnedByChild"],
+          "properties": {
+            "class": { "enum": ["package", "firmware"] },
+            "transactionId": { "type": "string", "minLength": 8 },
+            "state": { "type": "string", "minLength": 1 },
+            "journalOwnedByChild": { "const": true }
+          }
+        }
+      ]
+    },
+    "recovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["automaticMutation", "childRecoveryRequired", "operatorReviewRequired"],
+      "properties": {
+        "automaticMutation": { "const": false },
+        "childRecoveryRequired": { "type": "boolean" },
+        "operatorReviewRequired": { "type": "boolean" }
+      }
+    },
+    "error": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code", "message"],
+          "properties": {
+            "code": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "message": { "type": "string", "minLength": 1, "maxLength": 1000 }
+          }
+        }
+      ]
+    }
+  }
+}
