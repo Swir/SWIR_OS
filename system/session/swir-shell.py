@@ -12,7 +12,6 @@ import datetime as dt
 import json
 import os
 import pathlib
-import shutil
 import subprocess
 import sys
 from typing import Final
@@ -20,7 +19,7 @@ from typing import Final
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import GLib, Gtk  # noqa: E402
+from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
 APP_ID: Final = "dev.swir.Shell"
 EVIDENCE_SCHEMA: Final = "swir.native-shell-runtime-evidence/0.1"
@@ -81,11 +80,12 @@ class SwirShell(Gtk.Application):
         Gtk.Application.do_startup(self)
         provider = Gtk.CssProvider()
         provider.load_from_data(CSS)
-        display = __import__("gi.repository", fromlist=["Gdk"]).Gdk.Display.get_default()
-        if display is not None:
-            Gtk.StyleContext.add_provider_for_display(
-                display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
-            )
+        display = Gdk.Display.get_default()
+        if display is None:
+            raise RuntimeError("SWIR shell requires an active graphical display")
+        Gtk.StyleContext.add_provider_for_display(
+            display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
 
     def do_activate(self) -> None:
         if self.window is not None:
@@ -190,8 +190,12 @@ class SwirShell(Gtk.Application):
         if self.evidence_written or not self.evidence_path:
             return
         path = pathlib.Path(self.evidence_path)
-        runtime = pathlib.Path(os.environ.get("XDG_RUNTIME_DIR", ""))
-        if not runtime or path.parent != runtime:
+        runtime_text = os.environ.get("XDG_RUNTIME_DIR", "")
+        if not runtime_text:
+            print("missing XDG_RUNTIME_DIR for shell evidence", file=sys.stderr)
+            return
+        runtime = pathlib.Path(runtime_text).resolve()
+        if path.parent.resolve() != runtime:
             print("refusing shell evidence path outside XDG_RUNTIME_DIR", file=sys.stderr)
             return
         payload = {
