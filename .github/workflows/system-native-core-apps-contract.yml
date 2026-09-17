@@ -39,28 +39,35 @@ jobs:
             system/apps/core_runtime.py \
             system/apps/core_runtime.selftest.py \
             system/apps/swir-files.py \
+            system/apps/swir-network-center.py \
             system/apps/swir-notes.py \
             system/apps/swir-settings.py \
-            system/apps/swir-system-monitor.py
+            system/apps/swir-system-monitor.py \
+            system/apps/swir-terminal.py
           PYTHONPATH=system/apps python3 system/apps/core_runtime.selftest.py
           ! grep -RE 'shell *= *True|os\.system\(|subprocess\.(run|Popen)\([^\n]*shell *= *True' system/apps
           ! grep -RE 'sudo |pkexec |/usr/bin/su |/bin/su ' system/apps
           grep -F 'fileOpenDelegationEnabled": False' system/apps/swir-files.py >/dev/null
+          grep -F 'mutationControlsExposed": False' system/apps/swir-network-center.py >/dev/null
           grep -F 'ownerOnlyNotesFile' system/apps/swir-notes.py >/dev/null
           grep -F 'ownerOnlySettingsFile' system/apps/swir-settings.py >/dev/null
           grep -F 'processRowsBounded' system/apps/swir-system-monitor.py >/dev/null
+          grep -F 'shellCommandInterpolation": False' system/apps/swir-terminal.py >/dev/null
+          grep -F 'Terminal", (("/usr/local/bin/swir-terminal",)' system/session/swir-shell.py >/dev/null
+          grep -F 'Network", (("/usr/local/bin/swir-network-center",)' system/session/swir-shell.py >/dev/null
 
   wayland-runtime:
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
-      - name: Install controlled GTK4 and Wayland runtime
+      - name: Install controlled GTK4, VTE and Wayland runtime
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends weston python3-gi gir1.2-gtk-4.0
+          sudo apt-get install -y --no-install-recommends \
+            weston python3-gi gir1.2-gtk-4.0 gir1.2-vte-3.91 libvte-2.91-gtk4-0 network-manager
       - name: Map native SWIR core apps on headless Wayland
         shell: bash
         run: |
@@ -90,24 +97,36 @@ jobs:
           [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]]
 
           SWIR_APP_E2E=1 SWIR_APP_EVIDENCE_PATH="$RUNTIME/files.json" python3 system/apps/swir-files.py
+          SWIR_APP_E2E=1 SWIR_APP_EVIDENCE_PATH="$RUNTIME/network.json" python3 system/apps/swir-network-center.py
           SWIR_APP_E2E=1 SWIR_APP_EVIDENCE_PATH="$RUNTIME/notes.json" python3 system/apps/swir-notes.py
           SWIR_APP_E2E=1 SWIR_APP_EVIDENCE_PATH="$RUNTIME/settings.json" python3 system/apps/swir-settings.py
           SWIR_APP_E2E=1 SWIR_APP_EVIDENCE_PATH="$RUNTIME/system-monitor.json" python3 system/apps/swir-system-monitor.py
+          SWIR_APP_E2E=1 SWIR_APP_EVIDENCE_PATH="$RUNTIME/terminal.json" python3 system/apps/swir-terminal.py
 
-          python3 - "$RUNTIME/files.json" "$RUNTIME/notes.json" "$RUNTIME/settings.json" "$RUNTIME/system-monitor.json" "$CONFIG/swir/settings.json" "$DATA/swir/notes.txt" <<'PY'
+          python3 - "$RUNTIME/files.json" "$RUNTIME/network.json" "$RUNTIME/notes.json" "$RUNTIME/settings.json" "$RUNTIME/system-monitor.json" "$RUNTIME/terminal.json" "$CONFIG/swir/settings.json" "$DATA/swir/notes.txt" <<'PY'
           import json, pathlib, stat, sys
           files = json.load(open(sys.argv[1], encoding='utf-8'))
-          notes = json.load(open(sys.argv[2], encoding='utf-8'))
-          settings = json.load(open(sys.argv[3], encoding='utf-8'))
-          monitor = json.load(open(sys.argv[4], encoding='utf-8'))
-          stored = json.load(open(sys.argv[5], encoding='utf-8'))
-          notes_path = pathlib.Path(sys.argv[6])
+          network = json.load(open(sys.argv[2], encoding='utf-8'))
+          notes = json.load(open(sys.argv[3], encoding='utf-8'))
+          settings = json.load(open(sys.argv[4], encoding='utf-8'))
+          monitor = json.load(open(sys.argv[5], encoding='utf-8'))
+          terminal = json.load(open(sys.argv[6], encoding='utf-8'))
+          stored = json.load(open(sys.argv[7], encoding='utf-8'))
+          notes_path = pathlib.Path(sys.argv[8])
 
           assert files['schema'] == 'swir.native-files-runtime-evidence/0.1'
           assert files['passed'] is True and files['applicationId'] == 'dev.swir.Files'
           assert files['nativeToolkit'] == 'gtk4' and files['displayProtocol'] == 'wayland'
           assert files['windowMapped'] is True and files['privilegedOperations'] is False
           assert files['currentDirectoryReadable'] is True and files['fileOpenDelegationEnabled'] is False
+
+          assert network['schema'] == 'swir.native-network-center-runtime-evidence/0.1'
+          assert network['passed'] is True and network['applicationId'] == 'dev.swir.NetworkCenter'
+          assert network['nativeToolkit'] == 'gtk4' and network['displayProtocol'] == 'wayland'
+          assert network['windowMapped'] is True and network['privilegedOperations'] is False
+          assert network['mutationControlsExposed'] is False and network['nmcliAbsolutePath'] == '/usr/bin/nmcli'
+          assert network['nmcliPresent'] is True and network['deviceRowsBounded'] == 100
+          assert network['queryTimeoutSeconds'] == 4
 
           assert notes['schema'] == 'swir.native-notes-runtime-evidence/0.1'
           assert notes['passed'] is True and notes['applicationId'] == 'dev.swir.Notes'
@@ -123,7 +142,7 @@ jobs:
           assert settings['windowMapped'] is True and settings['privilegedOperations'] is False
           assert settings['ownerOnlySettingsFile'] is True and settings['settingsSchema'] == 'swir.user-settings/0.1'
           assert stored['schema'] == 'swir.user-settings/0.1'
-          assert stat.S_IMODE(pathlib.Path(sys.argv[5]).stat().st_mode) == 0o600
+          assert stat.S_IMODE(pathlib.Path(sys.argv[7]).stat().st_mode) == 0o600
 
           assert monitor['schema'] == 'swir.native-system-monitor-runtime-evidence/0.1'
           assert monitor['passed'] is True and monitor['applicationId'] == 'dev.swir.SystemMonitor'
@@ -131,4 +150,11 @@ jobs:
           assert monitor['windowMapped'] is True and monitor['privilegedOperations'] is False
           assert 0 < monitor['visibleProcessCount'] <= monitor['processRowsBounded'] == 200
           assert monitor['memTotalKiB'] > 0
+
+          assert terminal['schema'] == 'swir.native-terminal-runtime-evidence/0.1'
+          assert terminal['passed'] is True and terminal['applicationId'] == 'dev.swir.Terminal'
+          assert terminal['nativeToolkit'] == 'gtk4-vte' and terminal['displayProtocol'] == 'wayland'
+          assert terminal['windowMapped'] is True and terminal['ptyAttached'] is True
+          assert terminal['privilegedOperations'] is False and terminal['shellCommandInterpolation'] is False
+          assert terminal['scrollbackLines'] == 10000
           PY
