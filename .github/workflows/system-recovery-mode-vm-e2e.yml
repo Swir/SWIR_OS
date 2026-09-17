@@ -1,0 +1,123 @@
+name: System Recovery Mode UEFI E2E
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'system/recovery/**'
+      - 'system/e2e/debian13-recovery-mode-vm-e2e.sh'
+      - 'system/contracts/system-recovery-mode-e2e.schema.json'
+      - 'system/image/system-base-debian-trixie.json'
+      - 'system/image/build-debian-trixie-rootfs.sh'
+      - 'system/SWIR-RECOVERY-MODE-E2E-0.1.md'
+      - 'SWIR-OS-ARCHITECTURE.md'
+      - '.github/workflows/system-recovery-mode-vm-e2e.yml'
+  pull_request:
+    paths:
+      - 'system/recovery/**'
+      - 'system/e2e/debian13-recovery-mode-vm-e2e.sh'
+      - 'system/contracts/system-recovery-mode-e2e.schema.json'
+      - 'system/image/system-base-debian-trixie.json'
+      - 'system/image/build-debian-trixie-rootfs.sh'
+      - 'system/SWIR-RECOVERY-MODE-E2E-0.1.md'
+      - 'SWIR-OS-ARCHITECTURE.md'
+      - '.github/workflows/system-recovery-mode-vm-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: system-recovery-mode-vm-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate recovery contracts and provisioning
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check system/recovery/recovery-mode-agent.mjs
+          node --check system/recovery/recovery-mode-provisioning.mjs
+          node --check system/recovery/recovery-mode-provisioning.selftest.mjs
+          bash -n system/e2e/debian13-recovery-mode-vm-e2e.sh
+          python3 -m json.tool system/contracts/system-recovery-mode-e2e.schema.json >/dev/null
+          node system/recovery/recovery-mode-provisioning.selftest.mjs
+          node scripts/validate-roadmap-progress.mjs
+          grep -F 'ProtectSystem=strict' system/recovery/swir-recovery.service >/dev/null
+          grep -F 'NoNewPrivileges=yes' system/recovery/swir-recovery.service >/dev/null
+          grep -F 'CapabilityBoundingSet=' system/recovery/swir-recovery.service >/dev/null
+          grep -F 'RuntimeDirectoryPreserve=yes' system/recovery/swir-recovery.service >/dev/null
+          grep -F "const PACKAGE_JOURNAL_ROOT = '/var/lib/swir/package-transactions';" system/recovery/recovery-mode-agent.mjs >/dev/null
+          grep -F "const FIRMWARE_JOURNAL_ROOT = '/var/lib/swir/transactions/firmware';" system/recovery/recovery-mode-agent.mjs >/dev/null
+          grep -F "const FIRMWARE_JOURNAL_SCHEMA = 'swir.firmware-transaction-journal/0.1';" system/recovery/recovery-mode-agent.mjs >/dev/null
+          grep -F "statusField: 'status'" system/recovery/recovery-mode-agent.mjs >/dev/null
+          grep -F 'systemd.unit=swir-recovery.target' system/e2e/debian13-recovery-mode-vm-e2e.sh >/dev/null
+          grep -F 'systemd.mask=systemd-remount-fs.service' system/e2e/debian13-recovery-mode-vm-e2e.sh >/dev/null
+          grep -F 'systemd.mask=apt-daily.timer' system/e2e/debian13-recovery-mode-vm-e2e.sh >/dev/null
+          grep -F 'systemd.mask=apt-daily-upgrade.timer' system/e2e/debian13-recovery-mode-vm-e2e.sh >/dev/null
+          grep -F 'systemd.mask=dpkg-db-backup.timer' system/e2e/debian13-recovery-mode-vm-e2e.sh >/dev/null
+          grep -F 'systemd.mask=fstrim.timer' system/e2e/debian13-recovery-mode-vm-e2e.sh >/dev/null
+          grep -F 'systemd.mask=fwupd-refresh.timer' system/e2e/debian13-recovery-mode-vm-e2e.sh >/dev/null
+          grep -F 'fstab=no' system/e2e/debian13-recovery-mode-vm-e2e.sh >/dev/null
+          ! grep -E 'curl |wget |--no-check-gpg|AllowUnauthenticated|trusted=yes|shell:[[:space:]]*true' \
+            system/recovery/recovery-mode-agent.mjs \
+            system/recovery/recovery-mode-provisioning.mjs \
+            system/e2e/debian13-recovery-mode-vm-e2e.sh
+
+  recovery-boot-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install controlled image and VM dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mmdebstrap debian-archive-keyring qemu-system-x86 qemu-utils ovmf e2fsprogs dosfstools rsync parted util-linux udev
+      - name: Build and boot dedicated SWIR recovery entry
+        env:
+          SWIR_RECOVERY_VM_WORK_ROOT: ${{ runner.temp }}/swir-debian13-recovery-vm
+          SWIR_RECOVERY_VM_ARTIFACT_DIR: ${{ runner.temp }}/swir-debian13-recovery-vm-artifacts
+        run: sudo --preserve-env=SWIR_RECOVERY_VM_WORK_ROOT,SWIR_RECOVERY_VM_ARTIFACT_DIR bash system/e2e/debian13-recovery-mode-vm-e2e.sh
+      - name: Export readable diagnostics
+        if: always()
+        run: sudo chown -R "$USER:$USER" "${{ runner.temp }}/swir-debian13-recovery-vm-artifacts" 2>/dev/null || true
+      - name: Validate emitted recovery evidence
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m json.tool "${{ runner.temp }}/swir-debian13-recovery-vm-artifacts/recovery-mode-evidence.json" >/dev/null
+          node - "${{ runner.temp }}/swir-debian13-recovery-vm-artifacts/recovery-mode-evidence.json" <<'NODE'
+          const fs = require('fs');
+          const e = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          if (e.schema !== 'swir.system-recovery-mode-e2e/0.2' || e.passed !== true) process.exit(2);
+          if (!e.recoveryModeClaim || !e.filesystemIntegrationClaim || e.filesystemRepairClaim) process.exit(3);
+          if (!e.rootReadOnly || !e.rootFstabIntegrated || !e.espFstabIntegrated || !e.remountServiceMasked) process.exit(4);
+          if (!e.fstabGeneratorDisabledDuringRecovery || !e.guestNetworkDisabled || !e.mutationTimersMasked || !e.diagnosticsAgentPassed) process.exit(5);
+          if (!e.transactionJournalScanPassed || !e.packageJournalPathIntegrated || !e.firmwareJournalPathIntegrated) process.exit(6);
+          if (!e.pendingPackageTransactionDetected || !e.pendingFirmwareTransactionDetected || !e.manualRecoveryRequired) process.exit(7);
+          if (e.packageJournalSchema !== 'swir.system-package-transaction/0.1' || e.firmwareJournalSchema !== 'swir.firmware-transaction-journal/0.1') process.exit(8);
+          if (e.automaticFilesystemRepairPerformed || e.automaticPackageMutationPerformed || e.automaticFirmwareMutationPerformed) process.exit(9);
+          for (const key of ['bootloaderSha256', 'imageSha256', 'ovmfSha256']) if (!/^[0-9a-f]{64}$/.test(e[key] || '')) process.exit(10);
+          NODE
+      - name: Upload compact recovery evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swir-debian13-recovery-vm-e2e-${{ github.run_id }}
+          path: ${{ runner.temp }}/swir-debian13-recovery-vm-artifacts
+          if-no-files-found: warn
+          retention-days: 7

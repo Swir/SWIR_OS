@@ -16,20 +16,20 @@ The mandatory end-user application and experience scope is defined in [`SWIR-PRO
 <!-- ROADMAP-PROGRESS:START -->
 <p align="center">
   <a href="https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml"><img alt="CI" src="https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml/badge.svg"></a>
-  <img alt="Roadmap progress" src="https://img.shields.io/badge/ROADMAP-73.3%25-2ea043?style=for-the-badge">
-  <img alt="Completed" src="https://img.shields.io/badge/DONE-44%2F60-1f6feb?style=for-the-badge">
+  <img alt="Roadmap progress" src="https://img.shields.io/badge/ROADMAP-75.0%25-2ea043?style=for-the-badge">
+  <img alt="Completed" src="https://img.shields.io/badge/DONE-45%2F60-1f6feb?style=for-the-badge">
   <img alt="Status" src="https://img.shields.io/badge/STATUS-IN%20PROGRESS-7c3aed?style=for-the-badge">
 </p>
 
 ## 📊 Overall progress
 
 ```text
-███████████████░░░░░ 73.3%
+███████████████░░░░░ 75.0%
 ```
 
 | ✅ Completed | ⏳ Remaining | 📦 Total | 🎯 Progress |
 |---:|---:|---:|---:|
-| **44** | **16** | **60** | **73.3%** |
+| **45** | **15** | **60** | **75.0%** |
 
 > **Progress rule:** the explicit `[x]/[ ]` deliverables in **Version roadmap** are the source of truth for the full Web → Desktop → System plan. Update the checklist first, then badges, numbers, percentage and the 20-segment bar. A prototype does not count as complete until the described deliverable is actually implemented and verified.
 <!-- ROADMAP-PROGRESS:END -->
@@ -434,7 +434,7 @@ Planned:
 - [ ] allowlisted official vendor repositories for exceptional proprietary components
 - [x] dependency-aware system package manager/updater
 - [ ] journaled driver/firmware/package transactions
-- [ ] filesystem integration and recovery mode
+- [x] filesystem integration and recovery mode
 
 ---
 

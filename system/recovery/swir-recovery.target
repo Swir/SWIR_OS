@@ -1,0 +1,8 @@
+[Unit]
+Description=SWIR System Edition recovery mode
+Documentation=https://github.com/Swir/SWIR_OS
+Requires=basic.target swir-recovery.service
+After=basic.target swir-recovery.service
+Conflicts=graphical.target multi-user.target rescue.target emergency.target
+AllowIsolate=yes
+StopWhenUnneeded=no
