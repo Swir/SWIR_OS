@@ -19,6 +19,23 @@ Current verified behavior:
 
 This is not yet a complete File Manager product. Copy/move/delete, removable volumes, previews, search, trash and native Default Apps handoff remain future work.
 
+## SWIR Terminal
+
+`system/apps/swir-terminal.py` is a first-party GTK4 terminal using Debian's GTK4 VTE runtime.
+
+Current verified behavior:
+
+- starts as `dev.swir.Terminal` on Wayland;
+- attaches a real VTE pseudo-terminal instead of emulating a terminal in a text box;
+- resolves the current account's configured executable login shell with `/bin/bash` and `/bin/sh` as fixed fallbacks;
+- starts the shell in the user's home directory;
+- keeps a bounded 10,000-line scrollback;
+- does not interpolate user text into a shell command from the launcher;
+- exposes no built-in `sudo`, `pkexec`, root-login or privilege shortcut;
+- receives VTE only from the signed Debian package repositories used by the image build.
+
+The shell itself naturally executes commands entered by the logged-in user. This milestone does not grant the terminal any privilege beyond that user's normal Linux account and does not bypass the existing Polkit/broker boundaries.
+
 ## SWIR Notes
 
 `system/apps/swir-notes.py` is an unprivileged first-party GTK4 notes editor.
@@ -52,6 +69,21 @@ Current verified behavior:
 
 Privileged settings such as users, storage, firmware, system services and package mutation remain behind dedicated brokers/Polkit policies and are not implemented by this user-settings foundation.
 
+## SWIR Network Center
+
+`system/apps/swir-network-center.py` is an unprivileged GTK4 NetworkManager status surface.
+
+Current verified behavior:
+
+- starts as `dev.swir.NetworkCenter` on Wayland;
+- invokes only the fixed `/usr/bin/nmcli` binary with fixed read-only query argument vectors and `shell=False`;
+- bounds each query to four seconds and bounds the visible device list to 100 rows;
+- displays NetworkManager's overall state plus device name, type, state and active connection when the system service is reachable;
+- reports a bounded error instead of pretending connectivity when NetworkManager is unavailable;
+- exposes a refresh action but no connect/disconnect, credential, radio, route, DNS or privileged mutation controls.
+
+Connection mutation remains future work behind explicit NetworkManager/Polkit policy and must not be confused with this read-only observability milestone.
+
 ## SWIR System Monitor
 
 `system/apps/swir-system-monitor.py` is an unprivileged GTK4 resource/process viewer.
@@ -77,10 +109,10 @@ Process termination, service control, cgroup inspection and privileged diagnosti
 `.github/workflows/system-native-core-apps-contract.yml` runs two layers:
 
 1. policy checks, shared-runtime self-tests and Python compilation;
-2. real GTK4 application startup against a headless Weston Wayland compositor, requiring SWIR Files, Notes, Settings and System Monitor to map actual windows and emit bounded runtime evidence.
+2. real GTK4 application startup against a headless Weston Wayland compositor, requiring SWIR Files, Terminal, Notes, Settings, Network Center and System Monitor to map actual windows and emit bounded runtime evidence.
 
-The Wayland gate also verifies atomic Notes persistence, owner-only Notes/Settings files and live `/proc` resource evidence. The graphical System Edition provisioning path installs these scripts into the image only after source and package checks succeed. The SWIR shell uses fixed executable paths and never builds launcher commands from user-controlled shell strings.
+The Wayland gate verifies VTE PTY attachment, bounded read-only NetworkManager queries, atomic Notes persistence, owner-only Notes/Settings files and live `/proc` resource evidence. The graphical System Edition provisioning path installs these scripts into the image only after source/package checks succeed. VTE comes from the signed Debian package source already trusted by the System image, and the SWIR shell uses fixed executable paths rather than building launcher commands from user-controlled shell strings.
 
 ## Roadmap accounting
 
-This milestone does **not** mark `essential native Linux application suite for dependable daily use` complete. The product baseline still requires the full coherent suite, including Terminal, Software/Store, Update Center, Hardware/Driver and Network centers, native Browser, media/image/document/archive applications, diagnostics and backup/recovery integration. Progress changes only when the authoritative `SWIR-OS-ARCHITECTURE.md` checklist is legitimately satisfied.
+This milestone does **not** mark `essential native Linux application suite for dependable daily use` complete. The product baseline still requires the full coherent suite, including Software/Store, Update Center, Hardware/Driver Center UI, native Browser, media/image/document/archive applications, diagnostics and backup/recovery integration. Progress changes only when the authoritative `SWIR-OS-ARCHITECTURE.md` checklist is legitimately satisfied.
