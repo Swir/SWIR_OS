@@ -13,12 +13,11 @@ import json
 import os
 import pathlib
 import re
-import shutil
 import stat
 import subprocess
 import sys
 import tempfile
-from typing import Any
+from typing import Any, NoReturn
 
 ENGINE = pathlib.Path("/usr/local/sbin/swir-install-engine")
 LIVE_MARKER = pathlib.Path("/var/lib/swir/live/live.json")
@@ -33,7 +32,7 @@ class InstallerError(RuntimeError):
     pass
 
 
-def fail(message: str, code: int = 2) -> "NoReturn":
+def fail(message: str, code: int = 2) -> NoReturn:
     print(json.dumps({"schema": "swir.graphical-installer-result/0.1", "status": "error", "message": message}), file=sys.stdout)
     raise SystemExit(code)
 
@@ -67,7 +66,8 @@ def validate_request(data: Any) -> dict[str, str]:
         raise InstallerError("confirmation token format is invalid")
     if not USERNAME_RE.fullmatch(username) or username in {"root", "daemon", "bin", "sys", "sync", "games", "man", "lp", "mail", "news", "uucp", "proxy", "www-data", "backup", "list", "irc", "_apt", "nobody", "systemd-network", "systemd-timesync", "messagebus", "polkitd", "_greetd"}:
         raise InstallerError("username is invalid or reserved")
-    if len(password.encode("utf-8")) < 8 or len(password.encode("utf-8")) > MAX_PASSWORD_BYTES or "\x00" in password or "\n" in password or "\r" in password:
+    password_bytes = password.encode("utf-8")
+    if len(password_bytes) < 8 or len(password_bytes) > MAX_PASSWORD_BYTES or "\x00" in password or "\n" in password or "\r" in password:
         raise InstallerError("password must be 8-256 bytes and contain no line breaks")
     if not LOCALE_RE.fullmatch(locale):
         raise InstallerError("locale format is invalid")
@@ -106,6 +106,28 @@ def partition_for_label(disk: str, label: str) -> str:
     raise InstallerError(f"installed partition with label {label} was not found")
 
 
+def enable_locale(root_mount: pathlib.Path, locale: str) -> None:
+    locale_gen = root_mount / "etc/locale.gen"
+    if not locale_gen.is_file():
+        raise InstallerError("installed system does not contain /etc/locale.gen")
+    lines = locale_gen.read_text(encoding="utf-8").splitlines()
+    wanted = f"{locale} UTF-8"
+    normalized = []
+    found = False
+    for line in lines:
+        stripped = line.strip()
+        candidate = stripped.lstrip("#").strip()
+        if candidate == wanted:
+            normalized.append(wanted)
+            found = True
+        else:
+            normalized.append(line)
+    if not found:
+        normalized.append(wanted)
+    locale_gen.write_text("\n".join(normalized) + "\n", encoding="utf-8")
+    run(["chroot", str(root_mount), "/usr/sbin/locale-gen", locale])
+
+
 def configure_installed_root(root_mount: pathlib.Path, cfg: dict[str, str]) -> None:
     username = cfg["username"]
     password = cfg["password"]
@@ -113,14 +135,18 @@ def configure_installed_root(root_mount: pathlib.Path, cfg: dict[str, str]) -> N
     keyboard = cfg["keyboard"]
     timezone = cfg["timezone"]
 
-    # Account creation is intentionally explicit and local to the installed root.
-    user_exists = subprocess.run(["chroot", str(root_mount), "/usr/bin/id", "-u", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+    user_exists = subprocess.run(
+        ["chroot", str(root_mount), "/usr/bin/id", "-u", username],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    ).returncode == 0
     if user_exists:
         raise InstallerError("requested installed username already exists in source image")
     run(["chroot", str(root_mount), "/usr/sbin/useradd", "--create-home", "--shell", "/bin/bash", "--user-group", username])
     run(["chroot", str(root_mount), "/usr/sbin/chpasswd"], input_text=f"{username}:{password}\n")
 
     etc = root_mount / "etc"
+    enable_locale(root_mount, locale)
     (etc / "locale.conf").write_text(f"LANG={locale}\n", encoding="utf-8")
     (etc / "default").mkdir(parents=True, exist_ok=True)
     (etc / "default" / "keyboard").write_text(
@@ -149,8 +175,6 @@ def configure_installed_root(root_mount: pathlib.Path, cfg: dict[str, str]) -> N
 
 def install(cfg: dict[str, str]) -> dict[str, Any]:
     target = cfg["targetStablePath"]
-    # Re-run preview immediately before mutation so the helper binds to the
-    # current target identity and refuses a stale UI token.
     preview_proc = run([str(ENGINE), "preview", "--target", target])
     preview = json.loads(preview_proc.stdout)
     if preview.get("confirmationToken") != cfg["confirmationToken"]:
