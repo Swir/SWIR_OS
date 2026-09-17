@@ -21,6 +21,15 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
+LIBDIR = pathlib.Path("/usr/local/lib/swir")
+if LIBDIR.is_dir() and str(LIBDIR) not in sys.path:
+    sys.path.insert(0, str(LIBDIR))
+
+try:
+    from core_runtime import UserSettingsStore
+except ImportError:
+    UserSettingsStore = None  # type: ignore[assignment,misc]
+
 APP_ID: Final = "dev.swir.Shell"
 EVIDENCE_SCHEMA: Final = "swir.native-shell-runtime-evidence/0.1"
 
@@ -76,6 +85,12 @@ class SwirShell(Gtk.Application):
         self.evidence_path = os.environ.get("SWIR_SHELL_EVIDENCE_PATH", "")
         self.e2e = os.environ.get("SWIR_SHELL_E2E", "0") == "1"
         self.evidence_written = False
+        self.clock24h = True
+        if UserSettingsStore is not None:
+            try:
+                self.clock24h = bool(UserSettingsStore().load().get("clock24h", True))
+            except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
+                print(f"SWIR shell ignored invalid user settings: {exc}", file=sys.stderr)
 
     def do_startup(self) -> None:
         Gtk.Application.do_startup(self)
@@ -163,7 +178,9 @@ class SwirShell(Gtk.Application):
 
     def _update_clock(self) -> bool:
         if self.clock_label is not None:
-            self.clock_label.set_text(dt.datetime.now().astimezone().strftime("%H:%M"))
+            now = dt.datetime.now().astimezone()
+            text = now.strftime("%H:%M") if self.clock24h else now.strftime("%I:%M %p").lstrip("0")
+            self.clock_label.set_text(text)
         return True
 
     def _launch(self, _button: Gtk.Button, label: str, candidates: tuple[tuple[str, ...], ...]) -> None:
@@ -228,6 +245,7 @@ class SwirShell(Gtk.Application):
             "launcherEntries": [item[0] for item in LAUNCHERS],
             "launcherProbePassed": launcher_probe_passed,
             "privilegedOperationsInShell": False,
+            "clock24h": self.clock24h,
         }
         path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
         path.chmod(0o600)
