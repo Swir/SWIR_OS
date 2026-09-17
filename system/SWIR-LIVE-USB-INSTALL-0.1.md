@@ -16,7 +16,7 @@ No ISO-hybrid, Secure Boot, legacy BIOS or physical-hardware compatibility claim
 `system/image/build-live-usb-img.sh` accepts a prepared System Edition rootfs and creates a byte-for-byte writable raw image. The image uses:
 
 - GPT partition table;
-- `SWIR_LIVE_ESP` FAT32 UEFI partition;
+- `SWIRLIVEESP` FAT32 UEFI partition (kept within the FAT 11-character volume-label limit);
 - `SWIR_LIVE_ROOT` ext4 root partition;
 - systemd-boot fallback path for x86-64 UEFI;
 - SHA-256 sidecar file.
@@ -33,9 +33,9 @@ cancel   -> read-only cancellation result; no target mutation
 install  -> destructive path; requires the exact current target-bound token
 ```
 
-Production target selection requires a stable `/dev/disk/by-id/...` path. The engine resolves the currently booted source disk and refuses to install onto that same disk. It also refuses a read-only disk, a mounted target, a non-whole-disk device and targets smaller than the minimum image size.
+Production target selection requires a stable `/dev/disk/by-id/...` path. The engine resolves the currently booted source disk and refuses to install onto that same disk. It also refuses a read-only disk, any target or child partition with an active mount/swap association, a non-whole-disk device and targets smaller than the minimum image size.
 
-The first destructive action is not reached until all of those guards and the confirmation token have passed.
+The first destructive action is not reached until all of those guards and the confirmation token have passed. After copying the running Live root, the installed target removes the production Live-media marker and clears the cloned machine ID so the installed system generates its own machine identity on first boot.
 
 ## VM E2E gate
 
