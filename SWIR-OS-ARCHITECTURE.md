@@ -16,24 +16,24 @@ The mandatory end-user application and experience scope is defined in [`SWIR-PRO
 <!-- ROADMAP-PROGRESS:START -->
 <p align="center">
   <a href="https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml"><img alt="CI" src="https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml/badge.svg"></a>
-  <img alt="Roadmap progress" src="https://img.shields.io/badge/ROADMAP-76.9%25-2ea043?style=for-the-badge">
-  <img alt="Completed" src="https://img.shields.io/badge/DONE-50%2F65-1f6feb?style=for-the-badge">
+  <img alt="Roadmap progress" src="https://img.shields.io/badge/ROADMAP-78.5%25-2ea043?style=for-the-badge">
+  <img alt="Completed" src="https://img.shields.io/badge/DONE-51%2F65-1f6feb?style=for-the-badge">
   <img alt="Status" src="https://img.shields.io/badge/STATUS-IN%20PROGRESS-7c3aed?style=for-the-badge">
 </p>
 
 <p align="center">
-  <img width="900" src="assets/readme/progress-mini.svg" alt="SWIR OS roadmap progress — 76.9%, 50 of 65 verified deliverables" />
+  <img width="900" src="assets/readme/progress-mini.svg" alt="SWIR OS roadmap progress — 78.5%, 51 of 65 verified deliverables" />
 </p>
 
 ## 📊 Overall progress
 
 ```text
-███████████████░░░░░ 76.9%
+████████████████░░░░ 78.5%
 ```
 
 | ✅ Completed | ⏳ Remaining | 📦 Total | 🎯 Progress |
 |---:|---:|---:|---:|
-| **50** | **15** | **65** | **76.9%** |
+| **51** | **14** | **65** | **78.5%** |
 
 > **Progress rule:** the explicit `[x]/[ ]` deliverables in **Version roadmap** are the source of truth for the full Web → Desktop → System plan. Update the checklist first, then badges, numbers, percentage and the 20-segment bar. A prototype does not count as complete until the described deliverable is actually implemented and verified.
 <!-- ROADMAP-PROGRESS:END -->
@@ -453,7 +453,7 @@ Planned:
 
 - [x] maintained Linux base/kernel and bootable image
 - [x] SWIR boot splash and login/session manager
-- [ ] SWIR desktop shell
+- [x] SWIR desktop shell
 - [x] NetworkManager integration
 - [x] native Linux application execution
 - [ ] essential native Linux application suite for dependable daily use
