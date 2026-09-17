@@ -60,7 +60,7 @@ window.swir-shell {
 
 # Fixed commands only: user-controlled strings are never passed to a shell.
 LAUNCHERS: Final = (
-    ("Files", (("/usr/bin/nautilus",), ("/usr/bin/thunar",), ("/usr/bin/pcmanfm",))),
+    ("Files", (("/usr/local/bin/swir-files",), ("/usr/bin/nautilus",), ("/usr/bin/thunar",), ("/usr/bin/pcmanfm",))),
     ("Terminal", (("/usr/bin/foot",), ("/usr/bin/kitty",), ("/usr/bin/gnome-terminal",))),
     ("Settings", (("/usr/local/bin/swir-settings",), ("/usr/bin/gnome-control-center",))),
     ("Install SWIR OS", (("/usr/local/bin/swir-installer",),)),
