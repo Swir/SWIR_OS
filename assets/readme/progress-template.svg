@@ -1,0 +1,20 @@
+<!-- SWIR-PROGRESS-SVG-PRO:v1 TEMPLATE / NOT PROJECT DATA -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 180" role="img" aria-labelledby="progressTemplateTitle progressTemplateDesc">
+  <title id="progressTemplateTitle">SWIR Progress SVG PRO template — not project data</title>
+  <desc id="progressTemplateDesc">Reusable visual template only. Replace through the deterministic project generator; do not embed this file as live project progress.</desc>
+  <defs>
+    <linearGradient id="progressGradient" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#0088FF"/><stop offset="1" stop-color="#62E5FF"/></linearGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M 32 0 L 0 0 0 32" fill="none" stroke="#62E5FF" stroke-opacity="0.035" stroke-width="1"/></pattern>
+  </defs>
+  <rect width="1200" height="180" rx="22" fill="#02050A"/>
+  <rect x="1" y="1" width="1198" height="178" rx="21" fill="none" stroke="#0088FF" stroke-opacity="0.38"/>
+  <rect x="1" y="1" width="1198" height="178" rx="21" fill="url(#grid)"/>
+  <text x="50" y="42" fill="#62E5FF" font-family="system-ui,Segoe UI,Arial,sans-serif" font-size="18" font-weight="700" letter-spacing="2">TEMPLATE / NOT PROJECT DATA</text>
+  <text x="50" y="77" fill="#F4FAFF" font-family="system-ui,Segoe UI,Arial,sans-serif" font-size="28" font-weight="700">PROJECT NAME</text>
+  <text x="50" y="106" fill="#8DA8B8" font-family="system-ui,Segoe UI,Arial,sans-serif" font-size="17">Measured scope: AUTHORITATIVE SOURCE REQUIRED</text>
+  <text x="1150" y="60" text-anchor="end" fill="#F4FAFF" font-family="system-ui,Segoe UI,Arial,sans-serif" font-size="34" font-weight="800">N/A</text>
+  <text x="1150" y="90" text-anchor="end" fill="#62E5FF" font-family="system-ui,Segoe UI,Arial,sans-serif" font-size="16" font-weight="700">PLANNING</text>
+  <text x="1150" y="111" text-anchor="end" fill="#8DA8B8" font-family="system-ui,Segoe UI,Arial,sans-serif" font-size="15">counter unavailable</text>
+  <rect x="50" y="124" width="1100" height="18" rx="9" fill="#07111C" stroke="#62E5FF" stroke-opacity="0.28"/>
+  <text x="50" y="165" fill="#8DA8B8" font-family="system-ui,Segoe UI,Arial,sans-serif" font-size="13">Generate project-specific assets from verified authoritative data.</text>
+</svg>
