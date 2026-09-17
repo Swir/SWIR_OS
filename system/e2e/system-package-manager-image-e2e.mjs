@@ -7,6 +7,7 @@ import { SystemPackageTransactionService } from '../packages/package-transaction
 import { DistributionPackageSnapshotProvider, NativePackageHealthVerifier } from '../packages/distribution-package-state.mjs';
 import { SystemPackageStack } from '../packages/system-package-stack.mjs';
 import { validatePackageExecutorRequest } from '../packages/privileged-package-executor.mjs';
+import { AptDatabaseConsistencyProbe, AptInterruptedTransactionRecoveryService } from '../packages/apt-interrupted-recovery.mjs';
 
 function fail(code, message) {
   const error = new Error(message);
@@ -62,6 +63,7 @@ const os = readOsRelease();
 assert(os.ID === 'debian' && /^13(?:\.|$)/.test(os.VERSION_ID || ''), 'WRONG_BASE', 'E2E requires Debian 13');
 const aptFile = trustedRootFile('/usr/bin/apt-get');
 const dpkgFile = trustedRootFile('/usr/bin/dpkg-query');
+const dpkgAdminFile = trustedRootFile('/usr/bin/dpkg');
 const policyFile = trustedRootFile('/etc/swir/repository-trust-policy.json');
 const policy = JSON.parse(fs.readFileSync('/etc/swir/repository-trust-policy.json', 'utf8'));
 assert(policy.repositories?.some(item => item.id === 'debian-main' && item.manager === 'apt' && item.signatureVerification === 'native-required' && item.allowInsecure === false), 'TRUST_POLICY_MISSING', 'debian-main signed APT policy missing');
@@ -81,7 +83,7 @@ const authorizationEvents = [];
 const authorizationBroker = {
   async authorize(request) {
     authorizationEvents.push(request);
-    return { authorized: true, grantId: 'ci-contained-root-grant', actorId: 'ci-root-contained' };
+    return { authorized: true, grantId: `ci-contained-root-grant-${authorizationEvents.length}`, actorId: 'ci-root-contained' };
   }
 };
 const trustVerifier = {
@@ -119,8 +121,8 @@ assert(record.health?.healthy === true, 'HEALTH_NOT_VERIFIED', 'post-mutation na
 assert(authorizationEvents.length === 1 && authorizationEvents[0].scope === 'packages.mutate', 'AUTHORIZATION_NOT_BOUND', 'mutation authorization was not requested');
 assert(executionEvents.length === 1, 'UNEXPECTED_EXECUTION_COUNT', 'exactly one privileged mutation expected');
 
-const after = run('/usr/bin/dpkg-query', ['-W', '-f=${Status}\t${Version}\n', 'cowsay']);
-assert(after.exitCode === 0 && /^install ok installed\t/m.test(after.stdout), 'PACKAGE_NOT_INSTALLED', 'cowsay must be installed after transaction');
+const afterInstall = run('/usr/bin/dpkg-query', ['-W', '-f=${Status}\t${Version}\n', 'cowsay']);
+assert(afterInstall.exitCode === 0 && /^install ok installed\t/m.test(afterInstall.stdout), 'PACKAGE_NOT_INSTALLED', 'cowsay must be installed after transaction');
 const entryStat = fs.lstatSync('/usr/games/cowsay');
 assert(entryStat.isFile() || entryStat.isSymbolicLink(), 'ENTRYPOINT_MISSING', 'cowsay entry point missing');
 const journalPath = path.join(journalDirectory, 'apt-image-e2e-0001.json');
@@ -134,17 +136,81 @@ const removePlan = await stack.planWithDependencies('remove', manifest());
 assert(updatePlan.dependencies?.operation === 'update', 'UPDATE_PLAN_MISSING', 'dependency-aware update plan missing');
 assert(removePlan.dependencies?.operation === 'remove' && removePlan.dependencies.packages.affected.includes('cowsay'), 'REMOVE_PLAN_MISSING', 'dependency-aware remove plan missing');
 
+// Simulate the difficult crash class: APT completes the mutation, but the caller loses the
+// acknowledgement before execution evidence can be persisted. The original service must fail
+// closed into failed-needs-recovery; a fresh recovery service may only reconcile read-only state.
+const interruptedExecutionEvents = [];
+const acknowledgementLossExecutor = {
+  async execute(request) {
+    const { command } = validatePackageExecutorRequest(request);
+    assert(request.manager === 'apt' && request.operation === 'remove', 'UNEXPECTED_RECOVERY_FIXTURE_OPERATION', 'recovery fixture must be an APT remove');
+    const result = run('/usr/bin/apt-get', ['-y', ...command.slice(1)], { timeout: 300_000 });
+    interruptedExecutionEvents.push({ command, exitCode: result.exitCode });
+    assert(result.exitCode === 0, 'APT_INTERRUPTED_FIXTURE_MUTATION_FAILED', result.stderr.slice(0, 1000) || 'APT remove fixture failed');
+    const error = new Error('simulated process interruption after successful APT mutation');
+    error.code = 'E2E_ACKNOWLEDGEMENT_LOST';
+    throw error;
+  }
+};
+const interruptedService = new SystemPackageTransactionService({
+  journalDirectory, executor: acknowledgementLossExecutor, authorizationBroker, trustVerifier,
+  snapshotProvider: new DistributionPackageSnapshotProvider(), healthVerifier: new NativePackageHealthVerifier(),
+  allowlistedRepositories, idFactory: () => 'apt-image-e2e-0002'
+});
+const interruptedStack = new SystemPackageStack({ provider, transactionService: interruptedService, securityBoundary, dependencyResolver });
+let interruptedError = null;
+try {
+  await interruptedStack.execute('remove', manifest(), { reason: 'simulate post-APT acknowledgement loss' });
+} catch (error) {
+  interruptedError = error;
+}
+assert(interruptedError?.code === 'E2E_ACKNOWLEDGEMENT_LOST', 'INTERRUPTION_NOT_OBSERVED', 'fault injection must surface lost APT acknowledgement');
+assert(interruptedExecutionEvents.length === 1, 'INTERRUPTED_MUTATION_COUNT', 'exactly one interrupted APT mutation expected');
+const interruptedBeforeRecovery = interruptedService.readJournal('apt-image-e2e-0002');
+assert(interruptedBeforeRecovery.state === 'failed-needs-recovery', 'INTERRUPTED_STATE_NOT_DURABLE', 'interrupted transaction must persist failed-needs-recovery');
+assert(interruptedBeforeRecovery.snapshot?.installed === true, 'INTERRUPTED_PRESTATE_MISSING', 'interrupted remove must persist installed pre-state');
+const afterInterruptedMutation = run('/usr/bin/dpkg-query', ['-W', '-f=${Status}\t${Version}\n', 'cowsay']);
+assert(afterInterruptedMutation.exitCode !== 0, 'INTERRUPTED_MUTATION_NOT_APPLIED', 'fault injection requires the APT mutation to have completed before acknowledgement loss');
+
+const recoveryService = new AptInterruptedTransactionRecoveryService({
+  journalDirectory,
+  authorizationBroker,
+  snapshotProvider: new DistributionPackageSnapshotProvider(),
+  healthVerifier: new NativePackageHealthVerifier(),
+  consistencyProbe: new AptDatabaseConsistencyProbe(),
+  allowlistedRepositories
+});
+const recoveryOutcomes = await recoveryService.recoverPending({ reason: 'contained Debian image recovery E2E' });
+const recoveryOutcome = recoveryOutcomes.find(item => item.id === 'apt-image-e2e-0002');
+assert(recoveryOutcome?.status === 'committed' && recoveryOutcome.reconciled === true, 'RECOVERY_NOT_RECONCILED', 'interrupted APT transaction was not safely reconciled');
+assert(recoveryOutcome.mutationPerformed === false, 'RECOVERY_MUTATED_PACKAGES', 'recovery must not perform an inverse APT mutation');
+const recovered = recoveryService.readJournal('apt-image-e2e-0002');
+assert(recovered.state === 'committed', 'RECOVERY_JOURNAL_NOT_COMMITTED', 'reconciled journal must reach committed');
+assert(recovered.recovery?.reconciliation?.schema === 'swir.apt-interrupted-recovery/0.1', 'RECOVERY_EVIDENCE_MISSING', 'journal must contain recovery evidence');
+assert(recovered.recovery.reconciliation.commitSafe === true, 'RECOVERY_NOT_COMMIT_SAFE', 'recovery evidence must prove commit-safe state');
+assert(recovered.recovery.reconciliation.packageMutationPerformedByRecovery === false, 'RECOVERY_MUTATION_CLAIM', 'recovery evidence must prove no package mutation');
+assert(recovered.recovery.reconciliation.desiredStateReached === true, 'RECOVERY_TARGET_NOT_VERIFIED', 'recovery must prove the intended remove state');
+assert(recovered.recovery.reconciliation.consistency?.healthy === true, 'PACKAGE_DATABASE_NOT_HEALTHY', 'dpkg/APT database consistency must pass');
+assert(recovered.recovery.reconciliation.consistency.checks?.some(check => check.id === 'dpkg-audit' && check.ok === true), 'DPKG_AUDIT_NOT_PROVEN', 'dpkg --audit must pass');
+assert(recovered.recovery.reconciliation.consistency.checks?.some(check => check.id === 'apt-get-check' && check.ok === true), 'APT_CHECK_NOT_PROVEN', 'apt-get check must pass');
+const recoveryAuthorization = authorizationEvents.find(event => event.scope === 'packages.recover');
+assert(recoveryAuthorization?.planDigest === recovered.planDigest, 'RECOVERY_AUTHORIZATION_NOT_BOUND', 'recovery authorization must bind the exact original plan digest');
+
 const evidence = {
-  schema: 'swir.system-package-manager-image-e2e/0.1', generatedAt: new Date().toISOString(), selectedBase: 'debian-13-trixie', distribution: { id: os.ID, version: os.VERSION_ID },
-  packageManager: 'apt', fixturePackage: 'cowsay', aptBinary: aptFile, dpkgQueryBinary: dpkgFile, repositoryPolicy: policyFile, repositoryId: 'debian-main',
+  schema: 'swir.system-package-manager-image-e2e/0.2', generatedAt: new Date().toISOString(), selectedBase: 'debian-13-trixie', distribution: { id: os.ID, version: os.VERSION_ID },
+  packageManager: 'apt', fixturePackage: 'cowsay', aptBinary: aptFile, dpkgQueryBinary: dpkgFile, dpkgAdminBinary: dpkgAdminFile, repositoryPolicy: policyFile, repositoryId: 'debian-main',
   repositorySignaturesRequired: true, arbitraryRepositoryUrlsAllowed: false, dependencyResolutionMode: 'apt-get-simulation', dependencyAffectedPackages: record.plan.dependencies.packages.affected,
   dependencyClosureObserved: record.plan.dependencies.packages.affected.length >= 2, dependencyPlanPersistedBeforeMutation: persisted.plan?.dependencies?.schema === 'swir.apt-dependency-plan/0.1',
-  mutationAuthorized: authorizationEvents.length === 1, authorizationHarness: 'contained-ci-root', packageMutationPerformed: true, preMutationInstalled: record.snapshot.installed,
+  mutationAuthorized: authorizationEvents.some(event => event.scope === 'packages.mutate'), authorizationHarness: 'contained-ci-root', packageMutationPerformed: true, preMutationInstalled: record.snapshot.installed,
   transactionState: record.state, journalMode: journalStat.mode & 0o777, journalCommitted: persisted.state === 'committed', nativeHealthVerified: record.health.healthy,
-  installVerified: after.exitCode === 0, updatePlanVerified: updatePlan.dependencies?.operation === 'update', removePlanVerified: removePlan.dependencies?.operation === 'remove',
-  interruptedUpdateRecoveryProven: false, passed: true
+  installVerified: afterInstall.exitCode === 0, updatePlanVerified: updatePlan.dependencies?.operation === 'update', removePlanVerified: removePlan.dependencies?.operation === 'remove',
+  interruptedTransactionRecoveryProven: recovered.state === 'committed', interruptedStateBeforeRecovery: interruptedBeforeRecovery.state, recoveredTransactionState: recovered.state,
+  recoveryAuthorizationBound: recoveryAuthorization?.planDigest === recovered.planDigest, recoveryNoPackageMutation: recovered.recovery.reconciliation.packageMutationPerformedByRecovery === false,
+  desiredStateVerifiedDuringRecovery: recovered.recovery.reconciliation.desiredStateReached === true, dpkgAuditClean: recovered.recovery.reconciliation.consistency.checks.some(check => check.id === 'dpkg-audit' && check.ok === true),
+  aptCheckClean: recovered.recovery.reconciliation.consistency.checks.some(check => check.id === 'apt-get-check' && check.ok === true), failClosedRecoveryMode: 'read-only-state-reconciliation',
+  passed: true
 };
 const output = path.resolve(args.output || '/tmp/system-package-manager-image-e2e.json');
 fs.mkdirSync(path.dirname(output), { recursive: true, mode: 0o700 });
 fs.writeFileSync(output, `${JSON.stringify(evidence, null, 2)}\n`, { mode: 0o600 });
-console.log(JSON.stringify({ passed: true, affected: evidence.dependencyAffectedPackages, transactionState: record.state }));
+console.log(JSON.stringify({ passed: true, affected: evidence.dependencyAffectedPackages, transactionState: record.state, recoveryState: recovered.state }));
