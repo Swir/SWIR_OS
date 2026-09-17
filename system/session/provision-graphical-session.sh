@@ -32,9 +32,11 @@ for source_file in \
   system/session/swir-shell.py \
   system/apps/core_runtime.py \
   system/apps/swir-files.py \
+  system/apps/swir-network-center.py \
   system/apps/swir-notes.py \
   system/apps/swir-settings.py \
-  system/apps/swir-system-monitor.py; do
+  system/apps/swir-system-monitor.py \
+  system/apps/swir-terminal.py; do
   [[ -f "$SOURCE_ROOT/$source_file" && ! -L "$SOURCE_ROOT/$source_file" ]] || {
     echo "required trusted source file missing or symlinked: $source_file" >&2
     exit 69
@@ -74,12 +76,9 @@ ensure_exact_symlink() {
   parent="$(dirname "$rel")"
   safe_target "$parent" >/dev/null
   dest="$ROOTFS$rel"
-
   if [[ -L "$dest" ]]; then
     current="$(readlink "$dest")"
-    if [[ "$current" == "$expected" ]]; then
-      return 0
-    fi
+    if [[ "$current" == "$expected" ]]; then return 0; fi
     case "|$replaceable|" in
       *"|$current|"*) rm -- "$dest" ;;
       *) echo "refusing unexpected managed symlink $rel -> $current" >&2; exit 73 ;;
@@ -88,18 +87,17 @@ ensure_exact_symlink() {
     echo "refusing to replace non-symlink managed path: $rel" >&2
     exit 73
   fi
-
   ln -s -- "$expected" "$dest"
   [[ -L "$dest" && "$(readlink "$dest")" == "$expected" ]] || { echo "failed to install trusted symlink: $rel" >&2; exit 70; }
 }
 
-for pkg in greetd weston plymouth plymouth-themes wayland-utils dbus-user-session python3 python3-gi gir1.2-gtk-4.0; do
+for pkg in greetd weston plymouth plymouth-themes wayland-utils dbus-user-session python3 python3-gi gir1.2-gtk-4.0 gir1.2-vte-3.91 libvte-2.91-gtk4-0 network-manager; do
   chroot "$ROOTFS" dpkg-query -W -f='${db:Status-Abbrev}' "$pkg" 2>/dev/null | grep -qx 'ii ' || {
     echo "required graphical package is not installed: $pkg" >&2
     exit 69
   }
 done
-for file in /usr/sbin/greetd /usr/sbin/agreety /usr/bin/weston /usr/bin/wayland-info /usr/bin/plymouth /usr/sbin/plymouth-set-default-theme /usr/bin/python3.13; do
+for file in /usr/sbin/greetd /usr/sbin/agreety /usr/bin/weston /usr/bin/wayland-info /usr/bin/plymouth /usr/sbin/plymouth-set-default-theme /usr/bin/python3.13 /usr/bin/nmcli; do
   verify_trusted_regular_file "$file" yes
 done
 [[ -L "$ROOTFS/usr/bin/python3" && "$(readlink "$ROOTFS/usr/bin/python3")" == python3.13 ]] || {
@@ -121,17 +119,21 @@ install -m 0755 "$SOURCE_ROOT/system/session/swir-session-launcher.sh" "$(safe_t
 install -m 0755 "$SOURCE_ROOT/system/session/swir-shell.py" "$(safe_target /usr/local/bin/swir-shell)"
 install -m 0644 "$SOURCE_ROOT/system/apps/core_runtime.py" "$(safe_target /usr/local/lib/swir/core_runtime.py)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-files.py" "$(safe_target /usr/local/bin/swir-files)"
+install -m 0755 "$SOURCE_ROOT/system/apps/swir-network-center.py" "$(safe_target /usr/local/bin/swir-network-center)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-notes.py" "$(safe_target /usr/local/bin/swir-notes)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-settings.py" "$(safe_target /usr/local/bin/swir-settings)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-system-monitor.py" "$(safe_target /usr/local/bin/swir-system-monitor)"
+install -m 0755 "$SOURCE_ROOT/system/apps/swir-terminal.py" "$(safe_target /usr/local/bin/swir-terminal)"
 install -m 0644 "$SOURCE_ROOT/system/boot/plymouth/swir.plymouth" "$(safe_target /usr/share/plymouth/themes/swir/swir.plymouth)"
 install -m 0644 "$SOURCE_ROOT/system/boot/plymouth/swir.script" "$(safe_target /usr/share/plymouth/themes/swir/swir.script)"
 chroot "$ROOTFS" /usr/bin/python3 -m py_compile \
   /usr/local/bin/swir-shell \
   /usr/local/bin/swir-files \
+  /usr/local/bin/swir-network-center \
   /usr/local/bin/swir-notes \
   /usr/local/bin/swir-settings \
   /usr/local/bin/swir-system-monitor \
+  /usr/local/bin/swir-terminal \
   /usr/local/lib/swir/core_runtime.py
 
 cat > "$(safe_target /usr/share/wayland-sessions/swir.desktop)" <<'EOF'
@@ -159,14 +161,15 @@ else
     chroot "$ROOTFS" /usr/sbin/useradd --create-home --shell /bin/bash --user-group swir-e2e
   fi
   [[ "$(chroot "$ROOTFS" /usr/bin/id -u swir-e2e)" -ge 1000 ]] || { echo "E2E session account must be unprivileged" >&2; exit 70; }
-  printf '%s\n' 'swir-e2e:SWIR-E2E-Only-2026!' | chroot "$ROOTFS" /usr/sbin/chpasswd
+  E2E_AUTH_VALUE="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
+  printf 'swir-e2e:%s\n' "$E2E_AUTH_VALUE" | chroot "$ROOTFS" /usr/sbin/chpasswd
   install -m 0755 "$SOURCE_ROOT/system/session/greetd-e2e-greeter.py" "$(safe_target /usr/local/lib/swir/greetd-e2e-greeter.py)"
-  cat > "$(safe_target /etc/greetd/config.toml)" <<'EOF'
+  cat > "$(safe_target /etc/greetd/config.toml)" <<EOF
 [terminal]
 vt = 7
 
 [default_session]
-command = "/usr/bin/env SWIR_E2E_USERNAME=swir-e2e SWIR_E2E_PASSWORD=SWIR-E2E-Only-2026! /usr/local/lib/swir/greetd-e2e-greeter.py"
+command = "/usr/bin/env SWIR_E2E_USERNAME=swir-e2e SWIR_E2E_PASSWORD=$E2E_AUTH_VALUE /usr/local/lib/swir/greetd-e2e-greeter.py"
 user = "_greetd"
 EOF
 fi
@@ -184,16 +187,18 @@ if [[ "$MODE" == production ]]; then
   grep -Fq '/usr/sbin/agreety --cmd /usr/local/bin/swir-session' "$ROOTFS/etc/greetd/config.toml" || {
     echo "production greetd configuration lost authenticated greeter path" >&2; exit 70;
   }
-  ! grep -Fq 'SWIR-E2E-Only-2026!' "$ROOTFS/etc/greetd/config.toml" || { echo "test credential leaked into production config" >&2; exit 70; }
+  ! grep -Fq 'SWIR_E2E_PASSWORD=' "$ROOTFS/etc/greetd/config.toml" || { echo "test authentication value leaked into production config" >&2; exit 70; }
 fi
 ! grep -Fq '[initial_session]' "$ROOTFS/etc/greetd/config.toml" || { echo "autologin initial_session is forbidden" >&2; exit 70; }
 [[ -f "$ROOTFS/etc/pam.d/greetd" && ! -L "$ROOTFS/etc/pam.d/greetd" ]] || { echo "greetd PAM policy missing" >&2; exit 70; }
 
 verify_trusted_regular_file /usr/local/bin/swir-shell yes
 verify_trusted_regular_file /usr/local/bin/swir-files yes
+verify_trusted_regular_file /usr/local/bin/swir-network-center yes
 verify_trusted_regular_file /usr/local/bin/swir-notes yes
 verify_trusted_regular_file /usr/local/bin/swir-settings yes
 verify_trusted_regular_file /usr/local/bin/swir-system-monitor yes
+verify_trusted_regular_file /usr/local/bin/swir-terminal yes
 verify_trusted_regular_file /usr/local/lib/swir/core_runtime.py no
 
-echo "SWIR graphical session staged: mode=$MODE theme=swir login=greetd compositor=weston native-shell=gtk4 native-apps=files,notes,settings,system-monitor"
+echo "SWIR graphical session staged: mode=$MODE theme=swir login=greetd compositor=weston native-shell=gtk4 native-apps=files,network,notes,settings,system-monitor,terminal"
