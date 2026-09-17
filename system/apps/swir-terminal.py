@@ -24,6 +24,7 @@ window.swir-app { background: #02050A; color: #F4FAFF; }
 .swir-header { background: #07111C; border-bottom: 1px solid #0088FF; padding: 8px 12px; }
 .swir-brand { color: #62E5FF; font-size: 18px; font-weight: 800; }
 .swir-muted { color: #8DA8B8; }
+.swir-error { color: #FF9D9D; }
 """
 
 
@@ -43,6 +44,54 @@ def resolve_login_shell() -> str:
     raise RuntimeError("no executable login shell is available")
 
 
+def spawn_terminal_child(terminal: Vte.Terminal, working_directory: str, argv: list[str]) -> str:
+    """Spawn a shell across the VTE 0.76 and Debian 13 / VTE 0.80 GI bindings.
+
+    Ubuntu 24.04 ships VTE 0.76 whose GI wrapper requires the closure/user-data
+    parameters positionally, while Debian 13 ships VTE 0.80 where the annotated
+    keyword form is available. A TypeError is raised before any child is spawned,
+    so it is safe to retry with the legacy positional ABI only for that case.
+    """
+
+    try:
+        terminal.spawn_async(
+            pty_flags=Vte.PtyFlags.DEFAULT,
+            working_directory=working_directory,
+            argv=argv,
+            envv=None,
+            spawn_flags=GLib.SpawnFlags.DEFAULT,
+            child_setup=None,
+            timeout=-1,
+            cancellable=None,
+            callback=None,
+        )
+        return "annotated-keyword"
+    except TypeError as keyword_error:
+        try:
+            # VTE 0.76 / PyGObject exposes child_setup_data and callback user_data
+            # as positional parameters while hiding the destroy notifier.
+            terminal.spawn_async(
+                Vte.PtyFlags.DEFAULT,
+                working_directory,
+                argv,
+                None,
+                GLib.SpawnFlags.DEFAULT,
+                None,
+                None,
+                -1,
+                None,
+                None,
+                None,
+            )
+            return "vte076-positional"
+        except TypeError as positional_error:
+            version = f"{Vte.get_major_version()}.{Vte.get_minor_version()}.{Vte.get_micro_version()}"
+            raise RuntimeError(
+                "unsupported VTE spawn_async GI binding "
+                f"(runtime {version}); keyword call: {keyword_error}; positional call: {positional_error}"
+            ) from positional_error
+
+
 class SwirTerminal(Gtk.Application):
     def __init__(self) -> None:
         super().__init__(application_id=APP_ID)
@@ -54,6 +103,8 @@ class SwirTerminal(Gtk.Application):
         self.window_mapped = False
         self.spawn_requested = False
         self.evidence_written = False
+        self.spawn_api = "not-attempted"
+        self.spawn_error = ""
         self.shell_path = resolve_login_shell()
 
     def do_startup(self) -> None:
@@ -106,18 +157,16 @@ class SwirTerminal(Gtk.Application):
         if self.e2e:
             argv = [self.shell_path, "-c", "printf 'SWIR Terminal E2E\\n'; sleep 3"]
 
-        terminal.spawn_async(
-            pty_flags=Vte.PtyFlags.DEFAULT,
-            working_directory=str(pathlib.Path.home()),
-            argv=argv,
-            envv=None,
-            spawn_flags=GLib.SpawnFlags.DEFAULT,
-            child_setup=None,
-            timeout=-1,
-            cancellable=None,
-            callback=None,
-        )
-        self.spawn_requested = True
+        try:
+            self.spawn_api = spawn_terminal_child(terminal, str(pathlib.Path.home()), argv)
+            self.spawn_requested = True
+        except (RuntimeError, GLib.Error, OSError) as exc:
+            self.spawn_error = str(exc)[:500]
+            self.status.set_text("Unable to start the user shell")
+            self.status.remove_css_class("swir-muted")
+            self.status.add_css_class("swir-error")
+            print(f"SWIR Terminal spawn failed: {self.spawn_error}", file=sys.stderr, flush=True)
+
         window.connect("map", self._on_mapped)
         window.present()
 
@@ -141,7 +190,7 @@ class SwirTerminal(Gtk.Application):
         pty_attached = self.terminal.get_pty() is not None
         payload = {
             "schema": EVIDENCE_SCHEMA,
-            "passed": self.window_mapped and self.spawn_requested and pty_attached,
+            "passed": self.window_mapped and self.spawn_requested and pty_attached and not self.spawn_error,
             "applicationId": APP_ID,
             "nativeToolkit": "gtk4-vte",
             "displayProtocol": "wayland",
@@ -151,6 +200,9 @@ class SwirTerminal(Gtk.Application):
             "privilegedOperations": False,
             "shellCommandInterpolation": False,
             "scrollbackLines": 10000,
+            "spawnApi": self.spawn_api,
+            "spawnError": self.spawn_error,
+            "vteRuntimeVersion": f"{Vte.get_major_version()}.{Vte.get_minor_version()}.{Vte.get_micro_version()}",
         }
         path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
         path.chmod(0o600)
