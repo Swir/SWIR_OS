@@ -32,7 +32,9 @@ for source_file in \
   system/session/swir-shell.py \
   system/apps/core_runtime.py \
   system/apps/swir-files.py \
-  system/apps/swir-settings.py; do
+  system/apps/swir-notes.py \
+  system/apps/swir-settings.py \
+  system/apps/swir-system-monitor.py; do
   [[ -f "$SOURCE_ROOT/$source_file" && ! -L "$SOURCE_ROOT/$source_file" ]] || {
     echo "required trusted source file missing or symlinked: $source_file" >&2
     exit 69
@@ -119,13 +121,17 @@ install -m 0755 "$SOURCE_ROOT/system/session/swir-session-launcher.sh" "$(safe_t
 install -m 0755 "$SOURCE_ROOT/system/session/swir-shell.py" "$(safe_target /usr/local/bin/swir-shell)"
 install -m 0644 "$SOURCE_ROOT/system/apps/core_runtime.py" "$(safe_target /usr/local/lib/swir/core_runtime.py)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-files.py" "$(safe_target /usr/local/bin/swir-files)"
+install -m 0755 "$SOURCE_ROOT/system/apps/swir-notes.py" "$(safe_target /usr/local/bin/swir-notes)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-settings.py" "$(safe_target /usr/local/bin/swir-settings)"
+install -m 0755 "$SOURCE_ROOT/system/apps/swir-system-monitor.py" "$(safe_target /usr/local/bin/swir-system-monitor)"
 install -m 0644 "$SOURCE_ROOT/system/boot/plymouth/swir.plymouth" "$(safe_target /usr/share/plymouth/themes/swir/swir.plymouth)"
 install -m 0644 "$SOURCE_ROOT/system/boot/plymouth/swir.script" "$(safe_target /usr/share/plymouth/themes/swir/swir.script)"
 chroot "$ROOTFS" /usr/bin/python3 -m py_compile \
   /usr/local/bin/swir-shell \
   /usr/local/bin/swir-files \
+  /usr/local/bin/swir-notes \
   /usr/local/bin/swir-settings \
+  /usr/local/bin/swir-system-monitor \
   /usr/local/lib/swir/core_runtime.py
 
 cat > "$(safe_target /usr/share/wayland-sessions/swir.desktop)" <<'EOF'
@@ -185,7 +191,9 @@ fi
 
 verify_trusted_regular_file /usr/local/bin/swir-shell yes
 verify_trusted_regular_file /usr/local/bin/swir-files yes
+verify_trusted_regular_file /usr/local/bin/swir-notes yes
 verify_trusted_regular_file /usr/local/bin/swir-settings yes
+verify_trusted_regular_file /usr/local/bin/swir-system-monitor yes
 verify_trusted_regular_file /usr/local/lib/swir/core_runtime.py no
 
-echo "SWIR graphical session staged: mode=$MODE theme=swir login=greetd compositor=weston native-shell=gtk4 native-apps=files,settings"
+echo "SWIR graphical session staged: mode=$MODE theme=swir login=greetd compositor=weston native-shell=gtk4 native-apps=files,notes,settings,system-monitor"
