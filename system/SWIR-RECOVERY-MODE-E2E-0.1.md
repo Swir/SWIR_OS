@@ -19,6 +19,7 @@ systemd-boot
           +--> root=LABEL=SWIR_ROOT ro
           +--> systemd.unit=swir-recovery.target
           +--> mask systemd-remount-fs.service
+          +--> mask APT/dpkg/fwupd/fstrim mutation-related timers
           +--> disable fstab generator during recovery boot
           |
           v
@@ -37,6 +38,8 @@ systemd-boot
 
 The normal System Edition fstab remains present and is inspected by the diagnostics agent. `fstab=no` is used only by the recovery boot entry so the recovery environment does not automatically mount additional persistent filesystems while it is diagnosing the machine.
 
+The recovery entry also masks `apt-daily.timer`, `apt-daily-upgrade.timer`, `dpkg-db-backup.timer`, `fstrim.timer`, and `fwupd-refresh.timer`. The guest E2E requires every one of those units to remain inactive and runtime-masked. This prevents the recovery target from opportunistically starting package, firmware, trim, or package-database maintenance while the machine is being diagnosed.
+
 ## Production recovery foundation
 
 `system/recovery/recovery-mode-provisioning.mjs` stages only three fixed repository-owned artifacts:
@@ -47,7 +50,7 @@ The normal System Edition fstab remains present and is inspected by the diagnost
 
 Production staging requires a root-owned, non-world-writable rootfs and rejects symlink destinations. Unit content is checked for required hardening and shell-string execution is forbidden.
 
-`swir-recovery.service` runs as root because it must inspect block-device metadata and protected transaction journals, but it deliberately drops its Linux capability bounding set and enables `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, `RestrictSUIDSGID`, `LockPersonality`, and native syscall architecture restriction. Its only writable application path is volatile `/run/swir/recovery`; recovery evidence is not persisted to the diagnosed root filesystem.
+`swir-recovery.service` runs as root because it must inspect block-device metadata and protected transaction journals, but it deliberately drops its Linux capability bounding set and enables `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, `RestrictSUIDSGID`, `LockPersonality`, and native syscall architecture restriction. Its only writable application path is volatile `/run/swir/recovery`; recovery evidence is not persisted to the diagnosed root filesystem. The volatile runtime directory is owned by systemd and preserved for the lifetime of the recovery session so later recovery gates can inspect the exact diagnostics report without writing it to persistent storage.
 
 ## What the UEFI E2E proves
 
@@ -63,8 +66,9 @@ A successful exact-revision run proves all of the following:
 8. The live `SWIR_ROOT` label resolves to a real ext4 block device.
 9. The disposable recovery VM has no non-loopback network interface because QEMU is launched without a NIC.
 10. Package and firmware transaction directories are scanned read-only when present.
-11. No filesystem repair, package mutation, or firmware mutation is performed automatically.
-12. The guest emits a machine-readable recovery report and a deterministic success marker before powering off.
+11. APT/dpkg/fwupd/fstrim maintenance timers are masked by the recovery boot entry and verified inactive in the guest.
+12. No filesystem repair, package mutation, or firmware mutation is performed automatically.
+13. The guest emits a machine-readable recovery report and a deterministic success marker before powering off.
 
 ## Safety boundary
 
