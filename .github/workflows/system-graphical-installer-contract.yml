@@ -1,0 +1,92 @@
+name: System Graphical Installer Contract
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'system/installer/swir-installer.py'
+      - 'system/installer/swir-installer-helper.py'
+      - 'system/installer/provision-graphical-installer.sh'
+      - 'system/installer/swir-installer.desktop'
+      - 'system/installer/dev.swir.installer.policy'
+      - 'system/installer/swir-install-engine.sh'
+      - 'system/SWIR-GRAPHICAL-INSTALLER-0.1.md'
+      - 'SWIR-OS-ARCHITECTURE.md'
+      - 'README.md'
+      - '.github/workflows/system-graphical-installer-contract.yml'
+  pull_request:
+    paths:
+      - 'system/installer/swir-installer.py'
+      - 'system/installer/swir-installer-helper.py'
+      - 'system/installer/provision-graphical-installer.sh'
+      - 'system/installer/swir-installer.desktop'
+      - 'system/installer/dev.swir.installer.policy'
+      - 'system/installer/swir-install-engine.sh'
+      - 'system/SWIR-GRAPHICAL-INSTALLER-0.1.md'
+      - 'SWIR-OS-ARCHITECTURE.md'
+      - 'README.md'
+      - '.github/workflows/system-graphical-installer-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: system-graphical-installer-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native UI smoke dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3-gi gir1.2-gtk-4.0 weston libxml2-utils
+      - name: Syntax and safety contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile system/installer/swir-installer.py system/installer/swir-installer-helper.py
+          bash -n system/installer/provision-graphical-installer.sh
+          python3 system/installer/swir-installer.py --self-test
+          python3 system/installer/swir-installer-helper.py --self-test
+          xmllint --noout system/installer/dev.swir.installer.policy
+          grep -F '<allow_any>no</allow_any>' system/installer/dev.swir.installer.policy >/dev/null
+          grep -F '<allow_inactive>no</allow_inactive>' system/installer/dev.swir.installer.policy >/dev/null
+          grep -F 'target must be a stable /dev/disk/by-id' system/installer/swir-installer-helper.py >/dev/null
+          grep -F 'confirmation token is stale or does not match the current target identity' system/installer/swir-installer-helper.py >/dev/null
+          grep -F 'passwordStoredInEvidence' system/installer/swir-installer-helper.py >/dev/null
+          ! grep -E 'shell=True|os\.system\(' system/installer/swir-installer.py system/installer/swir-installer-helper.py
+      - name: Create a real GTK4 window on headless Wayland
+        shell: bash
+        run: |
+          set -euo pipefail
+          runtime="$RUNNER_TEMP/swir-wayland"
+          evidence="$RUNNER_TEMP/swir-installer-ui-smoke.json"
+          install -d -m 0700 "$runtime"
+          export XDG_RUNTIME_DIR="$runtime"
+          export WAYLAND_DISPLAY=wayland-swir-installer
+          weston --backend=headless-backend.so --socket="$WAYLAND_DISPLAY" --idle-time=0 --log="$RUNNER_TEMP/weston.log" &
+          weston_pid=$!
+          trap 'kill "$weston_pid" 2>/dev/null || true; wait "$weston_pid" 2>/dev/null || true' EXIT
+          for i in $(seq 1 40); do
+            [[ -S "$runtime/$WAYLAND_DISPLAY" ]] && break
+            kill -0 "$weston_pid" 2>/dev/null || { cat "$RUNNER_TEMP/weston.log"; exit 1; }
+            sleep 0.25
+          done
+          [[ -S "$runtime/$WAYLAND_DISPLAY" ]]
+          GDK_BACKEND=wayland python3 system/installer/swir-installer.py --smoke-window --evidence "$evidence"
+          python3 - "$evidence" <<'PY'
+          import json, pathlib, sys
+          data = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
+          assert data['schema'] == 'swir.graphical-installer-ui-smoke/0.1'
+          assert data['gtkWindowCreated'] is True
+          assert data['liveMutationPerformed'] is False
+          assert data['waylandDisplay'] == 'wayland-swir-installer'
+          print('SWIR GTK4 Wayland window smoke OK')
+          PY
+      - name: Validate roadmap math
+        run: node scripts/validate-roadmap-progress.mjs
