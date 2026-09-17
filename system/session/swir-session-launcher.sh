@@ -50,7 +50,7 @@ done
 [ "$ready" = "1" ] || { echo "weston Wayland socket did not become ready" >&2; exit 73; }
 
 if [ "${SWIR_SESSION_E2E:-0}" = "1" ]; then
-  SWIR_SHELL_EVIDENCE_PATH="$SHELL_EVIDENCE" /usr/local/bin/swir-shell &
+  SWIR_SHELL_E2E=1 SWIR_SHELL_EVIDENCE_PATH="$SHELL_EVIDENCE" /usr/local/bin/swir-shell &
 else
   /usr/local/bin/swir-shell &
 fi
@@ -86,6 +86,7 @@ assert shell.get('nativeToolkit') == 'gtk4'
 assert shell.get('displayProtocol') == 'wayland'
 assert shell.get('windowMapped') is True
 assert shell.get('fullscreenRequested') is True
+assert shell.get('launcherProbePassed') is True
 assert shell.get('privilegedOperationsInShell') is False
 assert {'Files', 'Terminal', 'Settings', 'Install SWIR OS'} <= set(shell.get('launcherEntries', []))
 PY
@@ -149,6 +150,7 @@ out = {
         'windowMapped': shell['windowMapped'],
         'fullscreenRequested': shell['fullscreenRequested'],
         'launcherEntries': shell['launcherEntries'],
+        'launcherProbePassed': shell['launcherProbePassed'],
         'privilegedOperationsInShell': shell['privilegedOperationsInShell'],
         'pid': int(os.environ['SWIR_EVIDENCE_SHELL_PID']),
     },
