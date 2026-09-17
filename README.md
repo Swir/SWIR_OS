@@ -15,8 +15,8 @@ SWIR OS is an actively developed operating-system platform designed to become a 
 [![Roadmap Contract](https://github.com/Swir/SWIR_OS/actions/workflows/roadmap-contract.yml/badge.svg)](https://github.com/Swir/SWIR_OS/actions/workflows/roadmap-contract.yml)
 [![Native Notifications](https://github.com/Swir/SWIR_OS/actions/workflows/desktop-native-notification-contract.yml/badge.svg)](https://github.com/Swir/SWIR_OS/actions/workflows/desktop-native-notification-contract.yml)
 
-![Roadmap](https://img.shields.io/badge/ROADMAP-56.7%25-2ea043?style=for-the-badge)
-![Completed](https://img.shields.io/badge/DONE-34%2F60-1f6feb?style=for-the-badge)
+![Roadmap](https://img.shields.io/badge/ROADMAP-70.0%25-2ea043?style=for-the-badge)
+![Completed](https://img.shields.io/badge/DONE-42%2F60-1f6feb?style=for-the-badge)
 ![Status](https://img.shields.io/badge/STATUS-IN%20PROGRESS-7c3aed?style=for-the-badge)
 
 </div>
@@ -53,10 +53,10 @@ Windows kernel drivers are **not** treated as a general hardware solution for Li
 ### Overall roadmap
 
 ```text
-███████████░░░░░░░░░ 56.7%
+██████████████░░░░░░ 70.0%
 ```
 
-**34 of 60 measurable roadmap deliverables are complete.**
+**42 of 60 measurable roadmap deliverables are complete.**
 
 The percentage is based on implemented and verified roadmap items. CI-only prototypes do not count as completed functionality. The scope now explicitly includes the required SWIR Browser, installable shell themes/skins, SWIR Player, SWIR Photo Studio, GitHub-backed update policy and the complete native application baseline. Adding real required scope can reduce the percentage until those deliverables are implemented and verified.
 

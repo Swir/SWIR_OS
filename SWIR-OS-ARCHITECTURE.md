@@ -16,20 +16,20 @@ The mandatory end-user application and experience scope is defined in [`SWIR-PRO
 <!-- ROADMAP-PROGRESS:START -->
 <p align="center">
   <a href="https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml"><img alt="CI" src="https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml/badge.svg"></a>
-  <img alt="Roadmap progress" src="https://img.shields.io/badge/ROADMAP-56.7%25-2ea043?style=for-the-badge">
-  <img alt="Completed" src="https://img.shields.io/badge/DONE-34%2F60-1f6feb?style=for-the-badge">
+  <img alt="Roadmap progress" src="https://img.shields.io/badge/ROADMAP-70.0%25-2ea043?style=for-the-badge">
+  <img alt="Completed" src="https://img.shields.io/badge/DONE-42%2F60-1f6feb?style=for-the-badge">
   <img alt="Status" src="https://img.shields.io/badge/STATUS-IN%20PROGRESS-7c3aed?style=for-the-badge">
 </p>
 
 ## 📊 Overall progress
 
 ```text
-███████████░░░░░░░░░ 56.7%
+██████████████░░░░░░ 70.0%
 ```
 
 | ✅ Completed | ⏳ Remaining | 📦 Total | 🎯 Progress |
 |---:|---:|---:|---:|
-| **34** | **26** | **60** | **56.7%** |
+| **42** | **18** | **60** | **70.0%** |
 
 > **Progress rule:** the explicit `[x]/[ ]` deliverables in **Version roadmap** are the source of truth for the full Web → Desktop → System plan. Update the checklist first, then badges, numbers, percentage and the 20-segment bar. A prototype does not count as complete until the described deliverable is actually implemented and verified.
 <!-- ROADMAP-PROGRESS:END -->
@@ -411,21 +411,21 @@ Active direction:
 
 Planned:
 
-- [ ] maintained Linux base/kernel and bootable image
-- [ ] SWIR boot splash and login/session manager
+- [x] maintained Linux base/kernel and bootable image
+- [x] SWIR boot splash and login/session manager
 - [ ] SWIR desktop shell
-- [ ] NetworkManager integration
-- [ ] native Linux application execution
+- [x] NetworkManager integration
+- [x] native Linux application execution
 - [ ] essential native Linux application suite for dependable daily use
 - [ ] native SWIR Browser with Default Apps integration and one-click approved alternative browser installation
 - [ ] installable SWIR Shell Theme/Skin framework with accessibility-safe recovery to the default theme
 - [ ] native SWIR Player with library/playlists/media-key/notification integration
 - [ ] native SWIR Photo Studio with dependable basic editing, undo/redo and common-format export
 - [ ] common Package Provider layer for distribution packages and later Flatpak/AppImage
-- [ ] managed Wine/Proton compatibility service for Windows user applications
-- [ ] Hardware Service with PCI/USB inventory
-- [ ] SWIR Driver Center / Hardware Catalog
-- [ ] in-tree Linux drivers + linux-firmware as primary hardware path
+- [x] managed Wine/Proton compatibility service for Windows user applications
+- [x] Hardware Service with PCI/USB inventory
+- [x] SWIR Driver Center / Hardware Catalog
+- [x] in-tree Linux drivers + linux-firmware as primary hardware path
 - [ ] fwupd/LVFS firmware updates where supported
 - [ ] allowlisted official vendor repositories for exceptional proprietary components
 - [ ] dependency-aware system package manager/updater
