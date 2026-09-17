@@ -22,14 +22,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Update only verified System Edition roadmap deliverables
+      - name: Update verified canonical roadmap and visible README status
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          p = Path('SWIR-OS-ARCHITECTURE.md')
-          s = p.read_text(encoding='utf-8')
+
+          roadmap = Path('SWIR-OS-ARCHITECTURE.md')
+          s = roadmap.read_text(encoding='utf-8')
           replacements = {
             'ROADMAP-56.7%25-2ea043': 'ROADMAP-70.0%25-2ea043',
             'DONE-34%2F60-1f6feb': 'DONE-42%2F60-1f6feb',
@@ -47,11 +48,26 @@ jobs:
           for old, new in replacements.items():
               count = s.count(old)
               if count != 1:
-                  raise SystemExit(f'expected exactly one occurrence of {old!r}, found {count}')
+                  raise SystemExit(f'roadmap: expected exactly one occurrence of {old!r}, found {count}')
               s = s.replace(old, new)
-          p.write_text(s, encoding='utf-8')
+          roadmap.write_text(s, encoding='utf-8')
+
+          readme = Path('README.md')
+          r = readme.read_text(encoding='utf-8')
+          readme_replacements = {
+            'ROADMAP-56.7%25-2ea043': 'ROADMAP-70.0%25-2ea043',
+            'DONE-34%2F60-1f6feb': 'DONE-42%2F60-1f6feb',
+            '███████████░░░░░░░░░ 56.7%': '██████████████░░░░░░ 70.0%',
+            '**34 of 60 measurable roadmap deliverables are complete.**': '**42 of 60 measurable roadmap deliverables are complete.**',
+          }
+          for old, new in readme_replacements.items():
+              count = r.count(old)
+              if count != 1:
+                  raise SystemExit(f'README: expected exactly one occurrence of {old!r}, found {count}')
+              r = r.replace(old, new)
+          readme.write_text(r, encoding='utf-8')
           PY
-      - name: Validate locked roadmap dashboard and checklist
+      - name: Validate locked roadmap dashboard and synchronized README
         run: node scripts/validate-roadmap-progress.mjs
       - name: Commit verified reconciliation and remove helper
         shell: bash
@@ -60,6 +76,6 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git rm .github/workflows/one-time-roadmap-reconcile.yml
-          git add SWIR-OS-ARCHITECTURE.md
+          git add SWIR-OS-ARCHITECTURE.md README.md
           git commit -m 'Roadmap: record verified canonical System Edition milestones'
           git push origin HEAD:migration/system-edition-canonical-20260917
