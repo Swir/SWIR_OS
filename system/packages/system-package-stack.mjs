@@ -2,6 +2,7 @@ import { DistributionPackageProvider } from './distribution-package-provider.mjs
 import { SystemPackageTransactionService } from './package-transaction-service.mjs';
 import { GuardedPkexecPackageExecutor } from './privileged-package-executor.mjs';
 import { DistributionPackageSnapshotProvider, NativePackageHealthVerifier } from './distribution-package-state.mjs';
+import { AptDependencyResolver, validateAptDependencyPlan } from './apt-dependency-resolver.mjs';
 import { createSystemPackageSecurityBoundary } from '../security/system-package-security-boundary.mjs';
 
 const OPERATIONS = new Set(['install', 'update', 'remove']);
@@ -29,27 +30,31 @@ export class SystemPackageStack {
   #provider;
   #transactions;
   #security;
+  #dependencyResolver;
 
-  constructor({ provider, transactionService, securityBoundary } = {}) {
+  constructor({ provider, transactionService, securityBoundary, dependencyResolver = null } = {}) {
     assert(provider && typeof provider.planInstall === 'function' && typeof provider.planUpdate === 'function' && typeof provider.planRemove === 'function', 'INVALID_PROVIDER', 'DistributionPackageProvider-compatible provider is required');
     assert(transactionService && typeof transactionService.execute === 'function' && typeof transactionService.recoverPending === 'function', 'INVALID_TRANSACTION_SERVICE', 'SystemPackageTransactionService-compatible service is required');
     assert(securityBoundary && Array.isArray(securityBoundary.allowlistedRepositories), 'INVALID_SECURITY_BOUNDARY', 'System package security boundary is required');
+    if (dependencyResolver !== null) assert(typeof dependencyResolver.resolve === 'function', 'INVALID_DEPENDENCY_RESOLVER', 'dependency resolver must expose resolve()');
     this.#provider = provider;
     this.#transactions = transactionService;
     this.#security = securityBoundary;
+    this.#dependencyResolver = dependencyResolver;
     Object.freeze(this);
   }
 
   describe() {
     return Object.freeze({
-      schema: 'swir.system-package-stack/0.1',
+      schema: 'swir.system-package-stack/0.2',
       provider: clone(this.#provider.probe?.() || null),
       security: clone(this.#security.describe?.() || null),
       allowlistedRepositories: [...this.#security.allowlistedRepositories],
       directCallerPlanExecution: false,
       arbitraryHostOverride: false,
       arbitraryRepositoryUrlAllowed: false,
-      privilegedMutationPath: 'provider-plan -> trust -> polkit -> snapshot -> journal -> guarded-pkexec -> health'
+      dependencyResolution: this.#dependencyResolver ? 'apt-simulation-before-mutation' : 'not-configured',
+      privilegedMutationPath: 'provider-plan -> dependency-resolution -> trust -> polkit -> snapshot -> journal -> guarded-pkexec -> health'
     });
   }
 
@@ -60,9 +65,23 @@ export class SystemPackageStack {
     return this.#provider.planRemove(clone(manifest));
   }
 
+  async planWithDependencies(operation, manifest) {
+    const plan = this.plan(operation, manifest);
+    if (plan.host?.packageManager !== 'apt') return plan;
+    assert(this.#dependencyResolver, 'DEPENDENCY_RESOLVER_REQUIRED', 'apt package mutation requires dependency resolution before authorization');
+    const dependencies = validateAptDependencyPlan(await this.#dependencyResolver.resolve({
+      operation,
+      packageName: plan.package.sourceRef
+    }), {
+      operation,
+      packageName: plan.package.sourceRef
+    });
+    return { ...plan, dependencies: clone(dependencies) };
+  }
+
   async execute(operation, manifest, authorizationContext = {}) {
     assert(authorizationContext && typeof authorizationContext === 'object' && !Array.isArray(authorizationContext), 'INVALID_AUTHORIZATION_CONTEXT', 'authorization context must be an object');
-    const plan = this.plan(operation, manifest);
+    const plan = await this.planWithDependencies(operation, manifest);
     return this.#transactions.execute(plan, clone(authorizationContext));
   }
 
@@ -97,11 +116,16 @@ export function createSystemPackageStack({
     healthVerifier: new NativePackageHealthVerifier(),
     allowlistedRepositories: security.allowlistedRepositories
   });
-  return new SystemPackageStack({ provider, transactionService, securityBoundary: security });
+  return new SystemPackageStack({
+    provider,
+    transactionService,
+    securityBoundary: security,
+    dependencyResolver: new AptDependencyResolver()
+  });
 }
 
 export const SystemPackageStackPolicy = Object.freeze({
-  schema: 'swir.system-package-stack/0.1',
+  schema: 'swir.system-package-stack/0.2',
   productionDependencyInjection: false,
   directCallerPlanExecution: false,
   arbitraryHostOverride: false,
@@ -109,6 +133,8 @@ export const SystemPackageStackPolicy = Object.freeze({
   rootOwnedRepositoryPolicy: true,
   authorization: 'polkit-current-process-subject',
   executor: 'guarded-pkexec',
+  dependencyResolution: 'apt-simulation-before-mutation',
+  dependencyPlanJournalBinding: true,
   durableJournalBeforeMutation: true,
   postMutationHealthVerification: true
 });

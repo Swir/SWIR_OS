@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://swir.github.io/system/contracts/system-package-manager-image-e2e.schema.json",
+  "title": "SWIR System Package Manager Image E2E 0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "generatedAt", "selectedBase", "distribution", "packageManager", "fixturePackage",
+    "aptBinary", "dpkgQueryBinary", "repositoryPolicy", "repositoryId", "repositorySignaturesRequired",
+    "arbitraryRepositoryUrlsAllowed", "dependencyResolutionMode", "dependencyAffectedPackages",
+    "dependencyClosureObserved", "dependencyPlanPersistedBeforeMutation", "mutationAuthorized",
+    "authorizationHarness", "packageMutationPerformed", "preMutationInstalled", "transactionState",
+    "journalMode", "journalCommitted", "nativeHealthVerified", "installVerified", "updatePlanVerified",
+    "removePlanVerified", "interruptedUpdateRecoveryProven", "passed"
+  ],
+  "properties": {
+    "schema": { "const": "swir.system-package-manager-image-e2e/0.1" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "selectedBase": { "const": "debian-13-trixie" },
+    "distribution": {
+      "type": "object", "additionalProperties": false, "required": ["id", "version"],
+      "properties": { "id": { "const": "debian" }, "version": { "type": "string", "pattern": "^13(?:\\.|$)" } }
+    },
+    "packageManager": { "const": "apt" },
+    "fixturePackage": { "const": "cowsay" },
+    "aptBinary": { "$ref": "#/$defs/rootFile" },
+    "dpkgQueryBinary": { "$ref": "#/$defs/rootFile" },
+    "repositoryPolicy": { "$ref": "#/$defs/rootFile" },
+    "repositoryId": { "const": "debian-main" },
+    "repositorySignaturesRequired": { "const": true },
+    "arbitraryRepositoryUrlsAllowed": { "const": false },
+    "dependencyResolutionMode": { "const": "apt-get-simulation" },
+    "dependencyAffectedPackages": { "type": "array", "minItems": 2, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+    "dependencyClosureObserved": { "const": true },
+    "dependencyPlanPersistedBeforeMutation": { "const": true },
+    "mutationAuthorized": { "const": true },
+    "authorizationHarness": { "const": "contained-ci-root" },
+    "packageMutationPerformed": { "const": true },
+    "preMutationInstalled": { "const": false },
+    "transactionState": { "const": "committed" },
+    "journalMode": { "type": "integer", "const": 384 },
+    "journalCommitted": { "const": true },
+    "nativeHealthVerified": { "const": true },
+    "installVerified": { "const": true },
+    "updatePlanVerified": { "const": true },
+    "removePlanVerified": { "const": true },
+    "interruptedUpdateRecoveryProven": { "const": false },
+    "passed": { "const": true }
+  },
+  "$defs": {
+    "rootFile": {
+      "type": "object", "additionalProperties": false, "required": ["uid", "mode"],
+      "properties": { "uid": { "const": 0 }, "mode": { "type": "integer", "minimum": 256, "maximum": 511 } }
+    }
+  }
+}

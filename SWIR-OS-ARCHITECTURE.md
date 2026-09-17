@@ -16,20 +16,20 @@ The mandatory end-user application and experience scope is defined in [`SWIR-PRO
 <!-- ROADMAP-PROGRESS:START -->
 <p align="center">
   <a href="https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml"><img alt="CI" src="https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml/badge.svg"></a>
-  <img alt="Roadmap progress" src="https://img.shields.io/badge/ROADMAP-71.7%25-2ea043?style=for-the-badge">
-  <img alt="Completed" src="https://img.shields.io/badge/DONE-43%2F60-1f6feb?style=for-the-badge">
+  <img alt="Roadmap progress" src="https://img.shields.io/badge/ROADMAP-73.3%25-2ea043?style=for-the-badge">
+  <img alt="Completed" src="https://img.shields.io/badge/DONE-44%2F60-1f6feb?style=for-the-badge">
   <img alt="Status" src="https://img.shields.io/badge/STATUS-IN%20PROGRESS-7c3aed?style=for-the-badge">
 </p>
 
 ## 📊 Overall progress
 
 ```text
-██████████████░░░░░░ 71.7%
+███████████████░░░░░ 73.3%
 ```
 
 | ✅ Completed | ⏳ Remaining | 📦 Total | 🎯 Progress |
 |---:|---:|---:|---:|
-| **43** | **17** | **60** | **71.7%** |
+| **44** | **16** | **60** | **73.3%** |
 
 > **Progress rule:** the explicit `[x]/[ ]` deliverables in **Version roadmap** are the source of truth for the full Web → Desktop → System plan. Update the checklist first, then badges, numbers, percentage and the 20-segment bar. A prototype does not count as complete until the described deliverable is actually implemented and verified.
 <!-- ROADMAP-PROGRESS:END -->
@@ -334,6 +334,8 @@ Proton compatibility profiles
 
 The production System provider factory is distribution-only and is now verified inside the selected Debian 13 rootfs: it resolves APT plans against the allowlisted signed Debian repository policy, keeps privileged mutation behind the journaled broker stack, rejects untrusted repositories and keeps Windows compatibility outside the Linux package layer. Flatpak and AppImage adapters remain explicit experimental opt-ins and are not silently enabled by this completed common-layer milestone.
 
+The Debian System package stack now resolves APT dependencies with a read-only `apt-get -s` simulation before authorization and mutation. The resolved dependency closure is attached to the package plan before its digest is journaled. A disposable Debian 13 image E2E performs a real journaled APT installation, verifies the pre-state and native entry point after mutation, and also resolves update/remove plans. Interrupted-update recovery remains a separate, still-open milestone.
+
 Provider mechanics remain separate from Store UI policy. Privileged mutations require a structured plan, trusted source policy and transaction journal. A System Edition package entry must resolve to a supported native Linux payload or an explicitly managed Windows compatibility payload; an HTML-only payload does not satisfy the native System Edition application requirement.
 
 ### Hardware / Driver architecture
@@ -430,7 +432,7 @@ Planned:
 - [x] in-tree Linux drivers + linux-firmware as primary hardware path
 - [ ] fwupd/LVFS firmware updates where supported
 - [ ] allowlisted official vendor repositories for exceptional proprietary components
-- [ ] dependency-aware system package manager/updater
+- [x] dependency-aware system package manager/updater
 - [ ] journaled driver/firmware/package transactions
 - [ ] filesystem integration and recovery mode
 
