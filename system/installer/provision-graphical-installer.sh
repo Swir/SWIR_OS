@@ -33,6 +33,13 @@ safe_target() {
   printf '%s\n' "$ROOTFS$rel"
 }
 
+# Locale generation is part of the installer product path. Obtain Debian's
+# signed locales package from the already configured official repository if the
+# base image does not contain it yet; never add or trust a third-party source.
+if ! chroot "$ROOTFS" dpkg-query -W -f='${db:Status-Abbrev}' locales 2>/dev/null | grep -qx 'ii '; then
+  chroot "$ROOTFS" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends locales
+fi
+
 for pkg in python3 python3-gi gir1.2-gtk-4.0 polkitd locales; do
   chroot "$ROOTFS" dpkg-query -W -f='${db:Status-Abbrev}' "$pkg" 2>/dev/null | grep -qx 'ii ' || {
     echo "required graphical installer package is not installed: $pkg" >&2
