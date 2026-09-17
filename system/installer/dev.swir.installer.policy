@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN" "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>SWIR OS</vendor>
+  <vendor_url>https://github.com/Swir/SWIR_OS</vendor_url>
+  <action id="dev.swir.installer.install">
+    <description>Install SWIR OS to the explicitly selected disk</description>
+    <message>Authentication is required to erase the selected disk and install SWIR OS.</message>
+    <icon_name>drive-harddisk</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/libexec/swir-installer-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+</policyconfig>
