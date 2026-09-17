@@ -55,6 +55,10 @@ jobs:
           grep -F 'NoNewPrivileges=yes' system/recovery/swir-recovery.service >/dev/null
           grep -F 'CapabilityBoundingSet=' system/recovery/swir-recovery.service >/dev/null
           grep -F 'RuntimeDirectoryPreserve=yes' system/recovery/swir-recovery.service >/dev/null
+          grep -F "const PACKAGE_JOURNAL_ROOT = '/var/lib/swir/package-transactions';" system/recovery/recovery-mode-agent.mjs >/dev/null
+          grep -F "const FIRMWARE_JOURNAL_ROOT = '/var/lib/swir/transactions/firmware';" system/recovery/recovery-mode-agent.mjs >/dev/null
+          grep -F "const FIRMWARE_JOURNAL_SCHEMA = 'swir.firmware-transaction-journal/0.1';" system/recovery/recovery-mode-agent.mjs >/dev/null
+          grep -F "statusField: 'status'" system/recovery/recovery-mode-agent.mjs >/dev/null
           grep -F 'systemd.unit=swir-recovery.target' system/e2e/debian13-recovery-mode-vm-e2e.sh >/dev/null
           grep -F 'systemd.mask=systemd-remount-fs.service' system/e2e/debian13-recovery-mode-vm-e2e.sh >/dev/null
           grep -F 'systemd.mask=apt-daily.timer' system/e2e/debian13-recovery-mode-vm-e2e.sh >/dev/null
@@ -99,12 +103,15 @@ jobs:
           node - "${{ runner.temp }}/swir-debian13-recovery-vm-artifacts/recovery-mode-evidence.json" <<'NODE'
           const fs = require('fs');
           const e = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-          if (e.schema !== 'swir.system-recovery-mode-e2e/0.1' || e.passed !== true) process.exit(2);
+          if (e.schema !== 'swir.system-recovery-mode-e2e/0.2' || e.passed !== true) process.exit(2);
           if (!e.recoveryModeClaim || !e.filesystemIntegrationClaim || e.filesystemRepairClaim) process.exit(3);
           if (!e.rootReadOnly || !e.rootFstabIntegrated || !e.espFstabIntegrated || !e.remountServiceMasked) process.exit(4);
           if (!e.fstabGeneratorDisabledDuringRecovery || !e.guestNetworkDisabled || !e.mutationTimersMasked || !e.diagnosticsAgentPassed) process.exit(5);
-          if (e.automaticFilesystemRepairPerformed || e.automaticPackageMutationPerformed || e.automaticFirmwareMutationPerformed) process.exit(6);
-          for (const key of ['bootloaderSha256', 'imageSha256', 'ovmfSha256']) if (!/^[0-9a-f]{64}$/.test(e[key] || '')) process.exit(7);
+          if (!e.transactionJournalScanPassed || !e.packageJournalPathIntegrated || !e.firmwareJournalPathIntegrated) process.exit(6);
+          if (!e.pendingPackageTransactionDetected || !e.pendingFirmwareTransactionDetected || !e.manualRecoveryRequired) process.exit(7);
+          if (e.packageJournalSchema !== 'swir.system-package-transaction/0.1' || e.firmwareJournalSchema !== 'swir.firmware-transaction-journal/0.1') process.exit(8);
+          if (e.automaticFilesystemRepairPerformed || e.automaticPackageMutationPerformed || e.automaticFirmwareMutationPerformed) process.exit(9);
+          for (const key of ['bootloaderSha256', 'imageSha256', 'ovmfSha256']) if (!/^[0-9a-f]{64}$/.test(e[key] || '')) process.exit(10);
           NODE
       - name: Upload compact recovery evidence
         if: always()
