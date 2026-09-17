@@ -54,8 +54,14 @@ jobs:
           grep -F 'ProtectSystem=strict' system/recovery/swir-recovery.service >/dev/null
           grep -F 'NoNewPrivileges=yes' system/recovery/swir-recovery.service >/dev/null
           grep -F 'CapabilityBoundingSet=' system/recovery/swir-recovery.service >/dev/null
+          grep -F 'RuntimeDirectoryPreserve=yes' system/recovery/swir-recovery.service >/dev/null
           grep -F 'systemd.unit=swir-recovery.target' system/e2e/debian13-recovery-mode-vm-e2e.sh >/dev/null
           grep -F 'systemd.mask=systemd-remount-fs.service' system/e2e/debian13-recovery-mode-vm-e2e.sh >/dev/null
+          grep -F 'systemd.mask=apt-daily.timer' system/e2e/debian13-recovery-mode-vm-e2e.sh >/dev/null
+          grep -F 'systemd.mask=apt-daily-upgrade.timer' system/e2e/debian13-recovery-mode-vm-e2e.sh >/dev/null
+          grep -F 'systemd.mask=dpkg-db-backup.timer' system/e2e/debian13-recovery-mode-vm-e2e.sh >/dev/null
+          grep -F 'systemd.mask=fstrim.timer' system/e2e/debian13-recovery-mode-vm-e2e.sh >/dev/null
+          grep -F 'systemd.mask=fwupd-refresh.timer' system/e2e/debian13-recovery-mode-vm-e2e.sh >/dev/null
           grep -F 'fstab=no' system/e2e/debian13-recovery-mode-vm-e2e.sh >/dev/null
           ! grep -E 'curl |wget |--no-check-gpg|AllowUnauthenticated|trusted=yes|shell:[[:space:]]*true' \
             system/recovery/recovery-mode-agent.mjs \
@@ -96,7 +102,7 @@ jobs:
           if (e.schema !== 'swir.system-recovery-mode-e2e/0.1' || e.passed !== true) process.exit(2);
           if (!e.recoveryModeClaim || !e.filesystemIntegrationClaim || e.filesystemRepairClaim) process.exit(3);
           if (!e.rootReadOnly || !e.rootFstabIntegrated || !e.espFstabIntegrated || !e.remountServiceMasked) process.exit(4);
-          if (!e.fstabGeneratorDisabledDuringRecovery || !e.guestNetworkDisabled || !e.diagnosticsAgentPassed) process.exit(5);
+          if (!e.fstabGeneratorDisabledDuringRecovery || !e.guestNetworkDisabled || !e.mutationTimersMasked || !e.diagnosticsAgentPassed) process.exit(5);
           if (e.automaticFilesystemRepairPerformed || e.automaticPackageMutationPerformed || e.automaticFirmwareMutationPerformed) process.exit(6);
           for (const key of ['bootloaderSha256', 'imageSha256', 'ovmfSha256']) if (!/^[0-9a-f]{64}$/.test(e[key] || '')) process.exit(7);
           NODE
