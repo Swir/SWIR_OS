@@ -4,7 +4,12 @@ import { spawn } from 'node:child_process';
 
 const SAFE_OUTPUT_ROOT = '/run/swir/recovery';
 const MAX_JOURNAL_BYTES = 1024 * 1024;
-const PENDING_STATES = new Set(['authorized', 'snapshotting', 'snapshotted', 'mutating', 'verifying', 'failed-needs-recovery', 'rolling-back']);
+const PACKAGE_JOURNAL_ROOT = '/var/lib/swir/package-transactions';
+const PACKAGE_JOURNAL_SCHEMA = 'swir.system-package-transaction/0.1';
+const FIRMWARE_JOURNAL_ROOT = '/var/lib/swir/transactions/firmware';
+const FIRMWARE_JOURNAL_SCHEMA = 'swir.firmware-transaction-journal/0.1';
+const PENDING_PACKAGE_STATES = new Set(['prepared', 'mutating', 'verifying', 'rolling-back', 'failed-needs-recovery']);
+const PENDING_FIRMWARE_STATUSES = new Set(['planned', 'authorized', 'executing', 'staged-reboot-required', 'failed-needs-recovery']);
 
 function fail(code, message, cause) {
   const error = new Error(message, cause ? { cause } : undefined);
@@ -99,23 +104,38 @@ function parseFstab() {
   }
   return entries;
 }
-function scanTransactionDirectory(directory, expectedSchema) {
-  const result = { directory, exists: false, journals: 0, pending: 0, corrupt: 0, pendingIds: [] };
+function scanTransactionDirectory(directory, expectedSchema, { statusField, pendingStates, idFields }) {
+  const result = {
+    directory,
+    schema: expectedSchema,
+    statusField,
+    exists: false,
+    journals: 0,
+    pending: 0,
+    corrupt: 0,
+    pendingIds: []
+  };
   if (!fs.existsSync(directory)) return result;
   const directoryStat = fs.lstatSync(directory);
   assert(directoryStat.isDirectory() && !directoryStat.isSymbolicLink(), 'UNSAFE_JOURNAL_DIRECTORY', `unsafe journal directory: ${directory}`);
+  assert(directoryStat.uid === 0, 'UNSAFE_JOURNAL_DIRECTORY_OWNER', `journal directory must be root-owned: ${directory}`);
+  assert((directoryStat.mode & 0o022) === 0, 'UNSAFE_JOURNAL_DIRECTORY_MODE', `journal directory must not be group/world writable: ${directory}`);
   result.exists = true;
   for (const name of fs.readdirSync(directory).filter(item => item.endsWith('.json')).sort()) {
     const file = path.join(directory, name);
     try {
       const stat = fs.lstatSync(file);
       assert(stat.isFile() && !stat.isSymbolicLink() && stat.size <= MAX_JOURNAL_BYTES, 'UNSAFE_JOURNAL_FILE', `unsafe journal file: ${file}`);
+      assert(stat.uid === 0, 'UNSAFE_JOURNAL_FILE_OWNER', `journal file must be root-owned: ${file}`);
+      assert((stat.mode & 0o022) === 0, 'UNSAFE_JOURNAL_FILE_MODE', `journal file must not be group/world writable: ${file}`);
       const record = JSON.parse(fs.readFileSync(file, 'utf8'));
-      if (expectedSchema && record?.schema !== expectedSchema) throw new Error('schema mismatch');
+      if (record?.schema !== expectedSchema) throw new Error('schema mismatch');
       result.journals += 1;
-      if (PENDING_STATES.has(String(record?.state || ''))) {
+      const status = String(record?.[statusField] || '');
+      if (pendingStates.has(status)) {
         result.pending += 1;
-        result.pendingIds.push(String(record?.id || path.basename(name, '.json')).slice(0, 128));
+        const recordId = idFields.map(field => record?.[field]).find(value => typeof value === 'string' && value.length > 0);
+        result.pendingIds.push(String(recordId || path.basename(name, '.json')).slice(0, 160));
       }
     } catch {
       result.corrupt += 1;
@@ -155,11 +175,19 @@ const blkidType = await run('/usr/sbin/blkid', ['-s', 'TYPE', '-o', 'value', roo
 const rootFilesystem = blkidType.exitCode === 0 ? blkidType.stdout.trim() : '';
 const networkDevices = fs.readdirSync('/sys/class/net').sort();
 const nonLoopbackNetworkDevices = networkDevices.filter(name => name !== 'lo');
-const packageTransactions = scanTransactionDirectory('/var/lib/swir/package-transactions', 'swir.system-package-transaction/0.1');
-const firmwareTransactions = scanTransactionDirectory('/var/lib/swir/firmware-transactions', 'swir.fwupd-firmware-transaction/0.1');
+const packageTransactions = scanTransactionDirectory(PACKAGE_JOURNAL_ROOT, PACKAGE_JOURNAL_SCHEMA, {
+  statusField: 'state',
+  pendingStates: PENDING_PACKAGE_STATES,
+  idFields: ['id']
+});
+const firmwareTransactions = scanTransactionDirectory(FIRMWARE_JOURNAL_ROOT, FIRMWARE_JOURNAL_SCHEMA, {
+  statusField: 'status',
+  pendingStates: PENDING_FIRMWARE_STATUSES,
+  idFields: ['transactionId']
+});
 
 const report = {
-  schema: 'swir.recovery-mode-report/0.1',
+  schema: 'swir.recovery-mode-report/0.2',
   generatedAt: new Date().toISOString(),
   bootTarget: 'swir-recovery.target',
   diagnosticMode: true,
