@@ -210,6 +210,24 @@ EOF_CFG
   [ -s "$runtime/swir-installer-e2e-evidence.json" ] || fail gui-evidence-missing
   cp "$runtime/swir-installer-e2e-evidence.json" "$OUT/gui-evidence.json"
   chmod 0600 "$OUT/gui-evidence.json"
+  ui_diag="$(python3 - "$OUT/gui-evidence.json" <<'PY_DIAG'
+import json, pathlib, sys
+try:
+    d = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+except Exception as exc:
+    print(json.dumps({"status": "invalid-evidence", "message": type(exc).__name__}, sort_keys=True))
+else:
+    if d.get("status") != "installed":
+        safe = {
+            "schema": d.get("schema"),
+            "status": d.get("status"),
+            "message": str(d.get("message") or "")[:300],
+            "passwordStoredInEvidence": d.get("passwordStoredInEvidence"),
+        }
+        print(json.dumps(safe, sort_keys=True))
+PY_DIAG
+)"
+  [ -z "$ui_diag" ] || serial "SWIR_GRAPHICAL_INSTALLER_UI_EVIDENCE $ui_diag"
   python3 - "$OUT/gui-evidence.json" "$TARGET" "$TEST_USER" "$TEST_LOCALE" "$TEST_KEYBOARD" "$TEST_TIMEZONE" <<'PY' || fail gui-evidence
 import json, pathlib, sys
 path, target, username, locale, keyboard, timezone = sys.argv[1:]
