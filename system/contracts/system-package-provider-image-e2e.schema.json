@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://swir.github.io/system/contracts/system-package-provider-image-e2e.schema.json",
+  "title": "SWIR System Package Provider Image E2E 0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "generatedAt", "selectedBase", "distribution", "productionProvider", "providerStates",
+    "packageManager", "aptBinary", "polkitBinary", "repositoryPolicy", "aptMetadataReadable", "plans",
+    "repositorySignaturesRequired", "arbitraryRepositoryUrlsAllowed", "arbitraryProviderRegistration",
+    "directCommandExecution", "privilegedMutationDelegated", "untrustedRepositoryRejected",
+    "windowsCompatibilitySeparated", "experimentalProvidersProductionEnabled", "packageMutationPerformed", "passed"
+  ],
+  "properties": {
+    "schema": { "const": "swir.system-package-provider-image-e2e/0.1" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "selectedBase": { "const": "debian-13-trixie" },
+    "distribution": {
+      "type": "object", "additionalProperties": false, "required": ["id", "version"],
+      "properties": { "id": { "const": "debian" }, "version": { "type": "string", "pattern": "^13(?:\\.|$)" } }
+    },
+    "productionProvider": { "const": "swir.package.system" },
+    "providerStates": {
+      "type": "object", "additionalProperties": false,
+      "required": ["swir.package.system", "swir.package.flatpak", "swir.package.appimage"],
+      "properties": {
+        "swir.package.system": { "const": "ready" },
+        "swir.package.flatpak": { "const": "not-provisioned" },
+        "swir.package.appimage": { "const": "not-provisioned" }
+      }
+    },
+    "packageManager": { "const": "apt" },
+    "aptBinary": { "$ref": "#/$defs/rootFile" },
+    "polkitBinary": { "$ref": "#/$defs/rootFile" },
+    "repositoryPolicy": { "$ref": "#/$defs/rootFile" },
+    "aptMetadataReadable": { "const": true },
+    "plans": {
+      "type": "object", "additionalProperties": false, "required": ["install", "update", "remove"],
+      "properties": {
+        "install": { "$ref": "#/$defs/plan" },
+        "update": { "$ref": "#/$defs/plan" },
+        "remove": { "$ref": "#/$defs/plan" }
+      }
+    },
+    "repositorySignaturesRequired": { "const": true },
+    "arbitraryRepositoryUrlsAllowed": { "const": false },
+    "arbitraryProviderRegistration": { "const": false },
+    "directCommandExecution": { "const": false },
+    "privilegedMutationDelegated": { "const": true },
+    "untrustedRepositoryRejected": { "const": true },
+    "windowsCompatibilitySeparated": { "const": true },
+    "experimentalProvidersProductionEnabled": { "const": false },
+    "packageMutationPerformed": { "const": false },
+    "passed": { "const": true }
+  },
+  "$defs": {
+    "rootFile": {
+      "type": "object", "additionalProperties": false, "required": ["uid", "mode"],
+      "properties": { "uid": { "const": 0 }, "mode": { "type": "integer", "minimum": 0, "maximum": 511 } }
+    },
+    "plan": {
+      "type": "object", "additionalProperties": false,
+      "required": ["packageManager", "repositoryId", "commandPreview", "requiresPrivilege", "journalRequired", "healthCheckRequired"],
+      "properties": {
+        "packageManager": { "const": "apt" },
+        "repositoryId": { "const": "debian-main" },
+        "commandPreview": { "type": "array", "minItems": 3, "items": { "type": "string" } },
+        "requiresPrivilege": { "const": true },
+        "journalRequired": { "const": true },
+        "healthCheckRequired": { "type": "boolean" }
+      }
+    }
+  }
+}

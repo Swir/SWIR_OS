@@ -1,0 +1,122 @@
+name: System Package Provider Image E2E
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'system/packages/**'
+      - 'system/security/**'
+      - 'system/e2e/system-package-provider-image-e2e.mjs'
+      - 'system/contracts/system-package-provider-image-e2e.schema.json'
+      - 'system/image/system-base-debian-trixie.json'
+      - 'system/image/build-debian-trixie-rootfs.sh'
+      - 'system/image/debian-trixie-repository-trust-policy.json'
+      - 'system/SWIR-SYSTEM-PACKAGE-PROVIDER-LAYER-0.1.md'
+      - 'SWIR-OS-ARCHITECTURE.md'
+      - '.github/workflows/system-package-provider-image-e2e.yml'
+  pull_request:
+    paths:
+      - 'system/packages/**'
+      - 'system/security/**'
+      - 'system/e2e/system-package-provider-image-e2e.mjs'
+      - 'system/contracts/system-package-provider-image-e2e.schema.json'
+      - 'system/image/system-base-debian-trixie.json'
+      - 'system/image/build-debian-trixie-rootfs.sh'
+      - 'system/image/debian-trixie-repository-trust-policy.json'
+      - 'system/SWIR-SYSTEM-PACKAGE-PROVIDER-LAYER-0.1.md'
+      - 'SWIR-OS-ARCHITECTURE.md'
+      - '.github/workflows/system-package-provider-image-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: system-package-provider-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package-provider-image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install controlled Debian rootfs tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mmdebstrap debian-archive-keyring
+      - name: Validate provider contracts and unit boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check system/e2e/system-package-provider-image-e2e.mjs
+          node --check system/packages/package-provider-layer.mjs
+          python3 -m json.tool system/contracts/system-package-provider-image-e2e.schema.json >/dev/null
+          python3 -m json.tool system/image/system-base-debian-trixie.json >/dev/null
+          python3 -m json.tool system/image/debian-trixie-repository-trust-policy.json >/dev/null
+          bash -n system/image/build-debian-trixie-rootfs.sh
+          node system/packages/distribution-package-provider.selftest.mjs
+          node system/packages/system-package-stack.selftest.mjs
+          node system/packages/package-provider-layer.selftest.mjs
+          node system/packages/flatpak-user-package-provider.selftest.mjs
+          node system/packages/appimage-user-package-provider.selftest.mjs
+          node system/e2e/appimage-native-execution.selftest.mjs
+          node scripts/validate-roadmap-progress.mjs
+          ! grep -E 'shell:[[:space:]]*true|--no-check-gpg|AllowUnauthenticated|trusted=yes' \
+            system/e2e/system-package-provider-image-e2e.mjs \
+            system/packages/package-provider-layer.mjs \
+            system/packages/distribution-package-provider.mjs
+      - name: Build Debian 13 System Edition rootfs
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOTFS="$RUNNER_TEMP/swir-package-provider-rootfs"
+          sudo bash system/image/build-debian-trixie-rootfs.sh \
+            --rootfs "$ROOTFS" \
+            --profile "$GITHUB_WORKSPACE/system/image/system-base-debian-trixie.json" \
+            --arch amd64
+          sudo install -d -m 0755 "$ROOTFS/opt/swir" "$ROOTFS/etc/swir"
+          sudo cp -a system "$ROOTFS/opt/swir/system"
+          sudo install -o root -g root -m 0644 \
+            system/image/debian-trixie-repository-trust-policy.json \
+            "$ROOTFS/etc/swir/repository-trust-policy.json"
+          sudo chroot "$ROOTFS" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get update
+          sudo chroot "$ROOTFS" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nodejs
+          sudo chroot "$ROOTFS" /usr/bin/node \
+            /opt/swir/system/e2e/system-package-provider-image-e2e.mjs \
+            --output /tmp/system-package-provider-image-e2e.json
+          sudo cp "$ROOTFS/tmp/system-package-provider-image-e2e.json" \
+            "$RUNNER_TEMP/system-package-provider-image-e2e.json"
+          sudo chown "$USER:$USER" "$RUNNER_TEMP/system-package-provider-image-e2e.json"
+      - name: Validate emitted image evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - "$RUNNER_TEMP/system-package-provider-image-e2e.json" <<'NODE'
+          const fs = require('fs');
+          const e = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          if (e.schema !== 'swir.system-package-provider-image-e2e/0.1' || e.passed !== true) process.exit(2);
+          if (e.selectedBase !== 'debian-13-trixie' || e.distribution?.id !== 'debian' || e.packageManager !== 'apt') process.exit(3);
+          if (e.providerStates?.['swir.package.system'] !== 'ready') process.exit(4);
+          if (e.providerStates?.['swir.package.flatpak'] !== 'not-provisioned' || e.providerStates?.['swir.package.appimage'] !== 'not-provisioned') process.exit(5);
+          if (!e.repositorySignaturesRequired || e.arbitraryRepositoryUrlsAllowed || e.arbitraryProviderRegistration || e.directCommandExecution) process.exit(6);
+          if (!e.privilegedMutationDelegated || !e.untrustedRepositoryRejected || !e.windowsCompatibilitySeparated) process.exit(7);
+          if (e.experimentalProvidersProductionEnabled || e.packageMutationPerformed || !e.aptMetadataReadable) process.exit(8);
+          for (const op of ['install', 'update', 'remove']) {
+            const p = e.plans?.[op];
+            if (!p || p.packageManager !== 'apt' || p.repositoryId !== 'debian-main' || !p.requiresPrivilege || !p.journalRequired) process.exit(9);
+          }
+          NODE
+      - name: Upload package-provider evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swir-system-package-provider-image-${{ github.run_id }}
+          path: ${{ runner.temp }}/system-package-provider-image-e2e.json
+          if-no-files-found: warn
+          retention-days: 7
