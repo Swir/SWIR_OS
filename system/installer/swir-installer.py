@@ -38,8 +38,28 @@ class TargetDisk:
         return f"{ident} — {gib:.1f} GiB ({self.stable_path})"
 
 
+def _safe_command_failure(args: list[str], proc: subprocess.CompletedProcess[str]) -> str:
+    """Return a bounded failure reason without echoing stdin or command arguments."""
+    program = pathlib.Path(args[0]).name if args else "command"
+    try:
+        payload = json.loads(proc.stdout or "")
+    except json.JSONDecodeError:
+        payload = None
+    if isinstance(payload, dict) and isinstance(payload.get("message"), str):
+        message = " ".join(payload["message"].split())[:300]
+        if message:
+            return f"{program} failed: {message}"
+    return f"{program} exited with status {proc.returncode}"
+
+
 def run_json(args: list[str], *, input_text: str | None = None) -> dict[str, Any]:
-    proc = subprocess.run(args, input=input_text, text=True, capture_output=True, check=True)
+    # Do not use check=True here: the privileged helper intentionally returns a
+    # small sanitized JSON failure object. Preserving that message makes a
+    # failed install diagnosable without ever putting the password/request into
+    # evidence, logs or exception text.
+    proc = subprocess.run(args, input=input_text, text=True, capture_output=True, check=False)
+    if proc.returncode != 0:
+        raise RuntimeError(_safe_command_failure(args, proc))
     value = json.loads(proc.stdout)
     if not isinstance(value, dict):
         raise RuntimeError("command did not return a JSON object")
@@ -71,7 +91,7 @@ def enumerate_targets() -> list[TargetDisk]:
                 continue
             seen.add(real)
             targets.append(TargetDisk(str(entry), real, size, str(d.get("model") or "").strip(), str(d.get("serial") or "").strip()))
-        except (OSError, ValueError, subprocess.CalledProcessError, json.JSONDecodeError):
+        except (OSError, ValueError, RuntimeError, json.JSONDecodeError):
             continue
     return targets
 
@@ -100,6 +120,18 @@ def _is_safe_root_owned_marker(path: pathlib.Path) -> bool:
         return st.st_uid == 0 and not (stat.S_IMODE(st.st_mode) & 0o022)
     except OSError:
         return False
+
+
+def _e2e_serial(message: str) -> None:
+    """Mirror only bounded sanitized E2E diagnostics to the disposable VM serial port."""
+    if not _is_safe_root_owned_marker(E2E_MARKER):
+        return
+    safe = " ".join(str(message).split())[:320]
+    try:
+        with open("/dev/ttyS0", "w", encoding="utf-8") as serial:
+            serial.write(f"SWIR_GRAPHICAL_INSTALLER_UI_FAIL {safe}\n")
+    except OSError:
+        pass
 
 
 def load_e2e_config(path_text: str) -> dict[str, str]:
@@ -146,6 +178,13 @@ def self_test() -> None:
     assert validate_identity("Root User", "abcdefgh", "abcdefgh", "en_US.UTF-8", "us", "Etc/UTC")
     assert validate_identity("swir", "short", "short", "en_US.UTF-8", "us", "Etc/UTC")
     assert validate_identity("swir", "abcdefgh", "different", "en_US.UTF-8", "us", "Etc/UTC")
+    failure = _safe_command_failure(["pkexec", str(HELPER)], subprocess.CompletedProcess([], 127, "", "ignored secret"))
+    assert failure == "pkexec exited with status 127"
+    helper_failure = _safe_command_failure(
+        ["pkexec", str(HELPER)],
+        subprocess.CompletedProcess([], 2, '{"status":"error","message":"safe helper reason"}\n', "ignored"),
+    )
+    assert helper_failure == "pkexec failed: safe helper reason"
     print("SWIR graphical installer UI self-test OK")
 
 
@@ -489,15 +528,15 @@ card { background: #07111c; border-radius: 14px; padding: 18px; }
             self.spinner.stop()
             self.installing = False
             if error or not result or result.get("status") != "installed":
-                self.progress_text.set_text(
-                    "Installation stopped safely. " + (error or "Privileged helper returned an invalid result.")
-                )
+                safe_error = error or "Privileged helper returned an invalid result."
+                self.progress_text.set_text("Installation stopped safely. " + safe_error)
                 if e2e_config:
+                    _e2e_serial(safe_error)
                     self._write_evidence(
                         {
                             "schema": "swir.graphical-installer-ui-e2e/0.1",
                             "status": "failed",
-                            "message": error or "invalid privileged helper result",
+                            "message": safe_error,
                             "passwordStoredInEvidence": False,
                         }
                     )
@@ -543,6 +582,7 @@ card { background: #07111c; border-radius: 14px; padding: 18px; }
             return False
 
         def _e2e_fail(self, message: str) -> bool:
+            _e2e_serial(message)
             self._write_evidence(
                 {
                     "schema": "swir.graphical-installer-ui-e2e/0.1",
