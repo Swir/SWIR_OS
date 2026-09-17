@@ -55,13 +55,34 @@ The privileged helper refuses to operate unless `/var/lib/swir/live/live.json` e
 - evidence proving the smoke launch performed no disk mutation;
 - canonical roadmap validation.
 
-The existing Live USB E2E remains the authoritative destructive-path VM gate. The graphical installer roadmap item must remain open until the GTK application is provisioned into that final Live image and the complete UI-driven path is exercised there.
+The final Live USB image gate also provisions the GTK application and smoke-launches its real window before the existing guarded engine path installs to a disposable target disk and verifies detached boot.
+
+### Full GTK-driven disposable VM gate
+
+`.github/workflows/system-graphical-installer-e2e.yml` adds the stronger qualification lane required before the graphical-installer roadmap item may be checked complete. It boots the final raw Live image as USB mass storage under OVMF, starts the real GTK4 installer in the real Live Wayland session and drives the same production page callbacks used by an interactive user.
+
+The gate must prove all of the following before the milestone can close:
+
+- the GUI selects the exact stable `/dev/disk/by-id/...` target from the visible target list;
+- preview remains read-only and source-media targeting is rejected;
+- an intentionally wrong confirmation token is blocked by the final GTK review before installation begins;
+- account, locale, keyboard and time-zone values pass through the real UI widgets and normal validation path;
+- the correct target-bound token starts the normal `pkexec` + narrow-helper path rather than a separate test installer;
+- the installed root contains the requested account and regional configuration without storing password material in evidence;
+- the source USB is removed from the second VM boot;
+- the installed disk boots graphically and preserves installed data.
+
+The deterministic UI driver is deliberately unavailable on normal Live media. The disposable E2E image must create a root-owned `/run/swir/installer-e2e-enabled` marker and a root-owned `/run/swir/installer-e2e-*` configuration file. The test password is supplied only to the disposable VM process and must never appear in committed files or generated evidence. A test-only Polkit authorization rule is injected into the disposable CI rootfs so the real `pkexec` helper can be exercised non-interactively; that rule is not part of normal Live media provisioning.
+
+Machine-readable evidence is validated against `system/contracts/system-graphical-installer-e2e.schema.json` and `system/image/validate-graphical-installer-e2e.mjs`.
+
+The roadmap item remains open until this full GTK-driven gate succeeds on the final branch head. Physical USB/hardware qualification remains a separate later gate even after the VM workflow passes.
 
 ## Current limitations
 
 - This 0.1 UI does not claim physical-hardware qualification.
 - Secure Boot and legacy BIOS are not claimed.
 - The current locale/keyboard/time-zone pick lists are intentionally small and must expand through the shared i18n architecture.
-- The current Polkit policy requires administrator authentication for the destructive action. The final Live-account authorization UX must be qualified before public release.
+- The normal Live Polkit policy requires administrator authentication for the destructive action. The final Live-account authorization UX must be qualified before public release.
 - No promise is made that erased/formatted data can be recovered. A separate backup is required before destructive installation.
-- The final roadmap gate also requires integration into the final Live image and an end-to-end UI-driven install on disposable media before it can be checked complete.
+- The graphical-installer roadmap item cannot be checked complete merely because the window renders; its full disposable-media UI-driven install and detached-boot evidence must be green.
