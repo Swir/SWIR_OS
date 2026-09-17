@@ -51,7 +51,27 @@ jobs:
           node system/hardware/driver-center-service.selftest.mjs
           node scripts/validate-roadmap-progress.mjs
           ! grep -E 'exec\(|execSync\(|spawn\(|spawnSync\(|curl |wget |shell: *true' system/hardware/hardware-live-e2e.mjs
+      - name: Check hosted-runner hardware visibility
+        id: sysfs
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          pci=(/sys/bus/pci/devices/*)
+          if ((${#pci[@]} == 0)); then
+            echo 'available=false' >> "$GITHUB_OUTPUT"
+            echo '::warning::Hosted runner exposes no PCI devices in kernel sysfs. Keeping Hardware Service contracts green, but producing no new live-hardware evidence and making no hardware qualification claim.'
+            {
+              echo '### Hardware live probe unavailable'
+              echo ''
+              echo 'This hosted runner exposed zero `/sys/bus/pci/devices/*` entries. Contract/self-tests passed, but the live hardware probe was not executed and no replacement evidence was fabricated.'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'available=true' >> "$GITHUB_OUTPUT"
+            echo "Hosted runner exposes ${#pci[@]} PCI sysfs device(s); running production live probe."
+          fi
       - name: Probe runner kernel sysfs with the production Hardware Service
+        if: steps.sysfs.outputs.available == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -67,10 +87,10 @@ jobs:
           if (evidence.hardwareQualificationClaim !== false) process.exit(7);
           NODE
       - name: Upload live hardware evidence
-        if: always()
+        if: always() && steps.sysfs.outputs.available == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: swir-hardware-live-e2e-${{ github.run_id }}
           path: ${{ runner.temp }}/hardware-live-e2e.json
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 7
