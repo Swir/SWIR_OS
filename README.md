@@ -1,14 +1,10 @@
-<!-- SWIR-README-STANDARD:v1 -->
+<!-- SWIR-README-STANDARD:v2 -->
 
 <div align="center">
 
-<img src="assets/branding/swir-os-logo.svg" width="720" alt="SWIR OS official electric-blue logo" />
+<img width="100%" src="assets/readme/hero.svg" alt="SWIR OS — hybrid Linux desktop operating-system platform" />
 
-# ⚡ SWIR OS
-
-### Hybrid desktop operating-system platform
-
-**Linux foundation • Native Linux applications • Managed Windows compatibility • Secure packages • Hardware & Driver Center**
+<br>
 
 [![System Edition Contracts](https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml/badge.svg)](https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml)
 [![Package Provider Image E2E](https://github.com/Swir/SWIR_OS/actions/workflows/system-package-provider-image-e2e.yml/badge.svg)](https://github.com/Swir/SWIR_OS/actions/workflows/system-package-provider-image-e2e.yml)
@@ -18,6 +14,13 @@
 ![Roadmap](https://img.shields.io/badge/ROADMAP-71.7%25-02050A?style=for-the-badge&logoColor=62E5FF)
 ![Completed](https://img.shields.io/badge/DONE-43%2F60-02050A?style=for-the-badge&logoColor=62E5FF)
 ![Status](https://img.shields.io/badge/STATUS-IN%20PROGRESS-02050A?style=for-the-badge&logoColor=62E5FF)
+
+[![Author](https://img.shields.io/badge/Author-Swir-0088FF?style=flat-square&logo=github)](https://github.com/Swir)
+[![Stars](https://img.shields.io/github/stars/Swir/SWIR_OS?style=flat-square&color=0088FF)](https://github.com/Swir/SWIR_OS/stargazers)
+
+<br>
+
+[**Status**](#-project-status) · [**Highlights**](#-highlights) · [**Quick Start**](#️-quick-start--web-edition) · [**Roadmap**](#️-roadmap--releases)
 
 **Canonical source repository:** `Swir/SWIR_OS`
 
