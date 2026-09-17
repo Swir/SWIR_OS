@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'system/session/swir-session-launcher.sh'
+      - 'system/session/swir-shell.py'
       - 'system/session/greetd-e2e-greeter.py'
       - 'system/session/provision-graphical-session.sh'
       - 'system/boot/plymouth/**'
@@ -18,6 +19,7 @@ on:
   pull_request:
     paths:
       - 'system/session/swir-session-launcher.sh'
+      - 'system/session/swir-shell.py'
       - 'system/session/greetd-e2e-greeter.py'
       - 'system/session/provision-graphical-session.sh'
       - 'system/boot/plymouth/**'
@@ -53,18 +55,21 @@ jobs:
           bash -n system/session/swir-session-launcher.sh
           bash -n system/session/provision-graphical-session.sh
           bash -n system/e2e/debian13-graphical-session-vm-e2e.sh
-          python3 -m py_compile system/session/greetd-e2e-greeter.py
+          python3 -m py_compile system/session/greetd-e2e-greeter.py system/session/swir-shell.py
           python3 -m json.tool system/contracts/system-graphical-session-e2e.schema.json >/dev/null
           python3 -m json.tool system/image/system-base-debian-trixie.json >/dev/null
           node scripts/validate-roadmap-progress.mjs
           grep -F 'command = "/usr/sbin/agreety --cmd /usr/local/bin/swir-session"' system/session/provision-graphical-session.sh >/dev/null
-          grep -F "'desktopShellClaim': False" system/session/swir-session-launcher.sh >/dev/null
-          grep -F "'desktopShellClaim': False" system/e2e/debian13-graphical-session-vm-e2e.sh >/dev/null
+          grep -F "'desktopShellClaim': True" system/session/swir-session-launcher.sh >/dev/null
+          grep -F "'desktopShellClaim': True" system/e2e/debian13-graphical-session-vm-e2e.sh >/dev/null
+          grep -F "'nativeToolkit': 'gtk4'" system/session/swir-session-launcher.sh >/dev/null
           grep -F 'interactivePamAuthenticationPassed' system/e2e/debian13-graphical-session-vm-e2e.sh >/dev/null
           grep -F 'activeDuringBoot' system/e2e/debian13-graphical-session-vm-e2e.sh >/dev/null
+          grep -F 'privilegedOperationsInShell' system/session/swir-shell.py >/dev/null
           ! grep -E '^\[initial_session\]$' system/session/provision-graphical-session.sh
-          ! grep -E 'curl |wget |--no-check-gpg|AllowUnauthenticated|trusted=yes|shell: *true' \
+          ! grep -E 'curl |wget |--no-check-gpg|AllowUnauthenticated|trusted=yes|shell: *true|os\.system\(' \
             system/session/swir-session-launcher.sh \
+            system/session/swir-shell.py \
             system/session/greetd-e2e-greeter.py \
             system/session/provision-graphical-session.sh \
             system/e2e/debian13-graphical-session-vm-e2e.sh
@@ -112,8 +117,11 @@ jobs:
           assert e['loginManager']['provider'] == 'greetd' and e['loginManager']['pamPolicyInstalled'] is True
           assert e['loginManager']['interactivePamAuthenticationPassed'] is True and e['loginManager']['autologinUsed'] is False
           assert e['session']['waylandCompositor'] == 'weston' and e['session']['waylandClientHandshakePassed'] is True
+          assert e['shell']['applicationId'] == 'dev.swir.Shell' and e['shell']['nativeToolkit'] == 'gtk4'
+          assert e['shell']['displayProtocol'] == 'wayland' and e['shell']['windowMapped'] is True
+          assert e['shell']['privilegedOperationsInShell'] is False
           assert e['productionDefaults']['testCredentialEmbeddedInProductionImage'] is False
-          assert e['desktopShellClaim'] is False and e['secureBootClaim'] is False and e['hardwareQualificationClaim'] is False
+          assert e['desktopShellClaim'] is True and e['secureBootClaim'] is False and e['hardwareQualificationClaim'] is False
           PY
       - name: Upload compact graphical evidence
         if: always()
