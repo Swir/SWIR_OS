@@ -93,6 +93,7 @@ cat > "$ROOTFS/usr/local/sbin/swir-recovery-e2e-finish" <<'GUEST'
 #!/bin/sh
 set -eu
 REPORT=/run/swir/recovery/recovery-report.json
+MUTATION_TIMERS="apt-daily.timer apt-daily-upgrade.timer dpkg-db-backup.timer fstrim.timer fwupd-refresh.timer"
 serial() { printf '%s\n' "$*" > /dev/ttyS0; }
 fail() {
   serial "SWIR_RECOVERY_VM_E2E_FAIL $1"
@@ -103,9 +104,18 @@ fail() {
 }
 [ -s "$REPORT" ] || fail report-missing
 node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); if(r.schema!=='swir.recovery-mode-report/0.1'||r.bootTarget!=='swir-recovery.target'||r.safeReadOnlyRecoveryBoot!==true||r.root?.readOnly!==true||r.root?.filesystem!=='ext4'||r.root?.fstabIntegrated!==true||r.esp?.fstabIntegrated!==true||r.network?.nonLoopbackDevices?.length!==0||r.automaticFilesystemRepairPerformed!==false||r.automaticPackageMutationPerformed!==false||r.automaticFirmwareMutationPerformed!==false) process.exit(2)" "$REPORT" || fail report-invalid
+for unit in $MUTATION_TIMERS; do
+  state="$(systemctl is-active "$unit" 2>/dev/null || true)"
+  [ "$state" != "active" ] || fail "mutation-timer-active:$unit"
+  enabled="$(systemctl is-enabled "$unit" 2>/dev/null || true)"
+  case "$enabled" in
+    masked|masked-runtime) ;;
+    *) fail "mutation-timer-unmasked:$unit:$enabled" ;;
+  esac
+done
 printf 'SWIR_RECOVERY_VM_E2E_REPORT ' > /dev/ttyS0
 cat "$REPORT" > /dev/ttyS0
-serial 'SWIR_RECOVERY_VM_E2E_PASS debian=13 uefi=systemd-boot root=readonly network=disabled mutations=none'
+serial 'SWIR_RECOVERY_VM_E2E_PASS debian=13 uefi=systemd-boot root=readonly network=disabled timers=masked mutations=none'
 sync
 systemctl --no-block poweroff
 GUEST
@@ -174,7 +184,7 @@ cat > "$ESP_MOUNT/loader/entries/swir-recovery.conf" <<'ENTRY'
 title SWIR OS Recovery Mode E2E
 linux /EFI/Linux/swir-vmlinuz
 initrd /EFI/Linux/swir-initrd.img
-options root=LABEL=SWIR_ROOT ro console=ttyS0,115200n8 systemd.unit=swir-recovery.target systemd.mask=systemd-remount-fs.service fstab=no net.ifnames=0
+options root=LABEL=SWIR_ROOT ro console=ttyS0,115200n8 systemd.unit=swir-recovery.target systemd.mask=systemd-remount-fs.service systemd.mask=apt-daily.timer systemd.mask=apt-daily-upgrade.timer systemd.mask=dpkg-db-backup.timer systemd.mask=fstrim.timer systemd.mask=fwupd-refresh.timer fstab=no net.ifnames=0
 ENTRY
 sync
 umount "$ESP_MOUNT"
@@ -201,7 +211,7 @@ if [[ $qemu_status -ne 0 && $qemu_status -ne 124 ]]; then
   echo "recovery QEMU exited unexpectedly: $qemu_status" >&2
   exit 9
 fi
-grep -F 'SWIR_RECOVERY_VM_E2E_PASS debian=13 uefi=systemd-boot root=readonly network=disabled mutations=none' "$SERIAL_LOG" >/dev/null || {
+grep -F 'SWIR_RECOVERY_VM_E2E_PASS debian=13 uefi=systemd-boot root=readonly network=disabled timers=masked mutations=none' "$SERIAL_LOG" >/dev/null || {
   echo "guest did not emit SWIR_RECOVERY_VM_E2E_PASS" >&2
   tail -n 260 "$SERIAL_LOG" >&2 || true
   exit 10
@@ -240,6 +250,7 @@ const evidence = {
   remountServiceMasked: r.kernelPolicy.remountServiceMasked,
   fstabGeneratorDisabledDuringRecovery: r.kernelPolicy.fstabGeneratorDisabled,
   guestNetworkDisabled: r.network.nonLoopbackDevices.length === 0,
+  mutationTimersMasked: true,
   diagnosticsAgentPassed: true,
   transactionJournalScanPassed: true,
   automaticFilesystemRepairPerformed: r.automaticFilesystemRepairPerformed,
