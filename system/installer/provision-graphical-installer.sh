@@ -33,14 +33,20 @@ safe_target() {
   printf '%s\n' "$ROOTFS$rel"
 }
 
-# Locale generation is part of the installer product path. Obtain Debian's
-# signed locales package from the already configured official repository if the
-# base image does not contain it yet; never add or trust a third-party source.
-if ! chroot "$ROOTFS" dpkg-query -W -f='${db:Status-Abbrev}' locales 2>/dev/null | grep -qx 'ii '; then
-  chroot "$ROOTFS" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends locales
+# Locale generation and pkexec are part of the installer product path. Debian
+# Trixie packages pkexec separately from polkitd, so ensure both required
+# runtime pieces are obtained from the already configured signed Debian source.
+missing=()
+for pkg in locales pkexec; do
+  if ! chroot "$ROOTFS" dpkg-query -W -f='${db:Status-Abbrev}' "$pkg" 2>/dev/null | grep -qx 'ii '; then
+    missing+=("$pkg")
+  fi
+done
+if ((${#missing[@]})); then
+  chroot "$ROOTFS" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${missing[@]}"
 fi
 
-for pkg in python3 python3-gi gir1.2-gtk-4.0 polkitd locales; do
+for pkg in python3 python3-gi gir1.2-gtk-4.0 polkitd pkexec locales; do
   chroot "$ROOTFS" dpkg-query -W -f='${db:Status-Abbrev}' "$pkg" 2>/dev/null | grep -qx 'ii ' || {
     echo "required graphical installer package is not installed: $pkg" >&2
     exit 69
@@ -76,4 +82,4 @@ grep -Fq '/usr/local/libexec/swir-installer-helper' "$ROOTFS/usr/share/polkit-1/
 chroot "$ROOTFS" /usr/bin/python3 /usr/local/bin/swir-installer --self-test
 chroot "$ROOTFS" /usr/bin/python3 /usr/local/libexec/swir-installer-helper --self-test
 
-echo "SWIR graphical installer staged: gtk4=true helper=narrow-polkit engine=guarded locales=true"
+echo "SWIR graphical installer staged: gtk4=true helper=narrow-polkit engine=guarded locales=true pkexec=true"
