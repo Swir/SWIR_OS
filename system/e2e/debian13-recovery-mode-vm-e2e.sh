@@ -22,6 +22,8 @@ PROVISION_EVIDENCE="$ARTIFACT_DIR/recovery-provisioning.json"
 OVMF_CODE="/usr/share/OVMF/OVMF_CODE_4M.fd"
 OVMF_VARS_TEMPLATE="/usr/share/OVMF/OVMF_VARS_4M.fd"
 OVMF_VARS="$WORK_ROOT/OVMF_VARS_4M.fd"
+PACKAGE_FIXTURE_ID="recovery-e2e-package-0001"
+FIRMWARE_FIXTURE_ID="recovery-e2e-firmware-0001"
 
 case "$(readlink -m "$WORK_ROOT")" in
   /|/bin|/boot|/dev|/etc|/home|/lib|/lib64|/opt|/proc|/root|/run|/sbin|/srv|/sys|/usr|/var)
@@ -94,6 +96,8 @@ cat > "$ROOTFS/usr/local/sbin/swir-recovery-e2e-finish" <<'GUEST'
 set -eu
 REPORT=/run/swir/recovery/recovery-report.json
 MUTATION_TIMERS="apt-daily.timer apt-daily-upgrade.timer dpkg-db-backup.timer fstrim.timer fwupd-refresh.timer"
+PACKAGE_FIXTURE_ID=recovery-e2e-package-0001
+FIRMWARE_FIXTURE_ID=recovery-e2e-firmware-0001
 serial() { printf '%s\n' "$*" > /dev/ttyS0; }
 fail() {
   serial "SWIR_RECOVERY_VM_E2E_FAIL $1"
@@ -103,7 +107,21 @@ fail() {
   exit 1
 }
 [ -s "$REPORT" ] || fail report-missing
-node -e "const fs=require('fs'); const r=JSON.parse(fs.readFileSync(process.argv[1])); if(r.schema!=='swir.recovery-mode-report/0.1'||r.bootTarget!=='swir-recovery.target'||r.safeReadOnlyRecoveryBoot!==true||r.root?.readOnly!==true||r.root?.filesystem!=='ext4'||r.root?.fstabIntegrated!==true||r.esp?.fstabIntegrated!==true||r.network?.nonLoopbackDevices?.length!==0||r.automaticFilesystemRepairPerformed!==false||r.automaticPackageMutationPerformed!==false||r.automaticFirmwareMutationPerformed!==false) process.exit(2)" "$REPORT" || fail report-invalid
+node - "$REPORT" "$PACKAGE_FIXTURE_ID" "$FIRMWARE_FIXTURE_ID" <<'NODE' || fail report-invalid
+const fs = require('fs');
+const [reportPath, packageId, firmwareId] = process.argv.slice(2);
+const r = JSON.parse(fs.readFileSync(reportPath));
+const p = r.transactions?.packages;
+const f = r.transactions?.firmware;
+if (r.schema !== 'swir.recovery-mode-report/0.2' || r.bootTarget !== 'swir-recovery.target' || r.safeReadOnlyRecoveryBoot !== true) process.exit(2);
+if (r.root?.readOnly !== true || r.root?.filesystem !== 'ext4' || r.root?.fstabIntegrated !== true || r.esp?.fstabIntegrated !== true) process.exit(3);
+if (r.network?.nonLoopbackDevices?.length !== 0 || r.automaticFilesystemRepairPerformed !== false || r.automaticPackageMutationPerformed !== false || r.automaticFirmwareMutationPerformed !== false) process.exit(4);
+if (p?.directory !== '/var/lib/swir/package-transactions' || p?.schema !== 'swir.system-package-transaction/0.1' || p?.statusField !== 'state') process.exit(5);
+if (p?.journals !== 1 || p?.pending !== 1 || p?.corrupt !== 0 || !p?.pendingIds?.includes(packageId)) process.exit(6);
+if (f?.directory !== '/var/lib/swir/transactions/firmware' || f?.schema !== 'swir.firmware-transaction-journal/0.1' || f?.statusField !== 'status') process.exit(7);
+if (f?.journals !== 1 || f?.pending !== 1 || f?.corrupt !== 0 || !f?.pendingIds?.includes(firmwareId)) process.exit(8);
+if (r.manualRecoveryRequiredForPendingTransactions !== true) process.exit(9);
+NODE
 for unit in $MUTATION_TIMERS; do
   state="$(systemctl is-active "$unit" 2>/dev/null || true)"
   [ "$state" != "active" ] || fail "mutation-timer-active:$unit"
@@ -115,7 +133,7 @@ for unit in $MUTATION_TIMERS; do
 done
 printf 'SWIR_RECOVERY_VM_E2E_REPORT ' > /dev/ttyS0
 cat "$REPORT" > /dev/ttyS0
-serial 'SWIR_RECOVERY_VM_E2E_PASS debian=13 uefi=systemd-boot root=readonly network=disabled timers=masked mutations=none'
+serial 'SWIR_RECOVERY_VM_E2E_PASS debian=13 uefi=systemd-boot root=readonly network=disabled timers=masked mutations=none journals=canonical'
 sync
 systemctl --no-block poweroff
 GUEST
@@ -138,6 +156,29 @@ install -d -m 0755 "$ROOTFS/etc/systemd/system/swir-recovery.target.wants"
 ln -sf ../swir-recovery-e2e.service "$ROOTFS/etc/systemd/system/swir-recovery.target.wants/swir-recovery-e2e.service"
 printf 'LABEL=SWIR_ROOT / ext4 defaults 0 1\nLABEL=SWIR_ESP /boot/efi vfat umask=0077 0 2\n' > "$ROOTFS/etc/fstab"
 echo swir-recovery-e2e > "$ROOTFS/etc/hostname"
+
+# Seed minimal read-only diagnostics fixtures at the exact production journal roots.
+# The recovery agent must detect both without mutating either journal.
+install -d -m 0700 "$ROOTFS/var/lib/swir/package-transactions" "$ROOTFS/var/lib/swir/transactions/firmware"
+cat > "$ROOTFS/var/lib/swir/package-transactions/$PACKAGE_FIXTURE_ID.json" <<JSON
+{
+  "schema": "swir.system-package-transaction/0.1",
+  "id": "$PACKAGE_FIXTURE_ID",
+  "state": "failed-needs-recovery",
+  "diagnosticFixture": true
+}
+JSON
+chmod 0600 "$ROOTFS/var/lib/swir/package-transactions/$PACKAGE_FIXTURE_ID.json"
+cat > "$ROOTFS/var/lib/swir/transactions/firmware/$FIRMWARE_FIXTURE_ID.json" <<JSON
+{
+  "schema": "swir.firmware-transaction-journal/0.1",
+  "transactionId": "$FIRMWARE_FIXTURE_ID",
+  "status": "staged-reboot-required",
+  "diagnosticFixture": true
+}
+JSON
+chmod 0600 "$ROOTFS/var/lib/swir/transactions/firmware/$FIRMWARE_FIXTURE_ID.json"
+
 rm -f "$ROOTFS/usr/sbin/policy-rc.d"
 chroot "$ROOTFS" apt-get clean
 cleanup
@@ -211,7 +252,7 @@ if [[ $qemu_status -ne 0 && $qemu_status -ne 124 ]]; then
   echo "recovery QEMU exited unexpectedly: $qemu_status" >&2
   exit 9
 fi
-grep -F 'SWIR_RECOVERY_VM_E2E_PASS debian=13 uefi=systemd-boot root=readonly network=disabled timers=masked mutations=none' "$SERIAL_LOG" >/dev/null || {
+grep -F 'SWIR_RECOVERY_VM_E2E_PASS debian=13 uefi=systemd-boot root=readonly network=disabled timers=masked mutations=none journals=canonical' "$SERIAL_LOG" >/dev/null || {
   echo "guest did not emit SWIR_RECOVERY_VM_E2E_PASS" >&2
   tail -n 260 "$SERIAL_LOG" >&2 || true
   exit 10
@@ -222,17 +263,25 @@ printf '%s\n' "${REPORT_LINE#*SWIR_RECOVERY_VM_E2E_REPORT }" > "$RECOVERY_REPORT
 
 IMAGE_SHA256="$(sha256sum "$DISK" | awk '{print $1}')"
 OVMF_SHA256="$(sha256sum "$OVMF_CODE" | awk '{print $1}')"
-"$NODE_BIN" - "$RECOVERY_REPORT" "$RECOVERY_EVIDENCE" "$EFI_SHA256" "$IMAGE_SHA256" "$OVMF_SHA256" <<'NODE'
+"$NODE_BIN" - "$RECOVERY_REPORT" "$RECOVERY_EVIDENCE" "$EFI_SHA256" "$IMAGE_SHA256" "$OVMF_SHA256" "$PACKAGE_FIXTURE_ID" "$FIRMWARE_FIXTURE_ID" <<'NODE'
 const fs = require('fs');
-const [reportPath, outputPath, bootloaderSha256, imageSha256, ovmfSha256] = process.argv.slice(2);
+const [reportPath, outputPath, bootloaderSha256, imageSha256, ovmfSha256, packageId, firmwareId] = process.argv.slice(2);
 const r = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
-if (r?.schema !== 'swir.recovery-mode-report/0.1' || r.bootTarget !== 'swir-recovery.target' || r.safeReadOnlyRecoveryBoot !== true) process.exit(2);
+const p = r?.transactions?.packages;
+const f = r?.transactions?.firmware;
+if (r?.schema !== 'swir.recovery-mode-report/0.2' || r.bootTarget !== 'swir-recovery.target' || r.safeReadOnlyRecoveryBoot !== true) process.exit(2);
 if (r.root?.readOnly !== true || r.root?.filesystem !== 'ext4' || r.root?.fstabIntegrated !== true || r.esp?.fstabIntegrated !== true) process.exit(3);
 if (r.kernelPolicy?.rootRequestedReadOnly !== true || r.kernelPolicy?.remountServiceMasked !== true || r.kernelPolicy?.fstabGeneratorDisabled !== true) process.exit(4);
 if (r.network?.nonLoopbackDevices?.length !== 0 || r.network?.networkActivationRequested !== false) process.exit(5);
 if (r.automaticFilesystemRepairPerformed !== false || r.automaticPackageMutationPerformed !== false || r.automaticFirmwareMutationPerformed !== false) process.exit(6);
+const packageJournalPathIntegrated = p?.directory === '/var/lib/swir/package-transactions' && p?.schema === 'swir.system-package-transaction/0.1' && p?.statusField === 'state';
+const firmwareJournalPathIntegrated = f?.directory === '/var/lib/swir/transactions/firmware' && f?.schema === 'swir.firmware-transaction-journal/0.1' && f?.statusField === 'status';
+const pendingPackageTransactionDetected = p?.journals === 1 && p?.pending === 1 && p?.corrupt === 0 && p?.pendingIds?.includes(packageId);
+const pendingFirmwareTransactionDetected = f?.journals === 1 && f?.pending === 1 && f?.corrupt === 0 && f?.pendingIds?.includes(firmwareId);
+if (!packageJournalPathIntegrated || !firmwareJournalPathIntegrated || !pendingPackageTransactionDetected || !pendingFirmwareTransactionDetected) process.exit(7);
+if (r.manualRecoveryRequiredForPendingTransactions !== true) process.exit(8);
 const evidence = {
-  schema: 'swir.system-recovery-mode-e2e/0.1',
+  schema: 'swir.system-recovery-mode-e2e/0.2',
   generatedAt: new Date().toISOString(),
   distribution: 'debian-13-trixie',
   architecture: 'amd64',
@@ -252,7 +301,14 @@ const evidence = {
   guestNetworkDisabled: r.network.nonLoopbackDevices.length === 0,
   mutationTimersMasked: true,
   diagnosticsAgentPassed: true,
-  transactionJournalScanPassed: true,
+  transactionJournalScanPassed: packageJournalPathIntegrated && firmwareJournalPathIntegrated && pendingPackageTransactionDetected && pendingFirmwareTransactionDetected,
+  packageJournalPathIntegrated,
+  firmwareJournalPathIntegrated,
+  pendingPackageTransactionDetected,
+  pendingFirmwareTransactionDetected,
+  manualRecoveryRequired: r.manualRecoveryRequiredForPendingTransactions,
+  packageJournalSchema: p.schema,
+  firmwareJournalSchema: f.schema,
   automaticFilesystemRepairPerformed: r.automaticFilesystemRepairPerformed,
   automaticPackageMutationPerformed: r.automaticPackageMutationPerformed,
   automaticFirmwareMutationPerformed: r.automaticFirmwareMutationPerformed,
