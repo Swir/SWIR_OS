@@ -12,8 +12,8 @@
 [![Desktop Windows Build](https://github.com/Swir/SWIR_OS/actions/workflows/desktop-windows-build.yml/badge.svg)](https://github.com/Swir/SWIR_OS/actions/workflows/desktop-windows-build.yml)
 [![Roadmap Contract](https://github.com/Swir/SWIR_OS/actions/workflows/roadmap-contract.yml/badge.svg)](https://github.com/Swir/SWIR_OS/actions/workflows/roadmap-contract.yml)
 
-![Roadmap](https://img.shields.io/badge/ROADMAP-76.9%25-02050A?style=for-the-badge&logoColor=62E5FF)
-![Completed](https://img.shields.io/badge/DONE-50%2F65-02050A?style=for-the-badge&logoColor=62E5FF)
+![Roadmap](https://img.shields.io/badge/ROADMAP-78.5%25-02050A?style=for-the-badge&logoColor=62E5FF)
+![Completed](https://img.shields.io/badge/DONE-51%2F65-02050A?style=for-the-badge&logoColor=62E5FF)
 ![Status](https://img.shields.io/badge/STATUS-IN%20PROGRESS-02050A?style=for-the-badge&logoColor=62E5FF)
 
 [![Author](https://img.shields.io/badge/Author-Swir-0088FF?style=flat-square&logo=github)](https://github.com/Swir)
@@ -31,9 +31,9 @@
 
 ## 📊 Project status
 
-<img width="100%" src="assets/readme/progress-card.svg" alt="SWIR OS roadmap progress — 76.9%, 50 of 65 verified deliverables" />
+<img width="100%" src="assets/readme/progress-card.svg" alt="SWIR OS roadmap progress — 78.5%, 51 of 65 verified deliverables" />
 
-**Measured scope:** full Web → Desktop → System `Version roadmap`. **Project progress:** 50/65 = **76.9%**. **Release readiness:** not ready; physical Live USB qualification, the final native shell/application suite and other release gates remain open.
+**Measured scope:** full Web → Desktop → System `Version roadmap`. **Project progress:** 51/65 = **78.5%**. **Release readiness:** not ready; physical Live USB qualification, the complete native application suite and other release gates remain open.
 
 SWIR OS is actively being developed as three connected editions: a browser-based Web Edition, a Windows Desktop Edition with native adapters, and a real Linux-native System Edition intended to run from removable media and install to disk as a standalone operating system.
 
@@ -41,15 +41,15 @@ SWIR OS is actively being developed as three connected editions: a browser-based
 |---|---|---|
 | **Web Edition** | Portable shell, applications and API laboratory | `1.7.13` |
 | **Desktop Edition** | Windows host with native OS adapters and guarded update/recovery foundations | `0.5.7-preview` |
-| **System Edition** | Debian 13 foundation with VM-verified UEFI Live USB → native GTK4 installer → guarded separate-disk install → source-USB-detached standalone graphical boot; physical qualification pending | In development |
+| **System Edition** | Debian 13 foundation with authenticated native GTK4 SWIR shell plus VM-verified UEFI Live USB → native GTK4 installer → guarded separate-disk install → source-USB-detached standalone graphical boot; physical qualification pending | In development |
 
 ### Overall roadmap
 
 ```text
-███████████████░░░░░ 76.9%
+████████████████░░░░ 78.5%
 ```
 
-**50 of 65 measurable roadmap deliverables are complete.** Live USB, disk installation, detached boot, graphical-installer E2E and physical-hardware qualification are tracked explicitly rather than hidden inside a generic bootable-image milestone. The authoritative checklist and progress math live in [`SWIR-OS-ARCHITECTURE.md`](SWIR-OS-ARCHITECTURE.md). A prototype, contract skeleton or CI job alone does not count as a completed roadmap item.
+**51 of 65 measurable roadmap deliverables are complete.** The native System shell, Live USB, disk installation, detached boot, graphical-installer E2E and physical-hardware qualification are tracked explicitly rather than hidden inside generic bootable-image milestones. The authoritative checklist and progress math live in [`SWIR-OS-ARCHITECTURE.md`](SWIR-OS-ARCHITECTURE.md). A prototype, contract skeleton or CI job alone does not count as a completed roadmap item.
 
 ---
 
@@ -82,9 +82,10 @@ Windows kernel drivers are **not** treated as a general solution for Linux hardw
 
 | Area | Verified/current direction |
 |---|---|
+| 🖥️ **Native System shell** | The authenticated System Edition Wayland session now launches a real fullscreen GTK4 SWIR shell instead of stopping at an empty compositor. The UEFI E2E requires the native shell window to map, verifies fixed launcher entries and exercises the unprivileged subprocess launcher path. Privileged mutations remain outside the shell. |
 | 💽 **Live USB & installation** | A raw GPT amd64 image with SHA-256 is booted in CI as real QEMU USB mass storage under UEFI/OVMF. The VM gates prove graphical Live boot, no target write during idle/preview/cancel/wrong-token paths, source-media rejection, guarded install to a separate blank disk, source USB removal, standalone installed-disk boot and persistence. Physical USB qualification is still open. |
 | 🧭 **Native installer** | The GTK4 installer now drives the complete destructive path in a disposable UEFI VM through target review, wrong-token rejection, account/locale/keyboard/time-zone collection, the normal narrow Polkit helper, separate-disk installation and detached installed-system boot. The E2E verifies configured identity and regional settings after boot without storing password material in evidence. Physical hardware remains a separate gate. |
-| 🐧 **Linux System foundation** | Debian 13 base, kernel, UEFI boot path, systemd and authenticated graphical-session foundations are covered by System Edition gates. |
+| 🐧 **Linux System foundation** | Debian 13 base, kernel, UEFI boot path, systemd, authenticated graphical session and native GTK4 shell foundations are covered by System Edition gates. |
 | 🖥️ **Desktop bridge** | Windows Desktop Host exposes native filesystem, app-data, account/session, process/service, device/network, clipboard, tray, shortcuts, file-association and notification adapters. |
 | 🍷 **Windows compatibility** | Managed Wine compatibility has a live E2E that launches a deterministic Win64 application through controlled per-app compatibility state. Broader application compatibility is still being expanded. |
 | 📦 **Packages** | The Debian 13 System package path verifies the production distribution provider, read-only APT dependency resolution, real journaled APT installation and fail-closed interrupted-transaction reconciliation. Flatpak/AppImage remain explicit experimental adapters. |
@@ -288,6 +289,7 @@ A local build is not equivalent to an official verified release. Release pipelin
 | Path | Purpose |
 |---|---|
 | `desktop/windows/` | Windows Desktop Host, native brokers, updater, packaging and self-tests |
+| `system/session/` | Authenticated Wayland session launcher and native GTK4 SWIR desktop shell |
 | `system/installer/` | Guarded install engine, native GTK4 Live installer and narrow privileged helper |
 | `system/e2e/` | Disposable System Edition boot/runtime/install verification |
 | `system/image/` | Debian rootfs and bootable-media builders/evidence validators |
@@ -309,7 +311,7 @@ A local build is not equivalent to an official verified release. Release pipelin
 
 Development currently prioritizes the highest-impact path to a dependable Desktop/System platform:
 
-1. build the native SWIR desktop shell and mandatory native application suite,
+1. build the mandatory native application suite on top of the verified SWIR desktop shell,
 2. harden the Desktop host/update/signing lifecycle,
 3. verify fwupd/LVFS mutation on supported hardware and controlled official-vendor repository policy,
 4. qualify physical Live USB boot/install and recovery on dedicated hardware,
@@ -325,7 +327,7 @@ SWIR OS is under active development and is **not yet a finished System Edition d
 
 - The Live USB → GTK4 installer → disk install → detached boot path is verified only in a disposable UEFI VM; physical USB/hardware qualification is still open.
 - Secure Boot and legacy BIOS are not claimed.
-- System Edition still lacks the final native SWIR desktop shell and full daily-use native application suite.
+- The native GTK4 SWIR shell foundation is verified, but the full daily-use native application suite and shell theme/skin framework are not complete.
 - Desktop Edition remains a preview line.
 - Production package-signing provisioning is not yet fully cut over.
 - The signed GitHub-backed update feed/user-policy roadmap gate remains open.

@@ -69,7 +69,8 @@ POLICY
 chmod 0755 "$ROOTFS/usr/sbin/policy-rc.d"
 chroot "$ROOTFS" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get update
 chroot "$ROOTFS" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-  systemd-boot-efi greetd weston plymouth plymouth-themes wayland-utils dbus-user-session
+  systemd-boot-efi greetd weston plymouth plymouth-themes wayland-utils dbus-user-session \
+  python3-gi gir1.2-gtk-4.0
 chroot "$ROOTFS" /usr/bin/systemd-machine-id-setup
 
 bash "$REPO_ROOT/system/session/provision-graphical-session.sh" \
@@ -172,12 +173,18 @@ assert session.get('wayland', {}).get('compositor') == 'weston'
 assert session.get('wayland', {}).get('backend') == 'headless'
 assert session.get('wayland', {}).get('socketObserved') is True
 assert session.get('wayland', {}).get('clientHandshakePassed') is True
-assert session.get('desktopShellClaim') is False
+shell = session.get('shell', {})
+assert shell.get('applicationId') == 'dev.swir.Shell'
+assert shell.get('nativeToolkit') == 'gtk4' and shell.get('displayProtocol') == 'wayland'
+assert shell.get('windowMapped') is True and shell.get('fullscreenRequested') is True
+assert shell.get('privilegedOperationsInShell') is False
+assert {'Files', 'Terminal', 'Settings', 'Install SWIR OS'} <= set(shell.get('launcherEntries', []))
+assert session.get('desktopShellClaim') is True
 assert plymouth.get('selectedTheme') == 'swir' and plymouth.get('activeDuringBoot') is True
 PY
 
 printf 'PASS\n' > "$STATUS"
-serial 'SWIR_GRAPHICAL_E2E_PASS plymouth=swir login=greetd pam=true wayland=weston desktop-shell=false'
+serial 'SWIR_GRAPHICAL_E2E_PASS plymouth=swir login=greetd pam=true wayland=weston desktop-shell=true toolkit=gtk4'
 sync
 systemctl --no-block poweroff
 GUEST
@@ -327,12 +334,13 @@ out = {
     'waylandSocketObserved': session['wayland']['socketObserved'],
     'waylandClientHandshakePassed': session['wayland']['clientHandshakePassed'],
   },
+  'shell': session['shell'],
   'productionDefaults': {
     'greeter': 'agreety',
     'sessionCommand': '/usr/local/bin/swir-session',
     'testCredentialEmbeddedInProductionImage': False,
   },
-  'desktopShellClaim': False,
+  'desktopShellClaim': True,
   'secureBootClaim': False,
   'hardwareQualificationClaim': False,
 }
@@ -351,9 +359,12 @@ assert e['loginManager']['interactivePamAuthenticationPassed'] is True and e['lo
 assert e['loginManager']['remoteSession'] is False and e['loginManager']['sessionService'] == 'greetd'
 assert e['session']['waylandCompositor'] == 'weston' and e['session']['backend'] == 'headless'
 assert e['session']['waylandSocketObserved'] is True and e['session']['waylandClientHandshakePassed'] is True
+assert e['shell']['applicationId'] == 'dev.swir.Shell' and e['shell']['nativeToolkit'] == 'gtk4'
+assert e['shell']['displayProtocol'] == 'wayland' and e['shell']['windowMapped'] is True
+assert e['shell']['privilegedOperationsInShell'] is False
 assert e['productionDefaults']['testCredentialEmbeddedInProductionImage'] is False
-assert e['desktopShellClaim'] is False and e['secureBootClaim'] is False and e['hardwareQualificationClaim'] is False
+assert e['desktopShellClaim'] is True and e['secureBootClaim'] is False and e['hardwareQualificationClaim'] is False
 PY
 
-echo "SWIR Debian 13 graphical login/session UEFI E2E passed"
+echo "SWIR Debian 13 graphical login/session + native shell UEFI E2E passed"
 cat "$EVIDENCE_OUT"

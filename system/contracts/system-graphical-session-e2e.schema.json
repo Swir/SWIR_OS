@@ -11,6 +11,7 @@
     "bootSplash",
     "loginManager",
     "session",
+    "shell",
     "productionDefaults",
     "desktopShellClaim",
     "secureBootClaim",
@@ -71,6 +72,27 @@
         "waylandClientHandshakePassed": { "const": true }
       }
     },
+    "shell": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["applicationId", "nativeToolkit", "displayProtocol", "windowMapped", "fullscreenRequested", "launcherEntries", "launcherProbePassed", "privilegedOperationsInShell", "pid"],
+      "properties": {
+        "applicationId": { "const": "dev.swir.Shell" },
+        "nativeToolkit": { "const": "gtk4" },
+        "displayProtocol": { "const": "wayland" },
+        "windowMapped": { "const": true },
+        "fullscreenRequested": { "const": true },
+        "launcherEntries": {
+          "type": "array",
+          "minItems": 4,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 64 }
+        },
+        "launcherProbePassed": { "const": true },
+        "privilegedOperationsInShell": { "const": false },
+        "pid": { "type": "integer", "minimum": 1 }
+      }
+    },
     "productionDefaults": {
       "type": "object",
       "additionalProperties": false,
@@ -81,7 +103,7 @@
         "testCredentialEmbeddedInProductionImage": { "const": false }
       }
     },
-    "desktopShellClaim": { "const": false },
+    "desktopShellClaim": { "const": true },
     "secureBootClaim": { "const": false },
     "hardwareQualificationClaim": { "const": false }
   }
