@@ -56,8 +56,11 @@ if [[ "$SOURCE_TYPE" == part ]]; then
 fi
 [[ "$SOURCE_DISK" != "$TARGET" ]] || fail "refusing to install onto the currently booted source media"
 
-if lsblk -nrpo MOUNTPOINT "$TARGET" | grep -Eq '^/'; then
-  fail "target disk or one of its partitions is mounted"
+# Reject every active use of the target, including mounted filesystems and swap.
+# MOUNTPOINTS is deliberately used instead of MOUNTPOINT so multiple consumers
+# cannot be hidden by a single-field view.
+if lsblk -nrpo MOUNTPOINTS "$TARGET" | grep -Eq '[^[:space:]]'; then
+  fail "target disk or one of its partitions is mounted or active"
 fi
 
 SIZE_BYTES="$(blockdev --getsize64 "$TARGET")"
@@ -168,6 +171,16 @@ rsync -aHAX --numeric-ids --one-file-system \
   / "$ROOT_MOUNT/"
 chown 0:0 "$ROOT_MOUNT"
 chmod 0755 "$ROOT_MOUNT"
+
+# An installed system must not retain Live-media identity. Keep explicit E2E
+# persistence fixtures elsewhere, but remove the production Live marker and
+# force systemd to generate a fresh machine ID on first installed boot.
+rm -rf "$ROOT_MOUNT/var/lib/swir/live"
+: > "$ROOT_MOUNT/etc/machine-id"
+if [[ -e "$ROOT_MOUNT/var/lib/dbus/machine-id" && ! -L "$ROOT_MOUNT/var/lib/dbus/machine-id" ]]; then
+  rm -f "$ROOT_MOUNT/var/lib/dbus/machine-id"
+  ln -s /etc/machine-id "$ROOT_MOUNT/var/lib/dbus/machine-id"
+fi
 
 printf 'LABEL=SWIR_ROOT / ext4 defaults 0 1\nLABEL=SWIR_ESP /boot/efi vfat umask=0077 0 2\n' > "$ROOT_MOUNT/etc/fstab"
 mkdir -p "$ROOT_MOUNT/var/lib/swir/install"
