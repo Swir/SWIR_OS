@@ -68,7 +68,10 @@ grep -Fq '<action id="dev.swir.installer.install">' "$ROOTFS/usr/share/polkit-1/
 grep -Fq '<allow_any>no</allow_any>' "$ROOTFS/usr/share/polkit-1/actions/dev.swir.installer.policy"
 grep -Fq '<allow_inactive>no</allow_inactive>' "$ROOTFS/usr/share/polkit-1/actions/dev.swir.installer.policy"
 grep -Fq '/usr/local/libexec/swir-installer-helper' "$ROOTFS/usr/share/polkit-1/actions/dev.swir.installer.policy"
-! grep -Eq '(/bin/sh|/bin/bash|shell=True|os\.system\()' "$ROOTFS/usr/local/libexec/swir-installer-helper"
+# A normal installed user may legitimately use /bin/bash as their login shell.
+# What is forbidden here is invoking commands through Python shell mode or
+# generic os.system-style execution.
+! grep -Eq '(shell[[:space:]]*=[[:space:]]*True|os\.system\(|subprocess\.(run|Popen|call|check_call|check_output)\([^\n]*shell[[:space:]]*=[[:space:]]*True)' "$ROOTFS/usr/local/libexec/swir-installer-helper"
 
 chroot "$ROOTFS" /usr/bin/python3 /usr/local/bin/swir-installer --self-test
 chroot "$ROOTFS" /usr/bin/python3 /usr/local/libexec/swir-installer-helper --self-test
