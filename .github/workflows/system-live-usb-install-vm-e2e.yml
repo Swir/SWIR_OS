@@ -6,6 +6,11 @@ on:
     paths:
       - 'system/image/build-live-usb-img.sh'
       - 'system/installer/swir-install-engine.sh'
+      - 'system/installer/swir-installer.py'
+      - 'system/installer/swir-installer-helper.py'
+      - 'system/installer/provision-graphical-installer.sh'
+      - 'system/installer/swir-installer.desktop'
+      - 'system/installer/dev.swir.installer.policy'
       - 'system/e2e/debian13-live-usb-install-vm-e2e.sh'
       - 'system/image/validate-live-usb-install-evidence.mjs'
       - 'system/contracts/system-live-usb-install-e2e.schema.json'
@@ -13,6 +18,8 @@ on:
       - 'system/image/build-debian-trixie-rootfs.sh'
       - 'system/image/system-base-debian-trixie.json'
       - 'system/SWIR-LIVE-USB-INSTALL-0.1.md'
+      - 'system/SWIR-GRAPHICAL-INSTALLER-0.1.md'
+      - 'assets/branding/swir-os-logo.svg'
       - 'SWIR-OS-ARCHITECTURE.md'
       - 'README.md'
       - '.github/workflows/system-live-usb-install-vm-e2e.yml'
@@ -20,6 +27,11 @@ on:
     paths:
       - 'system/image/build-live-usb-img.sh'
       - 'system/installer/swir-install-engine.sh'
+      - 'system/installer/swir-installer.py'
+      - 'system/installer/swir-installer-helper.py'
+      - 'system/installer/provision-graphical-installer.sh'
+      - 'system/installer/swir-installer.desktop'
+      - 'system/installer/dev.swir.installer.policy'
       - 'system/e2e/debian13-live-usb-install-vm-e2e.sh'
       - 'system/image/validate-live-usb-install-evidence.mjs'
       - 'system/contracts/system-live-usb-install-e2e.schema.json'
@@ -27,6 +39,8 @@ on:
       - 'system/image/build-debian-trixie-rootfs.sh'
       - 'system/image/system-base-debian-trixie.json'
       - 'system/SWIR-LIVE-USB-INSTALL-0.1.md'
+      - 'system/SWIR-GRAPHICAL-INSTALLER-0.1.md'
+      - 'assets/branding/swir-os-logo.svg'
       - 'SWIR-OS-ARCHITECTURE.md'
       - 'README.md'
       - '.github/workflows/system-live-usb-install-vm-e2e.yml'
@@ -54,7 +68,9 @@ jobs:
           set -euo pipefail
           bash -n system/image/build-live-usb-img.sh
           bash -n system/installer/swir-install-engine.sh
+          bash -n system/installer/provision-graphical-installer.sh
           bash -n system/e2e/debian13-live-usb-install-vm-e2e.sh
+          python3 -m py_compile system/installer/swir-installer.py system/installer/swir-installer-helper.py
           node --check system/image/validate-live-usb-install-evidence.mjs
           python3 -m json.tool system/contracts/system-live-usb-install-e2e.schema.json >/dev/null
       - name: Enforce install safety invariants
@@ -67,8 +83,9 @@ jobs:
           grep -F 'destructiveWritePerformed": False' system/installer/swir-install-engine.sh >/dev/null
           grep -F 'usb-storage,drive=liveusb,bootindex=1,serial=SWIR_LIVE_E2E' system/e2e/debian13-live-usb-install-vm-e2e.sh >/dev/null
           grep -F 'sourceUsbDetachedBeforeInstalledBoot' system/e2e/debian13-live-usb-install-vm-e2e.sh >/dev/null
+          grep -F 'graphicalInstallerUiSmokePassed' system/e2e/debian13-live-usb-install-vm-e2e.sh >/dev/null
           grep -F '"graphicalInstallerClaim": False' system/e2e/debian13-live-usb-install-vm-e2e.sh >/dev/null
-          ! grep -E 'curl |wget |--no-check-gpg|AllowUnauthenticated|trusted=yes' system/image/build-live-usb-img.sh system/installer/swir-install-engine.sh system/e2e/debian13-live-usb-install-vm-e2e.sh
+          ! grep -E 'curl |wget |--no-check-gpg|AllowUnauthenticated|trusted=yes' system/image/build-live-usb-img.sh system/installer/swir-install-engine.sh system/installer/provision-graphical-installer.sh system/e2e/debian13-live-usb-install-vm-e2e.sh
       - name: Validate locked roadmap math
         run: node scripts/validate-roadmap-progress.mjs
 
