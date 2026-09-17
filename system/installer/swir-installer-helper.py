@@ -21,6 +21,7 @@ from typing import Any, NoReturn
 
 ENGINE = pathlib.Path("/usr/local/sbin/swir-install-engine")
 LIVE_MARKER = pathlib.Path("/var/lib/swir/live/live.json")
+E2E_MARKER = pathlib.Path("/run/swir/installer-e2e-enabled")
 MAX_PASSWORD_BYTES = 256
 USERNAME_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,30}$")
 LOCALE_RE = re.compile(r"^[A-Za-z]{2,3}(?:_[A-Za-z]{2})?(?:\.[A-Za-z0-9_-]+)?$")
@@ -34,6 +35,18 @@ class InstallerError(RuntimeError):
 
 def fail(message: str, code: int = 2) -> NoReturn:
     print(json.dumps({"schema": "swir.graphical-installer-result/0.1", "status": "error", "message": message}), file=sys.stdout)
+    # The disposable full-path VM gate deliberately captures helper stdout in
+    # the GTK process. Mirror only the already-sanitized failure message to the
+    # VM serial console when the root-owned E2E marker exists so CI can diagnose
+    # failures without weakening normal Live-media behavior or logging secrets.
+    try:
+        if E2E_MARKER.is_file() and not E2E_MARKER.is_symlink():
+            st = E2E_MARKER.stat()
+            if st.st_uid == 0 and not (stat.S_IMODE(st.st_mode) & 0o022):
+                with open("/dev/ttyS0", "w", encoding="utf-8") as serial:
+                    serial.write(f"SWIR_GRAPHICAL_INSTALLER_HELPER_FAIL {message}\n")
+    except OSError:
+        pass
     raise SystemExit(code)
 
 
