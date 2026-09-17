@@ -62,7 +62,17 @@ chown 0:0 "$ROOT_MOUNT"; chmod 0755 "$ROOT_MOUNT"
 printf 'LABEL=SWIR_LIVE_ROOT / ext4 defaults 0 1\nLABEL=SWIRLIVEESP /boot/efi vfat umask=0077 0 2\n' > "$ROOT_MOUNT/etc/fstab"
 mkdir -p "$ROOT_MOUNT/var/lib/swir/live"
 printf '%s\n' 'swir-live-media/0.1' > "$ROOT_MOUNT/var/lib/swir/live/media-version"
-chmod 0644 "$ROOT_MOUNT/var/lib/swir/live/media-version"
+cat > "$ROOT_MOUNT/var/lib/swir/live/live.json" <<'JSON'
+{
+  "schema": "swir.live-media/0.1",
+  "mode": "live",
+  "installerAllowed": true,
+  "readOnlyFirst": true
+}
+JSON
+chown -R 0:0 "$ROOT_MOUNT/var/lib/swir/live"
+chmod 0755 "$ROOT_MOUNT/var/lib/swir/live"
+chmod 0644 "$ROOT_MOUNT/var/lib/swir/live/media-version" "$ROOT_MOUNT/var/lib/swir/live/live.json"
 ESP="$ROOT_MOUNT/boot/efi"
 mkdir -p "$ESP/EFI/BOOT" "$ESP/EFI/systemd" "$ESP/EFI/Linux" "$ESP/loader/entries"
 install -m 0644 "$EFI_SOURCE" "$ESP/EFI/BOOT/BOOTX64.EFI"
