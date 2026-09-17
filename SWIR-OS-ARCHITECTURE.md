@@ -16,20 +16,20 @@ The mandatory end-user application and experience scope is defined in [`SWIR-PRO
 <!-- ROADMAP-PROGRESS:START -->
 <p align="center">
   <a href="https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml"><img alt="CI" src="https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml/badge.svg"></a>
-  <img alt="Roadmap progress" src="https://img.shields.io/badge/ROADMAP-70.0%25-2ea043?style=for-the-badge">
-  <img alt="Completed" src="https://img.shields.io/badge/DONE-42%2F60-1f6feb?style=for-the-badge">
+  <img alt="Roadmap progress" src="https://img.shields.io/badge/ROADMAP-71.7%25-2ea043?style=for-the-badge">
+  <img alt="Completed" src="https://img.shields.io/badge/DONE-43%2F60-1f6feb?style=for-the-badge">
   <img alt="Status" src="https://img.shields.io/badge/STATUS-IN%20PROGRESS-7c3aed?style=for-the-badge">
 </p>
 
 ## 📊 Overall progress
 
 ```text
-██████████████░░░░░░ 70.0%
+██████████████░░░░░░ 71.7%
 ```
 
 | ✅ Completed | ⏳ Remaining | 📦 Total | 🎯 Progress |
 |---:|---:|---:|---:|
-| **42** | **18** | **60** | **70.0%** |
+| **43** | **17** | **60** | **71.7%** |
 
 > **Progress rule:** the explicit `[x]/[ ]` deliverables in **Version roadmap** are the source of truth for the full Web → Desktop → System plan. Update the checklist first, then badges, numbers, percentage and the 20-segment bar. A prototype does not count as complete until the described deliverable is actually implemented and verified.
 <!-- ROADMAP-PROGRESS:END -->
@@ -321,7 +321,7 @@ These applications must integrate with SWIR locale, accessibility, permissions, 
 
 ### Common Store / Package layer
 
-The future common provider layer can resolve and plan installation across:
+The common provider layer resolves and plans native software across reviewed provider classes while keeping provider security separate from Store UI policy:
 
 ```text
 SWIR native package metadata
@@ -331,6 +331,8 @@ AppImage (after explicit sandbox/update policy)
 Wine compatibility profiles
 Proton compatibility profiles
 ```
+
+The production System provider factory is distribution-only and is now verified inside the selected Debian 13 rootfs: it resolves APT plans against the allowlisted signed Debian repository policy, keeps privileged mutation behind the journaled broker stack, rejects untrusted repositories and keeps Windows compatibility outside the Linux package layer. Flatpak and AppImage adapters remain explicit experimental opt-ins and are not silently enabled by this completed common-layer milestone.
 
 Provider mechanics remain separate from Store UI policy. Privileged mutations require a structured plan, trusted source policy and transaction journal. A System Edition package entry must resolve to a supported native Linux payload or an explicitly managed Windows compatibility payload; an HTML-only payload does not satisfy the native System Edition application requirement.
 
@@ -421,7 +423,7 @@ Planned:
 - [ ] installable SWIR Shell Theme/Skin framework with accessibility-safe recovery to the default theme
 - [ ] native SWIR Player with library/playlists/media-key/notification integration
 - [ ] native SWIR Photo Studio with dependable basic editing, undo/redo and common-format export
-- [ ] common Package Provider layer for distribution packages and later Flatpak/AppImage
+- [x] common Package Provider layer for distribution packages and later Flatpak/AppImage
 - [x] managed Wine/Proton compatibility service for Windows user applications
 - [x] Hardware Service with PCI/USB inventory
 - [x] SWIR Driver Center / Hardware Catalog

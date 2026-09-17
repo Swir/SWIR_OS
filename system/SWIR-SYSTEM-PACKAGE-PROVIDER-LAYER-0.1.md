@@ -1,8 +1,8 @@
 # SWIR System Package Provider Layer 0.1
 
-Status: **implemented common routing foundation / experimental Flatpak + cryptographically authorized managed AppImage providers / System-image E2E pending**
+Status: **implemented common routing foundation / production distribution provider verified inside Debian 13 System image / experimental Flatpak + cryptographically authorized managed AppImage providers remain opt-in**
 
-`system/packages/package-provider-layer.mjs` is the edition-neutral System package routing boundary above concrete Linux package providers. Store/Update Center code gets one stable surface for native Linux package planning/execution without invoking package managers or arbitrary commands directly.
+`system/packages/package-provider-layer.mjs` is the System package routing boundary above concrete Linux package providers. Store/Update Center code gets one stable surface for native Linux package planning/execution without invoking package managers or arbitrary commands directly.
 
 ## Current composition
 
@@ -32,9 +32,26 @@ The stable production factory `createSystemPackageProviderLayer()` remains distr
 
 ## Contract
 
-The layer accepts `swir.package-provider/0.2` manifests only when `targetEditions` contains `system`, `executionClass` is `linux-native`, the provider is one of the three reviewed Linux providers, and the operation is `install`, `update` or `remove`.
+The layer accepts `swir.package-provider/0.2` manifests only when `targetEditions` contains `system`, `executionClass` is `linux-native`, the provider is one of the reviewed Linux providers, and the operation is `install`, `update` or `remove`.
 
 Provider-specific security remains inside each adapter. Distribution mutation delegates to the privileged transaction stack. Flatpak 0.1 is fixed to user scope and reviewed argv templates. AppImage 0.1 is a local managed-import path that requires an exact package version, the official SWIR signed catalog and the exact catalog-authorized SHA-256; it has no download URL support.
+
+## Debian 13 System-image gate
+
+`system/e2e/system-package-provider-image-e2e.mjs` is executed from inside the selected Debian 13 rootfs by `.github/workflows/system-package-provider-image-e2e.yml`.
+
+The gate verifies the production composition rather than a caller-injected test adapter:
+
+1. the image is Debian 13 and exposes a trusted root-owned `apt-get` binary;
+2. the production repository policy is root-owned and maps to the signed Debian allowlist;
+3. `createSystemPackageStack()` and `createSystemPackageProviderLayer()` resolve the distribution provider as ready;
+4. install/update/remove plans resolve to APT with signature verification, privilege and transaction journal requirements;
+5. APT package metadata can be read from the composed image;
+6. a non-allowlisted repository is rejected;
+7. Windows compatibility payloads are rejected by the Linux package layer;
+8. Flatpak/AppImage remain recognized but `not-provisioned` in the production factory, so experimental providers cannot become silently enabled.
+
+The E2E deliberately performs **no package mutation**. Mutation correctness, dependency-aware updating, committed rollback/recovery and production Flatpak/AppImage lifecycle are separate roadmap gates.
 
 ## AppImage 0.1 trust boundary
 
@@ -57,6 +74,7 @@ The implementation supports crash recovery, but it does **not** yet advertise a 
 - no shell or child-process execution in the common routing layer;
 - no arbitrary provider identifiers or production adapter injection;
 - plan provider/operation identity is rechecked by the router;
+- distribution repositories are bound to the root-owned allowlist and native signature verification;
 - Flatpak full argv is revalidated immediately before spawn;
 - AppImage has no built-in network acquisition and cannot trust a caller-selected verification boolean;
 - AppImage requires native Ed25519 catalog authorization plus exact digest binding for install/update;
@@ -68,8 +86,8 @@ The implementation supports crash recovery, but it does **not** yet advertise a 
 
 `package-provider-layer.selftest.mjs` covers production fail-closed behavior and explicit experimental Flatpak/AppImage routing with real ephemeral Ed25519 catalog authorization. `flatpak-user-package-provider.selftest.mjs` covers remote/argv enforcement. `appimage-user-package-provider.selftest.mjs` covers cryptographic trust, anti-rollback, digest binding, install/update/remove, forged-authorization rejection and malicious-journal path rejection. `system/e2e/appimage-native-execution.selftest.mjs` verifies signed catalog authorization followed by managed install and trusted native launch on Linux.
 
-Dedicated provider workflows protect the experimental adapters while the aggregate System Edition workflow protects the wider distribution/security stack.
+The System-image gate emits `swir.system-package-provider-image-e2e/0.1` evidence after validating the production distribution composition inside a freshly built Debian 13 rootfs.
 
 ## Roadmap meaning
 
-The common provider layer now has reviewed foundations for distribution packages, Flatpak and AppImage, and AppImage is connected to the existing signed-catalog trust model rather than a boolean trust assertion. The System Edition roadmap checkbox remains open because these experimental providers still require production System-image E2E; Flatpak still needs version-aware SWIR rollback, and AppImage still needs production root/state provisioning, an acquisition/cache service, stronger sandbox/portal policy, committed rollback + bounded backup retention and desktop/icon integration before broad production enablement.
+The roadmap item **common Package Provider layer for distribution packages and later Flatpak/AppImage** is complete at the common-routing level because the production distribution provider is now verified inside the selected System image and the later provider classes have reviewed fail-closed adapter boundaries. This does **not** promote Flatpak or AppImage to production readiness and does not complete the separate dependency-aware updater, journaled mutation/recovery, package-signing, firmware-update or installer/recovery roadmap items.
