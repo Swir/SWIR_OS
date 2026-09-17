@@ -91,6 +91,17 @@ ensure_exact_symlink() {
   [[ -L "$dest" && "$(readlink "$dest")" == "$expected" ]] || { echo "failed to install trusted symlink: $rel" >&2; exit 70; }
 }
 
+# VTE is the trusted Debian GTK4 terminal widget used by the first-party SWIR Terminal.
+# Install it only through the already-configured signed APT repositories when absent.
+VTE_PACKAGES=(gir1.2-vte-3.91 libvte-2.91-gtk4-0)
+VTE_MISSING=0
+for pkg in "${VTE_PACKAGES[@]}"; do
+  chroot "$ROOTFS" dpkg-query -W -f='${db:Status-Abbrev}' "$pkg" 2>/dev/null | grep -qx 'ii ' || VTE_MISSING=1
+done
+if [[ $VTE_MISSING -eq 1 ]]; then
+  chroot "$ROOTFS" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${VTE_PACKAGES[@]}"
+fi
+
 for pkg in greetd weston plymouth plymouth-themes wayland-utils dbus-user-session python3 python3-gi gir1.2-gtk-4.0 gir1.2-vte-3.91 libvte-2.91-gtk4-0 network-manager; do
   chroot "$ROOTFS" dpkg-query -W -f='${db:Status-Abbrev}' "$pkg" 2>/dev/null | grep -qx 'ii ' || {
     echo "required graphical package is not installed: $pkg" >&2
