@@ -75,7 +75,7 @@
     "shell": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["applicationId", "nativeToolkit", "displayProtocol", "windowMapped", "fullscreenRequested", "launcherEntries", "privilegedOperationsInShell", "pid"],
+      "required": ["applicationId", "nativeToolkit", "displayProtocol", "windowMapped", "fullscreenRequested", "launcherEntries", "launcherProbePassed", "privilegedOperationsInShell", "pid"],
       "properties": {
         "applicationId": { "const": "dev.swir.Shell" },
         "nativeToolkit": { "const": "gtk4" },
@@ -88,6 +88,7 @@
           "uniqueItems": true,
           "items": { "type": "string", "minLength": 1, "maxLength": 64 }
         },
+        "launcherProbePassed": { "const": true },
         "privilegedOperationsInShell": { "const": false },
         "pid": { "type": "integer", "minimum": 1 }
       }
