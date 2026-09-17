@@ -8,11 +8,12 @@
 
 [![System Edition Contracts](https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml/badge.svg)](https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml)
 [![Package Provider Image E2E](https://github.com/Swir/SWIR_OS/actions/workflows/system-package-provider-image-e2e.yml/badge.svg)](https://github.com/Swir/SWIR_OS/actions/workflows/system-package-provider-image-e2e.yml)
+[![Package Manager Image E2E](https://github.com/Swir/SWIR_OS/actions/workflows/system-package-manager-image-e2e.yml/badge.svg)](https://github.com/Swir/SWIR_OS/actions/workflows/system-package-manager-image-e2e.yml)
 [![Desktop Windows Build](https://github.com/Swir/SWIR_OS/actions/workflows/desktop-windows-build.yml/badge.svg)](https://github.com/Swir/SWIR_OS/actions/workflows/desktop-windows-build.yml)
 [![Roadmap Contract](https://github.com/Swir/SWIR_OS/actions/workflows/roadmap-contract.yml/badge.svg)](https://github.com/Swir/SWIR_OS/actions/workflows/roadmap-contract.yml)
 
-![Roadmap](https://img.shields.io/badge/ROADMAP-71.7%25-02050A?style=for-the-badge&logoColor=62E5FF)
-![Completed](https://img.shields.io/badge/DONE-43%2F60-02050A?style=for-the-badge&logoColor=62E5FF)
+![Roadmap](https://img.shields.io/badge/ROADMAP-73.3%25-02050A?style=for-the-badge&logoColor=62E5FF)
+![Completed](https://img.shields.io/badge/DONE-44%2F60-02050A?style=for-the-badge&logoColor=62E5FF)
 ![Status](https://img.shields.io/badge/STATUS-IN%20PROGRESS-02050A?style=for-the-badge&logoColor=62E5FF)
 
 [![Author](https://img.shields.io/badge/Author-Swir-0088FF?style=flat-square&logo=github)](https://github.com/Swir)
@@ -36,15 +37,15 @@ SWIR OS is actively being developed toward a real installable Linux-based hybrid
 |---|---|---|
 | **Web Edition** | Portable shell, applications and API laboratory | `1.7.13` |
 | **Desktop Edition** | Windows host with native OS adapters and guarded update/recovery foundations | `0.5.7-preview` |
-| **System Edition** | Bootable Debian 13 foundation with verified native/runtime/hardware/package integration | In development |
+| **System Edition** | Bootable Debian 13 foundation with verified native/runtime/hardware/package-manager integration | In development |
 
 ### Overall roadmap
 
 ```text
-██████████████░░░░░░ 71.7%
+███████████████░░░░░ 73.3%
 ```
 
-**43 of 60 measurable roadmap deliverables are complete.** The authoritative checklist and progress math live in [`SWIR-OS-ARCHITECTURE.md`](SWIR-OS-ARCHITECTURE.md). A prototype, contract skeleton or CI job alone does not count as a completed roadmap item.
+**44 of 60 measurable roadmap deliverables are complete.** The authoritative checklist and progress math live in [`SWIR-OS-ARCHITECTURE.md`](SWIR-OS-ARCHITECTURE.md). A prototype, contract skeleton or CI job alone does not count as a completed roadmap item.
 
 ---
 
@@ -79,7 +80,7 @@ Windows kernel drivers are **not** treated as a general solution for Linux hardw
 | 🐧 **Linux System foundation** | Debian 13 base, kernel, UEFI boot path and systemd foundation are covered by System Edition gates. |
 | 🖥️ **Desktop bridge** | Windows Desktop Host exposes native filesystem, app-data, account/session, process/service, device/network, clipboard, tray, shortcuts, file-association and notification adapters. |
 | 🍷 **Windows compatibility** | Managed Wine compatibility has a live E2E that launches a deterministic Win64 application through controlled per-app compatibility state. Broader application compatibility is still being expanded. |
-| 📦 **Packages** | The production distribution Package Provider is verified inside the selected Debian 13 System rootfs; Flatpak/AppImage remain explicit experimental adapters behind separate trust boundaries. |
+| 📦 **Packages** | The Debian 13 System package path now verifies the production distribution provider, read-only APT dependency resolution and a real journaled APT installation with pre-state capture and native post-mutation health verification. Flatpak/AppImage remain explicit experimental adapters. |
 | 🔧 **Hardware & drivers** | PCI/USB inventory, Hardware Catalog, Driver Center runtime, Linux in-tree drivers and `linux-firmware` are verified foundations. |
 | 🌐 **Networking** | NetworkManager integration is exercised through a real isolated live E2E path. |
 | 🔐 **Security** | Privileged operations are designed around explicit brokers, Polkit/session identity binding, trusted repository policy, journals and fail-closed validation. |
@@ -125,14 +126,16 @@ System Edition keeps software sources behind a common provider boundary instead 
 ```text
 SWIR package metadata
         │
-        ├── distribution packages  -> production provider verified in Debian 13 image
+        ├── distribution packages  -> production provider + dependency-aware APT path verified
         ├── Flatpak                -> experimental / later production gate
         ├── AppImage               -> experimental / later production gate
         ├── Wine compatibility profiles
         └── Proton compatibility profiles
 ```
 
-Distribution package plans require trusted source metadata, signature verification, a structured operation plan and privileged transaction boundaries. The image E2E verifies APT selection, signed/allowlisted repository binding and fail-closed provider separation without performing package mutation. Flatpak/AppImage stay deliberately gated until their production lifecycle, rollback/update policy and System-image integration satisfy their own requirements.
+Distribution package plans require trusted source metadata, signature verification, a structured operation plan and privileged transaction boundaries. Before an APT mutation, the System stack now runs a read-only `apt-get -s` dependency simulation and binds the resolved dependency closure into the exact plan digest that enters the durable journal. The disposable Debian 13 image E2E then performs a real journaled installation, verifies the package was absent before mutation, checks the committed owner-only journal and verifies the installed native entry point. Dependency-aware update/remove planning is also exercised. Interrupted-update recovery remains a separate open gate.
+
+Flatpak/AppImage stay deliberately gated until their production lifecycle, rollback/update policy and System-image integration satisfy their own requirements.
 
 Microsoft Store is not copied, impersonated or bypassed. Any future integration would require an official Microsoft-supported and licensable path.
 
@@ -257,7 +260,7 @@ A local build is not equivalent to an official verified release. Release pipelin
 Development currently prioritizes the highest-impact path to a dependable Desktop/System platform:
 
 1. harden the Desktop host/update/signing lifecycle,
-2. complete dependency-aware System package updating and journaled recovery on top of the verified common provider boundary,
+2. prove interrupted System package/driver/firmware transaction recovery on top of the verified dependency-aware package manager,
 3. build the native SWIR desktop shell and mandatory native application suite,
 4. finish firmware/vendor-source transaction and recovery paths,
 5. complete installer/recovery, full-system i18n, reliability, accessibility and physical-hardware qualification.
@@ -275,7 +278,7 @@ SWIR OS is under active development and is **not yet a finished System Edition d
 - Production package-signing provisioning is not yet fully cut over.
 - The signed GitHub-backed update feed/user-policy roadmap gate remains open.
 - Flatpak and AppImage provider paths are experimental and not silently enabled in the production System provider factory.
-- `fwupd`/LVFS mutation, exceptional vendor repositories, dependency-aware system updates and complete recovery remain separate open roadmap gates.
+- `fwupd`/LVFS mutation, exceptional vendor repositories and complete interrupted-update recovery remain separate open roadmap gates.
 - Hardware catalog coverage is intentionally limited; current CI does not claim broad physical-hardware qualification.
 - Managed Wine execution is verified as a controlled compatibility foundation, not as a claim that every Windows application works.
 - Full localization of every native System Edition application screen is not complete.
