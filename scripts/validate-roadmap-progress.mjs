@@ -34,6 +34,7 @@ for (const required of [
   'alt="Roadmap progress"',
   'alt="Completed"',
   'alt="Status"',
+  'assets/readme/progress-mini.svg',
   '## 📊 Overall progress',
   '| ✅ Completed | ⏳ Remaining | 📦 Total | 🎯 Progress |',
 ]) {
@@ -85,12 +86,22 @@ for (const [needle, message] of [
   [`DONE-${completed}%2F${total}-`, 'README DONE badge'],
   [`${expectedBar} ${percent}%`, 'README 20-segment progress bar'],
   [`**${completed} of ${total} measurable roadmap deliverables are complete.**`, 'README measurable-progress sentence'],
+  ['assets/readme/progress-card.svg', 'README SWIR Progress SVG PRO card'],
 ]) {
   if (!readme.includes(needle)) fail(`${message} is stale; synchronize README.md with the authoritative roadmap.`);
 }
 
+for (const relativePath of [
+  'assets/readme/progress-card.svg',
+  'assets/readme/progress-mini.svg',
+  'assets/readme/progress-template.svg',
+  'scripts/generate-readme-progress.mjs',
+]) {
+  if (!fs.existsSync(path.resolve(repositoryRoot, relativePath))) fail(`required SWIR Progress SVG PRO asset/tool is missing: ${relativePath}`);
+}
+
 console.log(JSON.stringify({
-  schema: 'swir.roadmap-contract/1.1',
+  schema: 'swir.roadmap-contract/1.2',
   roadmap: path.basename(roadmapPath),
   completed,
   remaining,
@@ -98,6 +109,7 @@ console.log(JSON.stringify({
   percent: Number(percent),
   bar: expectedBar,
   readmeSynchronized: true,
+  progressSvgEmbedded: true,
   styleLock: 'SWIR-ROADMAP-STANDARD:v1',
   valid: true,
 }));
