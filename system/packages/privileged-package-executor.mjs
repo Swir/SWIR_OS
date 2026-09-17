@@ -12,7 +12,8 @@ const DEFAULT_EXECUTABLES = Object.freeze({
 const SAFE_ENVIRONMENT = Object.freeze({
   PATH: '/usr/sbin:/usr/bin:/sbin:/bin',
   LANG: 'C.UTF-8',
-  LC_ALL: 'C.UTF-8'
+  LC_ALL: 'C.UTF-8',
+  DEBIAN_FRONTEND: 'noninteractive'
 });
 
 const PACKAGE_NAME = /^[A-Za-z0-9][A-Za-z0-9+._:@-]{0,127}$/;
@@ -164,7 +165,13 @@ export class GuardedPkexecPackageExecutor {
     assertTrustedRootExecutable(this.#pkexecPath, this.#statSync);
     assertTrustedRootExecutable(executable, this.#statSync);
 
-    const args = [executable, ...command.slice(1)];
+    // APT otherwise prompts on an ignored stdin. The mutation was already explicitly
+    // authorized and the package argv shape is closed, so transport-level -y only
+    // makes the approved request deterministic/non-interactive; it does not broaden it.
+    const commandArgs = command.slice(1);
+    const args = logicalExecutable === 'apt-get'
+      ? [executable, '-y', ...commandArgs]
+      : [executable, ...commandArgs];
     const options = {
       shell: false,
       windowsHide: true,
@@ -206,6 +213,7 @@ export const PrivilegedPackageExecutorPolicy = Object.freeze({
   elevationTransport: 'pkexec',
   shell: false,
   inheritedEnvironment: false,
+  aptNonInteractiveAfterAuthorization: true,
   rootOwnedExecutableRequired: true,
   groupWorldWritableExecutableForbidden: true,
   arbitraryExecutableAllowed: false,

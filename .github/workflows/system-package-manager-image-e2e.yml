@@ -1,0 +1,120 @@
+name: System Package Manager Image E2E
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'system/packages/**'
+      - 'system/security/**'
+      - 'system/e2e/system-package-manager-image-e2e.mjs'
+      - 'system/contracts/system-package-manager-image-e2e.schema.json'
+      - 'system/image/system-base-debian-trixie.json'
+      - 'system/image/build-debian-trixie-rootfs.sh'
+      - 'system/image/debian-trixie-repository-trust-policy.json'
+      - 'system/SWIR-SYSTEM-PACKAGE-MANAGER-E2E-0.1.md'
+      - 'SWIR-OS-ARCHITECTURE.md'
+      - '.github/workflows/system-package-manager-image-e2e.yml'
+  pull_request:
+    paths:
+      - 'system/packages/**'
+      - 'system/security/**'
+      - 'system/e2e/system-package-manager-image-e2e.mjs'
+      - 'system/contracts/system-package-manager-image-e2e.schema.json'
+      - 'system/image/system-base-debian-trixie.json'
+      - 'system/image/build-debian-trixie-rootfs.sh'
+      - 'system/image/debian-trixie-repository-trust-policy.json'
+      - 'system/SWIR-SYSTEM-PACKAGE-MANAGER-E2E-0.1.md'
+      - 'SWIR-OS-ARCHITECTURE.md'
+      - '.github/workflows/system-package-manager-image-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: system-package-manager-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package-manager-image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install controlled Debian rootfs tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mmdebstrap debian-archive-keyring
+      - name: Validate dependency-manager contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check system/packages/apt-dependency-resolver.mjs
+          node --check system/packages/system-package-stack.mjs
+          node --check system/packages/privileged-package-executor.mjs
+          node --check system/e2e/system-package-manager-image-e2e.mjs
+          python3 -m json.tool system/contracts/system-package-manager-image-e2e.schema.json >/dev/null
+          python3 -m json.tool system/image/system-base-debian-trixie.json >/dev/null
+          python3 -m json.tool system/image/debian-trixie-repository-trust-policy.json >/dev/null
+          bash -n system/image/build-debian-trixie-rootfs.sh
+          node system/packages/apt-dependency-resolver.selftest.mjs
+          node system/packages/privileged-package-executor.selftest.mjs
+          node system/packages/system-package-stack.selftest.mjs
+          node system/packages/package-transaction-service.selftest.mjs
+          node system/packages/package-transaction-security.selftest.mjs
+          node scripts/validate-roadmap-progress.mjs
+          ! grep -E 'shell:[[:space:]]*true|--no-check-gpg|AllowUnauthenticated|trusted=yes' \
+            system/packages/apt-dependency-resolver.mjs \
+            system/packages/privileged-package-executor.mjs \
+            system/e2e/system-package-manager-image-e2e.mjs
+      - name: Build Debian 13 System Edition rootfs and execute real package transaction
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOTFS="$RUNNER_TEMP/swir-package-manager-rootfs"
+          sudo bash system/image/build-debian-trixie-rootfs.sh \
+            --rootfs "$ROOTFS" \
+            --profile "$GITHUB_WORKSPACE/system/image/system-base-debian-trixie.json" \
+            --arch amd64
+          sudo install -d -m 0755 "$ROOTFS/opt/swir" "$ROOTFS/etc/swir"
+          sudo cp -a system "$ROOTFS/opt/swir/system"
+          sudo install -o root -g root -m 0644 \
+            system/image/debian-trixie-repository-trust-policy.json \
+            "$ROOTFS/etc/swir/repository-trust-policy.json"
+          sudo chroot "$ROOTFS" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get update
+          sudo chroot "$ROOTFS" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nodejs
+          sudo chroot "$ROOTFS" /usr/bin/node \
+            /opt/swir/system/e2e/system-package-manager-image-e2e.mjs \
+            --output /tmp/system-package-manager-image-e2e.json
+          sudo cp "$ROOTFS/tmp/system-package-manager-image-e2e.json" \
+            "$RUNNER_TEMP/system-package-manager-image-e2e.json"
+          sudo chown "$USER:$USER" "$RUNNER_TEMP/system-package-manager-image-e2e.json"
+      - name: Validate emitted package-manager evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - "$RUNNER_TEMP/system-package-manager-image-e2e.json" <<'NODE'
+          const fs = require('fs');
+          const e = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          if (e.schema !== 'swir.system-package-manager-image-e2e/0.1' || e.passed !== true) process.exit(2);
+          if (e.selectedBase !== 'debian-13-trixie' || e.distribution?.id !== 'debian' || e.packageManager !== 'apt') process.exit(3);
+          if (e.repositoryId !== 'debian-main' || !e.repositorySignaturesRequired || e.arbitraryRepositoryUrlsAllowed) process.exit(4);
+          if (e.dependencyResolutionMode !== 'apt-get-simulation' || !e.dependencyClosureObserved || e.dependencyAffectedPackages?.length < 2) process.exit(5);
+          if (!e.dependencyPlanPersistedBeforeMutation || !e.mutationAuthorized || !e.packageMutationPerformed) process.exit(6);
+          if (e.preMutationInstalled !== false || e.transactionState !== 'committed' || !e.journalCommitted || e.journalMode !== 384) process.exit(7);
+          if (!e.nativeHealthVerified || !e.installVerified || !e.updatePlanVerified || !e.removePlanVerified) process.exit(8);
+          if (e.interruptedUpdateRecoveryProven !== false) process.exit(9);
+          NODE
+      - name: Upload package-manager evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swir-system-package-manager-image-${{ github.run_id }}
+          path: ${{ runner.temp }}/system-package-manager-image-e2e.json
+          if-no-files-found: warn
+          retention-days: 7

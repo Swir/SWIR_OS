@@ -56,6 +56,20 @@ const trustVerifier = new DistributionRepositoryTrustVerifier({
 const securityBoundary = new SystemPackageSecurityBoundary({ repositoryPolicy, authorizationBroker, trustVerifier });
 const provider = new DistributionPackageProvider({ host, allowlistedRepositories: securityBoundary.allowlistedRepositories });
 
+const dependencyCalls = [];
+const dependencyResolver = {
+  async resolve({ operation, packageName }) {
+    dependencyCalls.push({ operation, packageName });
+    return {
+      schema: 'swir.apt-dependency-plan/0.1', manager: 'apt', operation, packageName,
+      simulation: true, mutationPerformed: false, repositorySignatureVerificationBypassed: false,
+      command: ['apt-get', '-s', operation === 'install' ? 'install' : operation === 'remove' ? 'remove' : 'install', '--', packageName],
+      packages: { install: [packageName], remove: [], configure: [packageName], affected: [packageName] },
+      exitCode: 0, signal: null
+    };
+  }
+};
+
 const executionCalls = [];
 const executor = {
   async execute(request) {
@@ -77,28 +91,29 @@ const healthVerifier = {
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'swir-system-stack-'));
 try {
   const transactionService = new SystemPackageTransactionService({
-    journalDirectory: path.join(temp, 'journals'),
-    executor,
-    authorizationBroker,
-    trustVerifier,
-    snapshotProvider,
-    healthVerifier,
+    journalDirectory: path.join(temp, 'journals'), executor, authorizationBroker, trustVerifier, snapshotProvider, healthVerifier,
     allowlistedRepositories: securityBoundary.allowlistedRepositories,
-    idFactory: () => 'stack-test-0001',
-    clock: () => '2026-09-16T21:40:00.000Z'
+    idFactory: () => 'stack-test-0001', clock: () => '2026-09-16T21:40:00.000Z'
   });
-  const stack = new SystemPackageStack({ provider, transactionService, securityBoundary });
+  const stack = new SystemPackageStack({ provider, transactionService, securityBoundary, dependencyResolver });
 
   assert.equal(SystemPackageStackPolicy.productionDependencyInjection, false);
+  assert.equal(SystemPackageStackPolicy.dependencyPlanJournalBinding, true);
   assert.equal(stack.describe().directCallerPlanExecution, false);
+  assert.equal(stack.describe().dependencyResolution, 'apt-simulation-before-mutation');
   assert.deepEqual(stack.describe().allowlistedRepositories, ['debian-main']);
   const plan = stack.plan('install', manifest);
   assert.deepEqual(plan.commandPreview, ['apt-get', 'install', '--', 'example-editor']);
   assert.equal(plan.source.repositoryId, 'debian-main');
 
+  const resolved = await stack.planWithDependencies('install', manifest);
+  assert.deepEqual(resolved.dependencies.packages.affected, ['example-editor']);
+  assert.deepEqual(dependencyCalls[0], { operation: 'install', packageName: 'example-editor' });
+
   const record = await stack.execute('install', manifest, { actorId: 'uid:1000' });
   assert.equal(record.state, 'committed');
   assert.equal(record.plan.package.id, 'org.example.editor');
+  assert.deepEqual(record.plan.dependencies.packages.affected, ['example-editor']);
   assert.equal(executionCalls.length, 1);
   assert.equal(executionCalls[0].manager, 'apt');
   assert.deepEqual(executionCalls[0].command, ['apt-get', 'install', '--', 'example-editor']);
