@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://swir.dev/schema/system-live-usb-install-e2e/0.1",
+  "title": "SWIR System Live USB and install E2E evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "generatedAt", "distribution", "architecture", "firmware",
+    "liveMediaFormat", "liveUsbTransport", "liveImageSha256", "installedDiskSha256",
+    "liveUsbBooted", "liveGraphicalSessionPassed", "internalDiskUnchangedBeforeExplicitInstall",
+    "installerPreviewReadOnly", "installerCancellationReadOnly", "wrongConfirmationRejectedWithoutWrite",
+    "sourceMediaTargetRejected", "explicitConfirmationRequired", "installToSeparateDiskPassed",
+    "sourceUsbDetachedBeforeInstalledBoot", "installedDiskBooted", "installedGraphicalSessionPassed",
+    "persistencePassed", "secureBootClaim", "physicalHardwareQualificationClaim", "graphicalInstallerClaim"
+  ],
+  "properties": {
+    "schema": { "const": "swir.system-live-usb-install-e2e/0.1" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "distribution": { "const": "debian-13-trixie" },
+    "architecture": { "const": "amd64" },
+    "firmware": { "const": "uefi-ovmf" },
+    "liveMediaFormat": { "const": "raw-gpt-img" },
+    "liveUsbTransport": { "const": "qemu-usb-storage" },
+    "liveImageSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "installedDiskSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "liveUsbBooted": { "const": true },
+    "liveGraphicalSessionPassed": { "const": true },
+    "internalDiskUnchangedBeforeExplicitInstall": { "const": true },
+    "installerPreviewReadOnly": { "const": true },
+    "installerCancellationReadOnly": { "const": true },
+    "wrongConfirmationRejectedWithoutWrite": { "const": true },
+    "sourceMediaTargetRejected": { "const": true },
+    "explicitConfirmationRequired": { "const": true },
+    "installToSeparateDiskPassed": { "const": true },
+    "sourceUsbDetachedBeforeInstalledBoot": { "const": true },
+    "installedDiskBooted": { "const": true },
+    "installedGraphicalSessionPassed": { "const": true },
+    "persistencePassed": { "const": true },
+    "secureBootClaim": { "const": false },
+    "physicalHardwareQualificationClaim": { "const": false },
+    "graphicalInstallerClaim": { "const": false }
+  }
+}
