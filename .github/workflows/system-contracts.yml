@@ -38,19 +38,34 @@ jobs:
           node --check system/runtime/native-app-supervisor.selftest.mjs
           node --check system/runtime/native-package-execution-service.mjs
           node --check system/runtime/native-package-execution-service.selftest.mjs
-          node --check system/runtime/windows-compat-execution-service.mjs
-          node --check system/runtime/windows-compat-execution-service.selftest.mjs
-          node --check system/runtime/windows-compat-launcher.mjs
-          node --check system/runtime/windows-compat-supervisor.mjs
-          node --check system/runtime/windows-compat-supervisor.selftest.mjs
-          node --check system/runtime/application-runtime.mjs
-          node --check system/runtime/application-runtime.selftest.mjs
-          node --check system/runtime/package-launch-broker.mjs
-          node --check system/runtime/package-launch-broker.selftest.mjs
-          node --check system/runtime/package-runtime-coordinator.mjs
-          node --check system/runtime/package-runtime-coordinator.selftest.mjs
-          node --check system/providers/package-provider-registry.mjs
-          node --check system/providers/package-provider-registry.selftest.mjs
+          node --check system/runtime/windows-compatibility-service.mjs
+          node --check system/runtime/windows-compatibility-service.selftest.mjs
+          node --check system/runtime/validate-windows-compatibility-contract.mjs
+          node --check system/runtime/windows-compat-runtime-registry.mjs
+          node --check system/runtime/windows-compat-runtime-registry.selftest.mjs
+          node --check system/runtime/managed-windows-compatibility-stack.mjs
+          node --check system/runtime/managed-windows-compatibility-stack.selftest.mjs
+          node --check system/packages/package-provider-layer.mjs
+          node --check system/packages/package-provider-layer.selftest.mjs
+          node --check system/packages/system-package-stack.mjs
+          node --check system/packages/system-package-stack.selftest.mjs
+          node --check system/packages/validate-system-package-stack.mjs
+          node --check system/packages/package-transaction-service.mjs
+          node --check system/packages/package-transaction-service.selftest.mjs
+          node --check system/packages/package-transaction-security.selftest.mjs
+          node --check system/packages/privileged-package-executor.mjs
+          node --check system/packages/privileged-package-executor.selftest.mjs
+          node --check system/packages/distribution-package-state.mjs
+          node --check system/packages/distribution-package-state.selftest.mjs
+          node --check system/packages/validate-package-transaction-service.mjs
+          node --check system/security/polkit-authorization-broker.mjs
+          node --check system/security/polkit-authorization-broker.selftest.mjs
+          node --check system/security/distribution-repository-trust.mjs
+          node --check system/security/distribution-repository-trust.selftest.mjs
+          node --check system/security/system-package-security-boundary.mjs
+          node --check system/security/system-package-security-boundary.selftest.mjs
+          node --check system/security/validate-system-security-boundary.mjs
+          node --check system/security/system-security-host-probe.mjs
           node --check system/hardware/hardware-service.mjs
           node --check system/hardware/hardware-probe.mjs
           node --check system/hardware/hardware-service.selftest.mjs
@@ -65,6 +80,9 @@ jobs:
       - name: Validate System Edition contracts
         run: node system/validate-system-contracts.mjs
 
+      - name: Validate System package security boundary
+        run: node system/security/validate-system-security-boundary.mjs
+
       - name: Run guarded native Linux launcher self-tests
         run: node system/runtime/native-app-launcher.selftest.mjs
 
@@ -74,23 +92,54 @@ jobs:
       - name: Run native package execution service self-tests
         run: node system/runtime/native-package-execution-service.selftest.mjs
 
-      - name: Run Windows compatibility execution policy self-tests
-        run: node system/runtime/windows-compat-execution-service.selftest.mjs
+      - name: Re-run Windows compatibility service contract
+        run: |
+          node system/runtime/validate-windows-compatibility-contract.mjs
+          node system/runtime/windows-compatibility-service.selftest.mjs
 
-      - name: Run Windows compatibility supervisor self-tests
-        run: node system/runtime/windows-compat-supervisor.selftest.mjs
+      - name: Run trusted Wine/Proton runtime discovery self-tests
+        run: node system/runtime/windows-compat-runtime-registry.selftest.mjs
 
-      - name: Run unified System application runtime self-tests
-        run: node system/runtime/application-runtime.selftest.mjs
+      - name: Run managed Windows compatibility composition self-tests
+        run: node system/runtime/managed-windows-compatibility-stack.selftest.mjs
 
-      - name: Run System Package Launch Broker self-tests
-        run: node system/runtime/package-launch-broker.selftest.mjs
+      - name: Run common System Package Provider layer self-tests
+        run: node system/packages/package-provider-layer.selftest.mjs
 
-      - name: Run System Package Runtime Coordinator self-tests
-        run: node system/runtime/package-runtime-coordinator.selftest.mjs
+      - name: Re-run production System package stack integration
+        run: |
+          node system/packages/validate-system-package-stack.mjs
+          node system/packages/system-package-stack.selftest.mjs
 
-      - name: Run System Package Provider Registry self-tests
-        run: node system/providers/package-provider-registry.selftest.mjs
+      - name: Enforce System package transaction security boundaries
+        run: node system/packages/validate-package-transaction-service.mjs
+
+      - name: Run package state and health self-tests
+        run: node system/packages/distribution-package-state.selftest.mjs
+
+      - name: Run System package transaction lifecycle self-tests
+        run: node system/packages/package-transaction-service.selftest.mjs
+
+      - name: Run package transaction tamper-resistance self-tests
+        run: node system/packages/package-transaction-security.selftest.mjs
+
+      - name: Run guarded pkexec package executor self-tests
+        run: node system/packages/privileged-package-executor.selftest.mjs
+
+      - name: Run Polkit authorization broker self-tests
+        run: node system/security/polkit-authorization-broker.selftest.mjs
+
+      - name: Run distribution repository trust self-tests
+        run: node system/security/distribution-repository-trust.selftest.mjs
+
+      - name: Run composed package security boundary self-tests
+        run: node system/security/system-package-security-boundary.selftest.mjs
+
+      - name: Probe CI host security assumptions read-only
+        shell: bash
+        run: |
+          node system/security/system-security-host-probe.mjs --compact > "$RUNNER_TEMP/swir-security-host.json"
+          node -e "const r=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')); if(r.schema!=='swir.system-security-host-probe/0.1'||r.readOnly!==true||!r.distribution?.id||!Number.isInteger(r.subject?.pid)||!Array.isArray(r.policy?.availablePackageManagers)) process.exit(1); for(const item of Object.values(r.binaries)){if(item.available&&(item.rootOwned!==true||item.writableByGroupOrWorld!==false)) process.exit(1)} console.log('Security host probe:', r.distribution.prettyName, 'pkcheck=', r.policy.pkcheckSuitable, 'pkg=', r.policy.availablePackageManagers.join(','))" "$RUNNER_TEMP/swir-security-host.json"
 
       - name: Enforce trusted Hardware Catalog policy
         run: node system/hardware/hardware-catalog.selftest.mjs
@@ -108,7 +157,7 @@ jobs:
         shell: bash
         run: |
           node system/hardware/hardware-probe.mjs --compact > "$RUNNER_TEMP/swir-hardware.json"
-          node -e "const s=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')); if(s.schema!=='swir.hardware-snapshot/0.2'||s.host?.readOnly!==true||!s.host?.distribution?.id||!s.host?.capabilities?.fwupd||!Array.isArray(s.host?.capabilities?.packageManagers)||!Array.isArray(s.devices)) process.exit(1); console.log('Hardware probe:', s.host.distribution.prettyName, 'devices=', s.devices.length, 'fwupd=', s.host.capabilities.fwupd.available, 'pkg=', s.host.capabilities.packageManagers.join(','))" "$RUNNER_TEMP/swir-hardware.json"
+          node -e "const s=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')); if(s.schema!=='swir.hardware-snapshot/0.2'||s.host?.readOnly!==true||!s.host?.distribution?.id||!s.host?.capabilities?.fwupd||!Array.isArray(s.host?.capabilities?.packageManagers)||!Array.isArray(s.devices)) process.exit(1); for(const item of Object.values(s.host.capabilities.fwupd||{})){} console.log('Hardware probe:', s.host.distribution.prettyName, 'devices=', s.devices.length, 'fwupd=', s.host.capabilities.fwupd.available, 'pkg=', s.host.capabilities.packageManagers.join(','))" "$RUNNER_TEMP/swir-hardware.json"
 
       - name: Verify modalias diagnostics shape
         shell: bash
@@ -135,7 +184,11 @@ jobs:
           node -e "JSON.parse(require('fs').readFileSync('system/contracts/driver-plan.schema.json','utf8'))"
           node -e "JSON.parse(require('fs').readFileSync('system/contracts/driver-center-report.schema.json','utf8'))"
           node -e "JSON.parse(require('fs').readFileSync('system/contracts/package-provider.schema.json','utf8'))"
-          node -e "JSON.parse(require('fs').readFileSync('system/contracts/package-provider-plan.schema.json','utf8'))"
-          node -e "JSON.parse(require('fs').readFileSync('system/contracts/package-verification.schema.json','utf8'))"
+          node -e "JSON.parse(require('fs').readFileSync('system/contracts/package-transaction-journal.schema.json','utf8'))"
+          node -e "JSON.parse(require('fs').readFileSync('system/contracts/package-snapshot.schema.json','utf8'))"
+          node -e "JSON.parse(require('fs').readFileSync('system/contracts/package-health.schema.json','utf8'))"
+          node -e "JSON.parse(require('fs').readFileSync('system/contracts/system-authorization-grant.schema.json','utf8'))"
+          node -e "JSON.parse(require('fs').readFileSync('system/contracts/repository-trust-policy.schema.json','utf8'))"
+          node -e "JSON.parse(require('fs').readFileSync('system/contracts/repository-trust-proof.schema.json','utf8'))"
           node -e "JSON.parse(require('fs').readFileSync('system/contracts/trusted-sources.json','utf8'))"
           node -e "JSON.parse(require('fs').readFileSync('system/hardware/hardware-catalog.json','utf8'))"
