@@ -34,6 +34,7 @@ const servicePath = path.join(rootfs, 'etc/systemd/system/swir-recovery.service'
 const serviceUnit = fs.readFileSync(servicePath, 'utf8');
 assert.match(serviceUnit, /^RuntimeDirectory=swir\/recovery$/m);
 assert.match(serviceUnit, /^RuntimeDirectoryMode=0700$/m);
+assert.match(serviceUnit, /^RuntimeDirectoryPreserve=yes$/m);
 assert.match(serviceUnit, /^ReadWritePaths=\/run\/swir\/recovery$/m);
 assert.doesNotMatch(serviceUnit, /^ReadWritePaths=-/m);
 
