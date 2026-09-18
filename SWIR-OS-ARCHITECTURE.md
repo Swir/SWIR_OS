@@ -16,13 +16,13 @@ The mandatory end-user application and experience scope is defined in [`SWIR-PRO
 <!-- ROADMAP-PROGRESS:START -->
 <p align="center">
   <a href="https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml"><img alt="CI" src="https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml/badge.svg"></a>
-  <img alt="Roadmap progress" src="https://img.shields.io/badge/ROADMAP-80.0%25-2ea043?style=for-the-badge">
-  <img alt="Completed" src="https://img.shields.io/badge/DONE-52%2F65-1f6feb?style=for-the-badge">
+  <img alt="Roadmap progress" src="https://img.shields.io/badge/ROADMAP-81.5%25-2ea043?style=for-the-badge">
+  <img alt="Completed" src="https://img.shields.io/badge/DONE-53%2F65-1f6feb?style=for-the-badge">
   <img alt="Status" src="https://img.shields.io/badge/STATUS-IN%20PROGRESS-7c3aed?style=for-the-badge">
 </p>
 
 <p align="center">
-  <img width="900" src="assets/readme/progress-mini.svg" alt="SWIR OS roadmap progress — 80.0%, 52 of 65 verified deliverables" />
+  <img width="900" src="assets/readme/progress-mini.svg" alt="SWIR OS roadmap progress — 81.5%, 53 of 65 verified deliverables" />
 </p>
 
 ## 📊 Overall progress
@@ -30,7 +30,7 @@ The mandatory end-user application and experience scope is defined in [`SWIR-PRO
 
 | ✅ Completed | ⏳ Remaining | 📦 Total | 🎯 Progress |
 |---:|---:|---:|---:|
-| **52** | **13** | **65** | **80.0%** |
+| **53** | **12** | **65** | **81.5%** |
 
 > **Progress rule:** the explicit `[x]/[ ]` deliverables in **Version roadmap** are the source of truth for the full Web → Desktop → System plan. Update the checklist first, then badges, numbers, percentage and deterministic SVG outputs. A prototype does not count as complete until the described deliverable is actually implemented and verified.
 <!-- ROADMAP-PROGRESS:END -->
@@ -322,6 +322,8 @@ These applications must integrate with SWIR locale, accessibility, permissions, 
 
 The first-party SWIR Browser milestone is now verified on the native GTK4/WebKitGTK 6.0 path with tabs, bounded owner-only history/bookmarks, downloads, ephemeral private tabs, explicit permission prompts, Default Apps integration and approved alternative-browser handoff through Software Center. This closes the dedicated Browser roadmap item, not the broader daily-use suite.
 
+The first-party SWIR Player milestone is now verified on the native GTK4/GStreamer path for local audio/video playback, with bounded owner-only library and playlist persistence, MPRIS2 media-key integration, Gio notifications, desktop MIME integration and the distro-managed Debian 13 GStreamer runtime. Its dedicated Wayland gate maps the real GTK4 window and prerolls generated local media, while the Debian 13 target gate verifies the GTK4 video sink. The player remains unprivileged and has no self-updater or direct package mutation. This closes the dedicated Player roadmap item only; the broader daily-use suite, including the remaining media/document utilities, is still open.
+
 ### Live USB and installation path
 
 System Edition is required to support a real removable-media path rather than only VM boot or developer rootfs execution:
@@ -458,7 +460,7 @@ Planned:
 - [ ] essential native Linux application suite for dependable daily use
 - [x] native SWIR Browser with Default Apps integration and one-click approved alternative browser installation
 - [ ] installable SWIR Shell Theme/Skin framework with accessibility-safe recovery to the default theme
-- [ ] native SWIR Player with library/playlists/media-key/notification integration
+- [x] native SWIR Player with library/playlists/media-key/notification integration
 - [ ] native SWIR Photo Studio with dependable basic editing, undo/redo and common-format export
 - [x] common Package Provider layer for distribution packages and later Flatpak/AppImage
 - [x] managed Wine/Proton compatibility service for Windows user applications
