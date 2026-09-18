@@ -84,6 +84,37 @@ Current verified behavior:
 
 Connection mutation remains future work behind explicit NetworkManager/Polkit policy and must not be confused with this read-only observability milestone.
 
+## SWIR Software Center
+
+`system/apps/swir-software-center.py` is an unprivileged GTK4 package-discovery and installed-package surface backed by `package_status_runtime.py`.
+
+Current verified behavior:
+
+- starts as `dev.swir.SoftwareCenter` on Wayland;
+- shows a bounded snapshot of packages installed through dpkg;
+- performs bounded literal searches against the local APT cache;
+- invokes only allowlisted absolute package-tool paths, never a shell command;
+- runs metadata queries away from the GTK main loop so slow package metadata does not freeze the window;
+- exposes no install, remove, repository-edit or privilege-escalation control;
+- explicitly leaves mutation to the existing journaled SWIR package transaction service and Polkit boundary.
+
+This is the native Software Center foundation, not a completed app store. Package details, categories, screenshots, transaction confirmation/progress, Flatpak/AppImage UX and transaction-history presentation remain future work. Adding mutation here requires a brokered request contract; directly invoking privileged APT from the GTK process is not acceptable.
+
+## SWIR Update Center
+
+`system/apps/swir-update-center.py` is an unprivileged GTK4 update-planning surface backed by the same read-only package runtime.
+
+Current verified behavior:
+
+- starts as `dev.swir.UpdateCenter` on Wayland;
+- asks the fixed `/usr/bin/apt-get` executable for a `--simulate --no-download` dist-upgrade using `Debug::NoLocking=true`;
+- parses and displays a bounded list of locally known candidate upgrades;
+- performs no repository refresh and initiates no network access;
+- performs no package mutation and exposes no Apply button;
+- makes the separation between read-only planning and SWIR's privileged journaled transaction path explicit in the UI.
+
+This is not yet a complete updater. Secure repository refresh, authenticated transaction submission, progress/reboot coordination, recovery and rollback UX remain owned by the existing package/recovery architecture and must be connected without weakening those controls.
+
 ## SWIR System Monitor
 
 `system/apps/swir-system-monitor.py` is an unprivileged GTK4 resource/process viewer.
@@ -102,17 +133,16 @@ Process termination, service control, cgroup inspection and privileged diagnosti
 
 ## Shared runtime policy
 
-`system/apps/core_runtime.py` keeps common non-UI behavior testable independently from GTK. It currently provides deterministic read-only directory snapshots plus a validated, bounded and atomic user-settings store. `core_runtime.selftest.py` covers normal and hostile/symlink cases. App-specific storage/telemetry code remains similarly fail-closed and unprivileged until it is mature enough to justify a shared API.
+`system/apps/core_runtime.py` keeps common non-UI behavior testable independently from GTK. It provides deterministic read-only directory snapshots plus a validated, bounded and atomic user-settings store. `core_runtime.selftest.py` covers normal and hostile/symlink cases.
+
+`system/apps/package_status_runtime.py` is a separate, deliberately read-only package metadata boundary. It allowlists `/usr/bin/apt-cache`, `/usr/bin/apt-get` and `/usr/bin/dpkg-query`, caps execution time and captured output, escapes Software Center search terms before passing them to `apt-cache`, bounds visible rows, and permits only APT simulation for update planning. `package_status_runtime.selftest.py` verifies input bounds and deterministic parsing without modifying the host package database.
 
 ## Runtime verification
 
-`.github/workflows/system-native-core-apps-contract.yml` runs two layers:
+`.github/workflows/system-native-core-apps-contract.yml` verifies the established native suite. `.github/workflows/system-native-software-update-centers.yml` adds dedicated policy/parser checks plus real GTK4 startup of Software Center and Update Center on a headless Weston Wayland compositor.
 
-1. policy checks, shared-runtime self-tests and Python compilation;
-2. real GTK4 application startup against a headless Weston Wayland compositor, requiring SWIR Files, Terminal, Notes, Settings, Network Center and System Monitor to map actual windows and emit bounded runtime evidence.
-
-The Wayland gate verifies VTE PTY attachment, bounded read-only NetworkManager queries, atomic Notes persistence, owner-only Notes/Settings files and live `/proc` resource evidence. The graphical System Edition provisioning path installs these scripts into the image only after source/package checks succeed. VTE comes from the signed Debian package source already trusted by the System image, and the SWIR shell uses fixed executable paths rather than building launcher commands from user-controlled shell strings.
+The Wayland gates require real windows and bounded runtime evidence. The package UI gate additionally verifies that mutation controls and repository refresh are absent, package rows are bounded, required read-only package tools are present and the shell/provisioning paths include both applications. The graphical System Edition provisioning path installs the apps and shared package-status runtime into the image only after trusted-source/package checks succeed.
 
 ## Roadmap accounting
 
-This milestone does **not** mark `essential native Linux application suite for dependable daily use` complete. The product baseline still requires the full coherent suite, including Software/Store, Update Center, Hardware/Driver Center UI, native Browser, media/image/document/archive applications, diagnostics and backup/recovery integration. Progress changes only when the authoritative `SWIR-OS-ARCHITECTURE.md` checklist is legitimately satisfied.
+This milestone does **not** mark `essential native Linux application suite for dependable daily use` complete. The product baseline still requires the full coherent suite, including a mutation-capable but brokered Software/Store and Update Center experience, Hardware/Driver Center UI, native Browser, media/image/document/archive applications, diagnostics and backup/recovery integration. Progress changes only when the authoritative `SWIR-OS-ARCHITECTURE.md` checklist is legitimately satisfied.
