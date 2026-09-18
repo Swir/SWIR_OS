@@ -55,7 +55,7 @@ A commit must carry the short-lived envelope produced by the peer-authorization 
 
 `system/apps/package_transaction_client.py` is deliberately unprivileged. It performs JSON-line IPC only and contains no subprocess invocation or direct APT/dpkg/`pkexec` mutation path.
 
-`system/apps/package_mutation_flow.py` adds the application-layer confirmation contract used by both GTK package surfaces. A preview becomes an immutable mutation intent. The UI must confirm the exact preview digest before authorization is requested, and each confirmed digest is single-use inside the client flow. The intent is consumed before requesting Polkit so a double-click, re-entrant callback, failed authorization, or repeated UI callback cannot replay the same confirmation. A retry requires a fresh preview.
+`system/apps/package_mutation_flow.py` adds the application-layer confirmation contract used by both GTK package surfaces. A preview becomes an immutable mutation intent. The UI must confirm the exact preview digest before authorization is requested, and each prepared intent is single-use inside the client flow. The intent is consumed before requesting Polkit so a double-click, re-entrant callback, failed authorization, or repeated UI callback cannot replay the same confirmation. A retry requires a fresh preview; a fresh preview remains valid even if the dependency plan digest is unchanged.
 
 The native flow is:
 
