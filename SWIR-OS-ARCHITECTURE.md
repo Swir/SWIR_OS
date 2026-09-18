@@ -16,13 +16,13 @@ The mandatory end-user application and experience scope is defined in [`SWIR-PRO
 <!-- ROADMAP-PROGRESS:START -->
 <p align="center">
   <a href="https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml"><img alt="CI" src="https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml/badge.svg"></a>
-  <img alt="Roadmap progress" src="https://img.shields.io/badge/ROADMAP-83.1%25-2ea043?style=for-the-badge">
-  <img alt="Completed" src="https://img.shields.io/badge/DONE-54%2F65-1f6feb?style=for-the-badge">
+  <img alt="Roadmap progress" src="https://img.shields.io/badge/ROADMAP-84.6%25-2ea043?style=for-the-badge">
+  <img alt="Completed" src="https://img.shields.io/badge/DONE-55%2F65-1f6feb?style=for-the-badge">
   <img alt="Status" src="https://img.shields.io/badge/STATUS-IN%20PROGRESS-7c3aed?style=for-the-badge">
 </p>
 
 <p align="center">
-  <img width="900" src="assets/readme/progress-mini.svg" alt="SWIR OS roadmap progress — 83.1%, 54 of 65 verified deliverables" />
+  <img width="900" src="assets/readme/progress-mini.svg" alt="SWIR OS roadmap progress — 84.6%, 55 of 65 verified deliverables" />
 </p>
 
 ## 📊 Overall progress
@@ -30,7 +30,7 @@ The mandatory end-user application and experience scope is defined in [`SWIR-PRO
 
 | ✅ Completed | ⏳ Remaining | 📦 Total | 🎯 Progress |
 |---:|---:|---:|---:|
-| **54** | **11** | **65** | **83.1%** |
+| **55** | **10** | **65** | **84.6%** |
 
 > **Progress rule:** the explicit `[x]/[ ]` deliverables in **Version roadmap** are the source of truth for the full Web → Desktop → System plan. Update the checklist first, then badges, numbers, percentage and deterministic SVG outputs. A prototype does not count as complete until the described deliverable is actually implemented and verified.
 <!-- ROADMAP-PROGRESS:END -->
@@ -326,6 +326,8 @@ The first-party SWIR Player milestone is now verified on the native GTK4/GStream
 
 The first-party SWIR Photo Studio basic-editing milestone is now verified on the native GTK4/GdkPixbuf path for local regular image files, with bounded input limits, rotate/flip/resize editing, a bounded 24-state undo/redo history and explicit atomic owner-only PNG/JPEG/WebP export while preserving the source file. The dedicated Wayland gate maps the real GTK4 window and exercises edit/export behavior, and the Debian 13 target gate verifies the distro-managed GTK4/GdkPixbuf runtime. The application remains unprivileged and has no self-updater or direct package mutation. This closes only the dedicated basic Photo Studio roadmap item; the broader daily-use suite and advanced Product Baseline editing capabilities remain open.
 
+The installable SWIR Shell Theme/Skin framework milestone is now verified with bounded data-only `.swirtheme` packages, an exact token allowlist, accessibility contrast validation, owner-only atomic storage, Settings import/select/reset controls and fail-safe recovery to the immutable `builtin.swir-dark` theme. The dedicated Wayland gate maps real Settings and Shell windows, proves theme application and verifies missing-theme recovery. Theme packages cannot provide CSS selectors, scripts, commands, URLs or privileged code. This closes the dedicated shell theme/skin roadmap item; it does not imply arbitrary application theming or a theme marketplace.
+
 ### Live USB and installation path
 
 System Edition is required to support a real removable-media path rather than only VM boot or developer rootfs execution:
@@ -461,7 +463,7 @@ Planned:
 - [x] native Linux application execution
 - [ ] essential native Linux application suite for dependable daily use
 - [x] native SWIR Browser with Default Apps integration and one-click approved alternative browser installation
-- [ ] installable SWIR Shell Theme/Skin framework with accessibility-safe recovery to the default theme
+- [x] installable SWIR Shell Theme/Skin framework with accessibility-safe recovery to the default theme
 - [x] native SWIR Player with library/playlists/media-key/notification integration
 - [x] native SWIR Photo Studio with dependable basic editing, undo/redo and common-format export
 - [x] common Package Provider layer for distribution packages and later Flatpak/AppImage
