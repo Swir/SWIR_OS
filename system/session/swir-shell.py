@@ -432,6 +432,7 @@ class NotificationService:
                 app_name, replaces_id, _app_icon, summary, body, actions, _hints, expire_timeout = params.unpack()
                 note = self.publish(app_name=str(app_name), replaces_id=int(replaces_id), summary=str(summary), body=str(body), actions=list(actions), expire_timeout=int(expire_timeout))
                 invocation.return_value(GLib.Variant("(u)", (note.id,)))
+                GLib.idle_add(self._deliver_present, note)
                 return
             invocation.return_dbus_error("org.freedesktop.Notifications.Error.NotSupported", f"unsupported method: {method}")
         except (NotificationPolicyError, OSError, ValueError, TypeError) as exc:
@@ -452,7 +453,6 @@ class NotificationService:
             GLib.source_remove(old_timer)
         self.active[ident] = note
         self.history.append(note, async_write=True)
-        GLib.idle_add(self._deliver_present, note)
         if timeout > 0:
             self.timers[ident] = GLib.timeout_add(timeout, self._expire, ident)
         return note
@@ -677,7 +677,8 @@ class SwirShell(Gtk.Application):
         self.toast_panel.append(self.toast_body)
         self.toast_actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self.toast_panel.append(self.toast_actions)
-        self.toast_panel.set_visible(False)
+        self.toast_panel.set_opacity(0.0)
+        self.toast_panel.set_can_target(False)
         overlay.add_overlay(self.toast_panel)
 
         self._refresh_notification_history()
@@ -726,7 +727,8 @@ class SwirShell(Gtk.Application):
                 button.connect("clicked", self._notification_action_clicked, note.id, key)
                 self.toast_actions.append(button)
         if self.toast_panel is not None:
-            self.toast_panel.set_visible(True)
+            self.toast_panel.set_can_target(True)
+            self.toast_panel.set_opacity(1.0)
         self._refresh_notification_history()
         self._write_notification_evidence(note)
 
@@ -734,7 +736,8 @@ class SwirShell(Gtk.Application):
         if ident == self.current_notification_id:
             self.current_notification_id = 0
             if self.toast_panel is not None:
-                self.toast_panel.set_visible(False)
+                self.toast_panel.set_opacity(0.0)
+                self.toast_panel.set_can_target(False)
 
     def _notification_action_clicked(self, _button: Gtk.Button, ident: int, key: str) -> None:
         if self.notification_service is None:
