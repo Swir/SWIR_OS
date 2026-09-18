@@ -1,0 +1,106 @@
+name: Temporary Shell Theme Roadmap Sync
+
+on:
+  push:
+    branches:
+      - chore/roadmap-shell-theme-milestone
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply verified roadmap and README sync
+        shell: bash
+        env:
+          EXPECTED_BASE: 44576f8c2bb26ec2d13e8de47dfee61eac9b359c
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_BASE"
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected exactly one occurrence, found {count}")
+              return text.replace(old, new, 1)
+
+          roadmap_path = Path('SWIR-OS-ARCHITECTURE.md')
+          roadmap = roadmap_path.read_text(encoding='utf-8')
+          replacements = [
+              ('ROADMAP-83.1%25-2ea043', 'ROADMAP-84.6%25-2ea043', 'roadmap badge'),
+              ('DONE-54%2F65-1f6feb', 'DONE-55%2F65-1f6feb', 'done badge'),
+              ('SWIR OS roadmap progress — 83.1%, 54 of 65 verified deliverables', 'SWIR OS roadmap progress — 84.6%, 55 of 65 verified deliverables', 'mini alt'),
+              ('| **54** | **11** | **65** | **83.1%** |', '| **55** | **10** | **65** | **84.6%** |', 'roadmap table'),
+              ('- [ ] installable SWIR Shell Theme/Skin framework with accessibility-safe recovery to the default theme', '- [x] installable SWIR Shell Theme/Skin framework with accessibility-safe recovery to the default theme', 'theme roadmap checkbox'),
+          ]
+          for old, new, label in replacements:
+              roadmap = replace_once(roadmap, old, new, label)
+
+          anchor = '### Live USB and installation path\n'
+          theme_note = (
+              'The installable SWIR Shell Theme/Skin framework milestone is now verified with bounded data-only '
+              '`.swirtheme` packages, an exact token allowlist, accessibility contrast validation, owner-only atomic '
+              'storage, Settings import/select/reset controls and fail-safe recovery to the immutable '
+              '`builtin.swir-dark` theme. The dedicated Wayland gate maps real Settings and Shell windows, proves '
+              'theme application and verifies missing-theme recovery. Theme packages cannot provide CSS selectors, '
+              'scripts, commands, URLs or privileged code. This closes the dedicated shell theme/skin roadmap item; '
+              'it does not imply arbitrary application theming or a theme marketplace.\n\n'
+          )
+          if theme_note not in roadmap:
+              roadmap = replace_once(roadmap, anchor, theme_note + anchor, 'theme evidence insertion')
+          roadmap_path.write_text(roadmap, encoding='utf-8')
+
+          readme_path = Path('README.md')
+          readme = readme_path.read_text(encoding='utf-8')
+          readme_replacements = [
+              ('ROADMAP-83.1%25-02050A', 'ROADMAP-84.6%25-02050A', 'README roadmap badge'),
+              ('DONE-54%2F65-02050A', 'DONE-55%2F65-02050A', 'README done badge'),
+              ('SWIR OS roadmap progress — 83.1%, 54 of 65 verified deliverables', 'SWIR OS roadmap progress — 84.6%, 55 of 65 verified deliverables', 'README card alt'),
+              ('**Project progress:** 54/65 = **83.1%**.', '**Project progress:** 55/65 = **84.6%**.', 'README project progress'),
+              ('**54 of 65 measurable roadmap deliverables are complete.**', '**55 of 65 measurable roadmap deliverables are complete.**', 'README roadmap sentence'),
+              ('The native GTK4 SWIR shell foundation is verified, but the full daily-use native application suite and shell theme/skin framework are not complete.', 'The native GTK4 SWIR shell and installable accessibility-safe shell theme/skin framework are verified, but the full daily-use native application suite is not complete.', 'README limitation'),
+          ]
+          for old, new, label in readme_replacements:
+              readme = replace_once(readme, old, new, label)
+
+          photo_row = '| 🖼️ **Native Photo Studio** | SWIR Photo Studio now runs natively on GTK4/GdkPixbuf for bounded local image files with rotate/flip/resize editing, 24-state undo/redo and explicit atomic owner-only PNG/JPEG/WebP export while preserving the source file. Its Wayland and Debian 13 gates are verified; advanced Product Baseline editing remains open. |\n'
+          theme_row = '| 🎨 **Shell themes** | Installable data-only `.swirtheme` packages now support bounded visual tokens, accessibility contrast validation, owner-only atomic storage, Settings import/select/reset and fail-safe recovery to the built-in SWIR Dark theme. Theme packages cannot inject CSS selectors, scripts, commands, URLs or privileged code. |\n'
+          if theme_row not in readme:
+              readme = replace_once(readme, photo_row, photo_row + theme_row, 'README theme highlight')
+          readme_path.write_text(readme, encoding='utf-8')
+          PY
+
+          node scripts/generate-readme-progress.mjs
+          node scripts/generate-readme-progress.mjs --check
+          node scripts/generate-readme-progress.mjs --self-test
+          node scripts/validate-roadmap-progress.mjs
+
+          python3 - <<'PY'
+          from pathlib import Path
+          roadmap = Path('SWIR-OS-ARCHITECTURE.md').read_text(encoding='utf-8')
+          readme = Path('README.md').read_text(encoding='utf-8')
+          card = Path('assets/readme/progress-card.svg').read_text(encoding='utf-8')
+          mini = Path('assets/readme/progress-mini.svg').read_text(encoding='utf-8')
+          assert roadmap.count('- [x]') == 55
+          assert roadmap.count('- [ ]') == 10
+          assert '55 / 65 verified deliverables' in card and '84.6%' in card
+          assert '55 / 65' in mini and '84.6%' in mini
+          assert '54/65' not in readme and '83.1%' not in readme
+          assert '54 of 65' not in roadmap and '83.1%' not in roadmap
+          PY
+
+          git config user.name 'SWIR Automation'
+          git config user.email 'actions@users.noreply.github.com'
+          git rm .github/workflows/tmp-close-shell-theme-roadmap.yml
+          git add SWIR-OS-ARCHITECTURE.md README.md assets/readme/progress-card.svg assets/readme/progress-mini.svg assets/readme/progress-template.svg
+          git diff --cached --check
+          git commit -m 'docs: close verified shell theme roadmap milestone'
+          git push origin HEAD:chore/roadmap-shell-theme-milestone
