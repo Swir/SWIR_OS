@@ -16,6 +16,8 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 from dataclasses import dataclass
 from typing import Final
 
@@ -264,6 +266,9 @@ class NotificationHistory:
     def __init__(self, path: pathlib.Path | None = None) -> None:
         self.path = path or _notification_state_path()
         self.records: list[dict[str, object]] = []
+        self._persist_lock = threading.Lock()
+        self._pending_payload: dict[str, object] | None = None
+        self._persist_thread: threading.Thread | None = None
         self.load()
 
     def load(self) -> None:
@@ -300,17 +305,61 @@ class NotificationHistory:
                 clean.append({"id": ident, "appName": app_name, "summary": summary, "body": body, "createdAt": created_at})
         self.records = clean[-MAX_NOTIFICATION_HISTORY:]
 
-    def append(self, note: NativeNotification) -> None:
+    def _payload(self) -> dict[str, object]:
+        return {"schema": NOTIFICATION_HISTORY_SCHEMA, "notifications": [dict(item) for item in self.records[-MAX_NOTIFICATION_HISTORY:]]}
+
+    def append(self, note: NativeNotification, *, async_write: bool = False) -> None:
         self.records.append(note.history_record())
         self.records = self.records[-MAX_NOTIFICATION_HISTORY:]
-        self.save()
+        if async_write:
+            self.save_async()
+        else:
+            self.save()
 
     def save(self) -> None:
-        _atomic_json(self.path, {"schema": NOTIFICATION_HISTORY_SCHEMA, "notifications": self.records[-MAX_NOTIFICATION_HISTORY:]})
+        _atomic_json(self.path, self._payload())
 
-    def clear(self) -> None:
+    def save_async(self) -> None:
+        payload = self._payload()
+        with self._persist_lock:
+            self._pending_payload = payload
+            if self._persist_thread is not None and self._persist_thread.is_alive():
+                return
+            worker = threading.Thread(target=self._persist_worker, name="swir-notification-history", daemon=True)
+            self._persist_thread = worker
+            worker.start()
+
+    def _persist_worker(self) -> None:
+        while True:
+            with self._persist_lock:
+                payload = self._pending_payload
+                self._pending_payload = None
+                if payload is None:
+                    self._persist_thread = None
+                    return
+            try:
+                _atomic_json(self.path, payload)
+            except (OSError, NotificationPolicyError) as exc:
+                print(f"SWIR notification history async write failed: {exc}", file=sys.stderr)
+
+    def flush(self, timeout: float = 2.0) -> bool:
+        deadline = time.monotonic() + max(0.0, timeout)
+        while True:
+            with self._persist_lock:
+                worker = self._persist_thread
+            if worker is None:
+                return True
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            worker.join(min(remaining, 0.2))
+
+    def clear(self, *, async_write: bool = False) -> None:
         self.records = []
-        self.save()
+        if async_write:
+            self.save_async()
+        else:
+            self.save()
 
 
 class NotificationService:
@@ -346,6 +395,7 @@ class NotificationService:
             if source_id:
                 GLib.source_remove(source_id)
         self.timers.clear()
+        self.history.flush(2.0)
         if self.connection is not None and self.registration_id:
             try:
                 self.connection.unregister_object(self.registration_id)
@@ -401,7 +451,7 @@ class NotificationService:
         if old_timer:
             GLib.source_remove(old_timer)
         self.active[ident] = note
-        self.history.append(note)
+        self.history.append(note, async_write=True)
         GLib.idle_add(self._deliver_present, note)
         if timeout > 0:
             self.timers[ident] = GLib.timeout_add(timeout, self._expire, ident)
@@ -436,7 +486,7 @@ class NotificationService:
             self.connection.emit_signal(None, NOTIFICATION_PATH, NOTIFICATION_IFACE, "ActionInvoked", GLib.Variant("(us)", (ident, action_key)))
 
     def clear_history(self) -> None:
-        self.history.clear()
+        self.history.clear(async_write=True)
 
 
 class SwirShell(Gtk.Application):
@@ -698,12 +748,7 @@ class SwirShell(Gtk.Application):
 
     def _clear_notification_history(self, _button: Gtk.Button) -> None:
         if self.notification_service is not None:
-            try:
-                self.notification_service.clear_history()
-            except (OSError, NotificationPolicyError) as exc:
-                if self.status_label is not None:
-                    self.status_label.set_text(f"Could not clear notification history: {exc}")
-                return
+            self.notification_service.clear_history()
         self._refresh_notification_history()
 
     def _refresh_notification_history(self) -> None:
