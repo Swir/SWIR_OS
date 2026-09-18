@@ -87,6 +87,7 @@ jobs:
           dbus-run-session -- bash -euo pipefail -c '
             export LIBGL_ALWAYS_SOFTWARE=1
             export GTK_A11Y=none
+            export WAYLAND_DEBUG=client
             export SWIR_SHELL_E2E=1
             export SWIR_SHELL_EVIDENCE_PATH="$XDG_RUNTIME_DIR/shell.json"
             export SWIR_NOTIFICATION_E2E=1
@@ -102,8 +103,8 @@ jobs:
                 cat "$XDG_RUNTIME_DIR/shell.out"
               fi
               if [[ -s "$XDG_RUNTIME_DIR/shell.err" ]]; then
-                echo '"'"'--- shell.err ---'"'"'
-                cat "$XDG_RUNTIME_DIR/shell.err"
+                echo '"'"'--- shell.err tail ---'"'"'
+                tail -n 250 "$XDG_RUNTIME_DIR/shell.err"
               fi
             }
             trap cleanup_shell EXIT
