@@ -70,6 +70,7 @@ window.swir-shell {
 # Fixed commands only: user-controlled strings are never passed to a shell.
 LAUNCHERS: Final = (
     ("Files", (("/usr/local/bin/swir-files",), ("/usr/bin/nautilus",), ("/usr/bin/thunar",), ("/usr/bin/pcmanfm",))),
+    ("Browser", (("/usr/local/bin/swir-browser",),)),
     ("Terminal", (("/usr/local/bin/swir-terminal",),)),
     ("Notes", (("/usr/local/bin/swir-notes",),)),
     ("Settings", (("/usr/local/bin/swir-settings",), ("/usr/bin/gnome-control-center",))),
@@ -105,25 +106,20 @@ class SwirShell(Gtk.Application):
         display = Gdk.Display.get_default()
         if display is None:
             raise RuntimeError("SWIR shell requires an active graphical display")
-        Gtk.StyleContext.add_provider_for_display(
-            display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
-        )
+        Gtk.StyleContext.add_provider_for_display(display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
     def do_activate(self) -> None:
         if self.window is not None:
             self.window.present()
             return
-
         window = Gtk.ApplicationWindow(application=self)
         window.set_title("SWIR OS")
         window.set_default_size(1280, 720)
         window.add_css_class("swir-shell")
         window.fullscreen()
         self.window = window
-
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         window.set_child(root)
-
         top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
         top.add_css_class("swir-topbar")
         brand = Gtk.Label(label="◆  SWIR OS")
@@ -140,13 +136,11 @@ class SwirShell(Gtk.Application):
         self.clock_label.add_css_class("swir-brand")
         top.append(self.clock_label)
         root.append(top)
-
         center = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=22)
         center.set_hexpand(True)
         center.set_vexpand(True)
         center.set_halign(Gtk.Align.CENTER)
         center.set_valign(Gtk.Align.CENTER)
-
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         card.add_css_class("swir-card")
         card.set_size_request(650, -1)
@@ -154,10 +148,7 @@ class SwirShell(Gtk.Application):
         title.add_css_class("swir-title")
         title.set_xalign(0)
         card.append(title)
-        detail = Gtk.Label(
-            label="Native Linux desktop session • Debian 13 foundation • Wayland",
-            wrap=True,
-        )
+        detail = Gtk.Label(label="Native Linux desktop session • Debian 13 foundation • Wayland", wrap=True)
         detail.add_css_class("swir-subtle")
         detail.set_xalign(0)
         card.append(detail)
@@ -166,11 +157,6 @@ class SwirShell(Gtk.Application):
         card.append(self.status_label)
         center.append(card)
         root.append(center)
-
-        # The native app suite keeps growing, so the launcher surface must not
-        # force a single unbounded horizontal minimum width. FlowBox keeps the
-        # shell usable on the low-resolution virtual/physical displays used by
-        # installers and small screens while retaining every fixed launcher.
         dock = Gtk.FlowBox()
         dock.add_css_class("swir-dock")
         dock.set_selection_mode(Gtk.SelectionMode.NONE)
@@ -188,7 +174,6 @@ class SwirShell(Gtk.Application):
             button.connect("clicked", self._launch, label, candidates)
             dock.append(button)
         root.append(dock)
-
         GLib.timeout_add_seconds(1, self._update_clock)
         self._update_clock()
         window.connect("map", self._on_mapped)
@@ -208,14 +193,7 @@ class SwirShell(Gtk.Application):
                 self.status_label.set_text(f"{label} is not installed in this image yet.")
             return
         try:
-            subprocess.Popen(
-                command,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                close_fds=True,
-                start_new_session=True,
-            )
+            subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True, start_new_session=True)
             if self.status_label is not None:
                 self.status_label.set_text(f"Opened {label}")
         except OSError as exc:
@@ -228,15 +206,7 @@ class SwirShell(Gtk.Application):
         probe = pathlib.Path("/usr/bin/true")
         if not probe.is_file() or not os.access(probe, os.X_OK):
             raise RuntimeError("trusted launcher probe executable is missing")
-        completed = subprocess.run(
-            (str(probe),),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            close_fds=True,
-            check=False,
-            timeout=5,
-        )
+        completed = subprocess.run((str(probe),), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True, check=False, timeout=5)
         return completed.returncode == 0
 
     def _on_mapped(self, _window: Gtk.Window) -> None:

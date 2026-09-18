@@ -36,6 +36,8 @@ for source_file in \
   system/apps/package_status_runtime.py \
   system/apps/package_transaction_client.py \
   system/apps/package_mutation_flow.py \
+  system/apps/swir-browser.py \
+  system/apps/swir-browser.desktop \
   system/apps/swir-files.py \
   system/apps/swir-hardware-center.py \
   system/apps/swir-network-center.py \
@@ -107,11 +109,16 @@ ensure_exact_symlink() {
   [[ -L "$dest" && "$(readlink "$dest")" == "$expected" ]] || { echo "failed to install trusted symlink: $rel" >&2; exit 70; }
 }
 
-# VTE is the trusted Debian GTK4 terminal widget used by the first-party SWIR Terminal.
-# Node.js is the distro-managed runtime for the root-owned SWIR package transaction broker
-# and the read-only Driver Center diagnostic report adapter.
-# Both are installed only through the already-configured signed Debian repositories.
-RUNTIME_PACKAGES=(gir1.2-vte-3.91 libvte-2.91-gtk4-0 nodejs)
+# First-party UI runtimes are installed only from the configured signed Debian
+# repositories. WebKitGTK is distro-managed so browser security updates stay in
+# the SWIR package/update transaction path instead of an ad-hoc self-updater.
+RUNTIME_PACKAGES=(
+  gir1.2-vte-3.91
+  libvte-2.91-gtk4-0
+  nodejs
+  gir1.2-webkit-6.0
+  desktop-file-utils
+)
 RUNTIME_MISSING=0
 for pkg in "${RUNTIME_PACKAGES[@]}"; do
   chroot "$ROOTFS" dpkg-query -W -f='${db:Status-Abbrev}' "$pkg" 2>/dev/null | grep -qx 'ii ' || RUNTIME_MISSING=1
@@ -120,13 +127,13 @@ if [[ $RUNTIME_MISSING -eq 1 ]]; then
   chroot "$ROOTFS" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${RUNTIME_PACKAGES[@]}"
 fi
 
-for pkg in greetd weston plymouth plymouth-themes wayland-utils dbus-user-session python3 python3-gi gir1.2-gtk-4.0 gir1.2-vte-3.91 libvte-2.91-gtk4-0 network-manager nodejs; do
+for pkg in greetd weston plymouth plymouth-themes wayland-utils dbus-user-session python3 python3-gi gir1.2-gtk-4.0 gir1.2-vte-3.91 libvte-2.91-gtk4-0 gir1.2-webkit-6.0 network-manager nodejs desktop-file-utils; do
   chroot "$ROOTFS" dpkg-query -W -f='${db:Status-Abbrev}' "$pkg" 2>/dev/null | grep -qx 'ii ' || {
     echo "required graphical/runtime package is not installed: $pkg" >&2
     exit 69
   }
 done
-for file in /usr/sbin/greetd /usr/sbin/agreety /usr/bin/weston /usr/bin/wayland-info /usr/bin/plymouth /usr/sbin/plymouth-set-default-theme /usr/bin/python3.13 /usr/bin/node /usr/bin/nmcli /usr/bin/apt-cache /usr/bin/apt-get /usr/bin/dpkg-query; do
+for file in /usr/sbin/greetd /usr/sbin/agreety /usr/bin/weston /usr/bin/wayland-info /usr/bin/plymouth /usr/sbin/plymouth-set-default-theme /usr/bin/python3.13 /usr/bin/node /usr/bin/nmcli /usr/bin/apt-cache /usr/bin/apt-get /usr/bin/dpkg-query /usr/bin/update-desktop-database; do
   verify_trusted_regular_file "$file" yes
 done
 [[ -L "$ROOTFS/usr/bin/python3" && "$(readlink "$ROOTFS/usr/bin/python3")" == python3.13 ]] || {
@@ -136,8 +143,6 @@ done
 verify_trusted_regular_file /usr/lib/systemd/system/greetd.service no
 verify_trusted_regular_file /usr/lib/systemd/system/graphical.target no
 
-# Stage the root-owned broker, peer-credential authorization service, signed
-# Debian repository policy and the broker's exact Node module dependency set.
 node "$SOURCE_ROOT/system/image/stage-package-ui-runtime.mjs" \
   --rootfs "$ROOTFS" \
   --source-root "$SOURCE_ROOT" \
@@ -149,6 +154,7 @@ install -d -m 0755 \
   "$(safe_target /usr/local/lib/swir)" \
   "$(safe_target /usr/local/lib/swir/hardware)" \
   "$(safe_target /usr/local/lib/swir/contracts)" \
+  "$(safe_target /usr/share/applications)" \
   "$(safe_target /usr/share/wayland-sessions)" \
   "$(safe_target /usr/share/plymouth/themes/swir)" \
   "$(safe_target /etc/systemd/system/graphical.target.wants)"
@@ -160,6 +166,8 @@ install -m 0644 "$SOURCE_ROOT/system/apps/hardware_center_runtime.py" "$(safe_ta
 install -m 0644 "$SOURCE_ROOT/system/apps/package_status_runtime.py" "$(safe_target /usr/local/lib/swir/package_status_runtime.py)"
 install -m 0644 "$SOURCE_ROOT/system/apps/package_transaction_client.py" "$(safe_target /usr/local/lib/swir/package_transaction_client.py)"
 install -m 0644 "$SOURCE_ROOT/system/apps/package_mutation_flow.py" "$(safe_target /usr/local/lib/swir/package_mutation_flow.py)"
+install -m 0755 "$SOURCE_ROOT/system/apps/swir-browser.py" "$(safe_target /usr/local/bin/swir-browser)"
+install -m 0644 "$SOURCE_ROOT/system/apps/swir-browser.desktop" "$(safe_target /usr/share/applications/swir-browser.desktop)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-files.py" "$(safe_target /usr/local/bin/swir-files)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-hardware-center.py" "$(safe_target /usr/local/bin/swir-hardware-center)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-network-center.py" "$(safe_target /usr/local/bin/swir-network-center)"
@@ -179,6 +187,7 @@ install -m 0644 "$SOURCE_ROOT/system/boot/plymouth/swir.plymouth" "$(safe_target
 install -m 0644 "$SOURCE_ROOT/system/boot/plymouth/swir.script" "$(safe_target /usr/share/plymouth/themes/swir/swir.script)"
 chroot "$ROOTFS" /usr/bin/python3 -m py_compile \
   /usr/local/bin/swir-shell \
+  /usr/local/bin/swir-browser \
   /usr/local/bin/swir-files \
   /usr/local/bin/swir-hardware-center \
   /usr/local/bin/swir-network-center \
@@ -193,6 +202,7 @@ chroot "$ROOTFS" /usr/bin/python3 -m py_compile \
   /usr/local/lib/swir/package_status_runtime.py \
   /usr/local/lib/swir/package_transaction_client.py \
   /usr/local/lib/swir/package_mutation_flow.py
+chroot "$ROOTFS" /usr/bin/update-desktop-database /usr/share/applications
 
 cat > "$(safe_target /usr/share/wayland-sessions/swir.desktop)" <<'EOF'
 [Desktop Entry]
@@ -251,6 +261,8 @@ fi
 [[ -f "$ROOTFS/etc/pam.d/greetd" && ! -L "$ROOTFS/etc/pam.d/greetd" ]] || { echo "greetd PAM policy missing" >&2; exit 70; }
 
 verify_trusted_regular_file /usr/local/bin/swir-shell yes
+verify_trusted_regular_file /usr/local/bin/swir-browser yes
+verify_trusted_regular_file /usr/share/applications/swir-browser.desktop no
 verify_trusted_regular_file /usr/local/bin/swir-files yes
 verify_trusted_regular_file /usr/local/bin/swir-hardware-center yes
 verify_trusted_regular_file /usr/local/bin/swir-network-center yes
@@ -282,4 +294,4 @@ verify_trusted_regular_file /usr/libexec/swir/swir-peer-authorization-broker yes
   echo "SWIR package transaction broker service target is unexpected" >&2; exit 70;
 }
 
-printf 'SWIR graphical session staged: mode=%s theme=swir login=greetd compositor=weston native-shell=gtk4 native-apps=files,hardware,network,notes,settings,software,system-monitor,terminal,updates package-broker=peer-polkit-journaled\n' "$MODE"
+printf 'SWIR graphical session staged: mode=%s theme=swir login=greetd compositor=weston native-shell=gtk4 native-apps=browser,files,hardware,network,notes,settings,software,system-monitor,terminal,updates package-broker=peer-polkit-journaled\n' "$MODE"

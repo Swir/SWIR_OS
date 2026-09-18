@@ -1,0 +1,190 @@
+name: System Native Browser
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'system/apps/swir-browser.py'
+      - 'system/apps/swir-browser.desktop'
+      - 'system/apps/swir-settings.py'
+      - 'system/apps/swir-software-center.py'
+      - 'system/session/swir-shell.py'
+      - 'system/session/provision-graphical-session.sh'
+      - 'system/SWIR-NATIVE-CORE-APPS-0.1.md'
+      - '.github/workflows/system-native-browser.yml'
+  pull_request:
+    paths:
+      - 'system/apps/swir-browser.py'
+      - 'system/apps/swir-browser.desktop'
+      - 'system/apps/swir-settings.py'
+      - 'system/apps/swir-software-center.py'
+      - 'system/session/swir-shell.py'
+      - 'system/session/provision-graphical-session.sh'
+      - 'system/SWIR-NATIVE-CORE-APPS-0.1.md'
+      - '.github/workflows/system-native-browser.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: system-native-browser-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Python GI browser runtime for contract tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            python3-gi gir1.2-gtk-4.0 gir1.2-webkit-6.0 desktop-file-utils
+      - name: Compile, self-test and validate desktop integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n system/session/provision-graphical-session.sh
+          python3 -m py_compile \
+            system/apps/swir-browser.py \
+            system/apps/swir-settings.py \
+            system/apps/swir-software-center.py \
+            system/session/swir-shell.py
+          PYTHONPATH=system/apps python3 system/apps/swir-browser.py --self-test
+          PYTHONPATH=system/apps python3 system/apps/swir-software-center.py --self-test
+          desktop-file-validate system/apps/swir-browser.desktop
+          grep -F 'MimeType=text/html;x-scheme-handler/http;x-scheme-handler/https;' system/apps/swir-browser.desktop >/dev/null
+          grep -F 'Browser", (("/usr/local/bin/swir-browser",)' system/session/swir-shell.py >/dev/null
+          grep -F 'system/apps/swir-browser.py' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'gir1.2-webkit-6.0' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'update-desktop-database' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'NetworkSession.new_ephemeral()' system/apps/swir-browser.py >/dev/null
+          grep -F 'permissionsExplicitAllowDeny": True' system/apps/swir-browser.py >/dev/null
+          grep -F 'engineUpdatePath": "system-package-update-center"' system/apps/swir-browser.py >/dev/null
+          grep -F 'browserDefaultMutationOnExplicitActionOnly": True' system/apps/swir-settings.py >/dev/null
+          grep -F 'externalInstallAutoCommit": False' system/apps/swir-software-center.py >/dev/null
+          grep -F '("/usr/local/bin/swir-software-center", "--install", "firefox-esr")' system/apps/swir-browser.py >/dev/null
+          ! grep -RE 'shell *= *True|os\.system\(' system/apps/swir-browser.py system/apps/swir-settings.py system/apps/swir-software-center.py
+          ! grep -RE "/usr/bin/(sudo|pkexec|su)([[:space:]\"']|$)|/bin/su([[:space:]\"']|$)" system/apps/swir-browser.py system/apps/swir-settings.py system/apps/swir-software-center.py
+
+  wayland-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install controlled GTK4 WebKitGTK and Wayland runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            weston dbus-daemon python3-gi gir1.2-gtk-4.0 gir1.2-webkit-6.0 desktop-file-utils
+          sudo install -m 0755 system/apps/swir-browser.py /usr/local/bin/swir-browser
+      - name: Map native browser and verify runtime evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUNTIME="${{ runner.temp }}/swir-browser-runtime"
+          CONFIG="${{ runner.temp }}/swir-browser-config"
+          DATA="${{ runner.temp }}/swir-browser-data"
+          mkdir -p "$RUNTIME" "$CONFIG" "$DATA/applications"
+          chmod 0700 "$RUNTIME" "$CONFIG" "$DATA"
+          export XDG_RUNTIME_DIR="$RUNTIME"
+          export XDG_CONFIG_HOME="$CONFIG"
+          export XDG_DATA_HOME="$DATA"
+          export WAYLAND_DISPLAY=wayland-swir-browser
+          export GDK_BACKEND=wayland
+          export PYTHONPATH="$GITHUB_WORKSPACE/system/apps"
+
+          install -m 0644 system/apps/swir-browser.desktop "$DATA/applications/swir-browser.desktop"
+          update-desktop-database "$DATA/applications"
+
+          weston --backend=headless-backend.so --socket="$WAYLAND_DISPLAY" --idle-time=0 --log="$RUNTIME/weston.log" &
+          WESTON_PID=$!
+          cleanup() { kill "$WESTON_PID" 2>/dev/null || true; wait "$WESTON_PID" 2>/dev/null || true; }
+          trap cleanup EXIT
+          for _ in $(seq 1 80); do
+            [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]] && break
+            kill -0 "$WESTON_PID"
+            sleep 0.25
+          done
+          [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]]
+
+          # GitHub's hosted container denies the nested network namespace operation
+          # used by WebKitGTK/bubblewrap (RTM_NEWADDR on loopback). WebKit upstream
+          # provides this explicitly-dangerous switch for test processes. It is set
+          # only for this disposable CI process; System Edition production leaves the
+          # WebKit sandbox enabled. DMABUF is likewise disabled only for headless CI.
+          # The tiny harness delays the test-only evidence callback until GTK's idle
+          # queue, after do_activate() has created both persistent and private tabs.
+          timeout --signal=TERM --kill-after=5s 35s \
+            dbus-run-session -- \
+            env WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 \
+                WEBKIT_DISABLE_DMABUF_RENDERER=1 \
+                LIBGL_ALWAYS_SOFTWARE=1 \
+                GTK_A11Y=none \
+                SWIR_APP_E2E=1 SWIR_APP_EVIDENCE_PATH="$RUNTIME/browser.json" \
+            python3 - <<'PY'
+          import importlib.util
+          import pathlib
+          import sys
+
+          path = pathlib.Path('system/apps/swir-browser.py')
+          spec = importlib.util.spec_from_file_location('swir_browser_e2e', path)
+          assert spec is not None and spec.loader is not None
+          module = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = module
+          spec.loader.exec_module(module)
+          original = module.SwirBrowser._on_mapped
+
+          def delayed(self, window):
+              def write_evidence():
+                  original(self, window)
+                  return False
+              module.GLib.idle_add(write_evidence)
+
+          module.SwirBrowser._on_mapped = delayed
+          raise SystemExit(module.SwirBrowser().run(['swir-browser-e2e']))
+          PY
+
+          python3 - "$RUNTIME/browser.json" <<'PY'
+          import json, sys
+          evidence = json.load(open(sys.argv[1], encoding='utf-8'))
+          assert evidence['schema'] == 'swir.native-browser-runtime-evidence/0.1'
+          assert evidence['passed'] is True and evidence['applicationId'] == 'dev.swir.Browser'
+          assert evidence['nativeToolkit'] == 'gtk4-webkitgtk6'
+          assert evidence['displayProtocol'] == 'wayland' and evidence['windowMapped'] is True
+          assert evidence['webKitApiVersion'] == '6.0'
+          assert evidence['tabbedBrowsing'] is True
+          assert evidence['historyPersistent'] is True and evidence['bookmarksPersistent'] is True
+          assert evidence['downloadsIntegrated'] is True
+          assert evidence['privateBrowsingEphemeralSession'] is True
+          assert evidence['permissionsExplicitAllowDeny'] is True
+          assert evidence['defaultBrowserIntegration'] is True
+          assert evidence['approvedAlternativeInstallViaSoftwareCenter'] is True
+          assert evidence['approvedAlternativePackage'] == 'firefox-esr'
+          assert evidence['directPackageMutation'] is False
+          assert evidence['engineUpdatePath'] == 'system-package-update-center'
+          assert evidence['browserSelfUpdater'] is False
+          assert evidence['unsafeMainSchemesBlocked'] is True
+          assert evidence['historyRowsBounded'] == 500
+          assert evidence['bookmarkRowsBounded'] == 200
+          PY
+
+      - name: Verify Settings discovers SWIR Browser without changing defaults
+        shell: bash
+        run: |
+          set -euo pipefail
+          export XDG_RUNTIME_DIR="${{ runner.temp }}/swir-browser-runtime"
+          export XDG_CONFIG_HOME="${{ runner.temp }}/swir-browser-config"
+          export XDG_DATA_HOME="${{ runner.temp }}/swir-browser-data"
+          python3 - <<'PY'
+          from gi.repository import Gio
+          apps = Gio.AppInfo.get_all_for_type('x-scheme-handler/http')
+          ids = {app.get_id() for app in apps}
+          assert 'swir-browser.desktop' in ids, ids
+          PY
