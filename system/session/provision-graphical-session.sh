@@ -32,10 +32,13 @@ for source_file in \
   system/session/swir-session-launcher.sh \
   system/session/swir-shell.py \
   system/apps/core_runtime.py \
+  system/apps/backup_runtime.py \
   system/apps/hardware_center_runtime.py \
   system/apps/package_status_runtime.py \
   system/apps/package_transaction_client.py \
   system/apps/package_mutation_flow.py \
+  system/apps/swir-backup.py \
+  system/apps/swir-backup.desktop \
   system/apps/swir-browser.py \
   system/apps/swir-browser.desktop \
   system/apps/swir-player.py \
@@ -181,10 +184,13 @@ install -d -m 0755 \
 install -m 0755 "$SOURCE_ROOT/system/session/swir-session-launcher.sh" "$(safe_target /usr/local/bin/swir-session)"
 install -m 0755 "$SOURCE_ROOT/system/session/swir-shell.py" "$(safe_target /usr/local/bin/swir-shell)"
 install -m 0644 "$SOURCE_ROOT/system/apps/core_runtime.py" "$(safe_target /usr/local/lib/swir/core_runtime.py)"
+install -m 0644 "$SOURCE_ROOT/system/apps/backup_runtime.py" "$(safe_target /usr/local/lib/swir/backup_runtime.py)"
 install -m 0644 "$SOURCE_ROOT/system/apps/hardware_center_runtime.py" "$(safe_target /usr/local/lib/swir/hardware_center_runtime.py)"
 install -m 0644 "$SOURCE_ROOT/system/apps/package_status_runtime.py" "$(safe_target /usr/local/lib/swir/package_status_runtime.py)"
 install -m 0644 "$SOURCE_ROOT/system/apps/package_transaction_client.py" "$(safe_target /usr/local/lib/swir/package_transaction_client.py)"
 install -m 0644 "$SOURCE_ROOT/system/apps/package_mutation_flow.py" "$(safe_target /usr/local/lib/swir/package_mutation_flow.py)"
+install -m 0755 "$SOURCE_ROOT/system/apps/swir-backup.py" "$(safe_target /usr/local/bin/swir-backup)"
+install -m 0644 "$SOURCE_ROOT/system/apps/swir-backup.desktop" "$(safe_target /usr/share/applications/swir-backup.desktop)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-browser.py" "$(safe_target /usr/local/bin/swir-browser)"
 install -m 0644 "$SOURCE_ROOT/system/apps/swir-browser.desktop" "$(safe_target /usr/share/applications/swir-browser.desktop)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-player.py" "$(safe_target /usr/local/bin/swir-player)"
@@ -216,6 +222,7 @@ install -m 0644 "$SOURCE_ROOT/system/boot/plymouth/swir.plymouth" "$(safe_target
 install -m 0644 "$SOURCE_ROOT/system/boot/plymouth/swir.script" "$(safe_target /usr/share/plymouth/themes/swir/swir.script)"
 chroot "$ROOTFS" /usr/bin/python3 -m py_compile \
   /usr/local/bin/swir-shell \
+  /usr/local/bin/swir-backup \
   /usr/local/bin/swir-browser \
   /usr/local/bin/swir-player \
   /usr/local/bin/swir-photo-studio \
@@ -231,6 +238,7 @@ chroot "$ROOTFS" /usr/bin/python3 -m py_compile \
   /usr/local/bin/swir-system-monitor \
   /usr/local/bin/swir-terminal \
   /usr/local/bin/swir-update-center \
+  /usr/local/lib/swir/backup_runtime.py \
   /usr/local/lib/swir/core_runtime.py \
   /usr/local/lib/swir/hardware_center_runtime.py \
   /usr/local/lib/swir/package_status_runtime.py \
@@ -295,6 +303,8 @@ fi
 [[ -f "$ROOTFS/etc/pam.d/greetd" && ! -L "$ROOTFS/etc/pam.d/greetd" ]] || { echo "greetd PAM policy missing" >&2; exit 70; }
 
 verify_trusted_regular_file /usr/local/bin/swir-shell yes
+verify_trusted_regular_file /usr/local/bin/swir-backup yes
+verify_trusted_regular_file /usr/share/applications/swir-backup.desktop no
 verify_trusted_regular_file /usr/local/bin/swir-browser yes
 verify_trusted_regular_file /usr/share/applications/swir-browser.desktop no
 verify_trusted_regular_file /usr/local/bin/swir-player yes
@@ -316,6 +326,7 @@ verify_trusted_regular_file /usr/local/bin/swir-software-center yes
 verify_trusted_regular_file /usr/local/bin/swir-system-monitor yes
 verify_trusted_regular_file /usr/local/bin/swir-terminal yes
 verify_trusted_regular_file /usr/local/bin/swir-update-center yes
+verify_trusted_regular_file /usr/local/lib/swir/backup_runtime.py no
 verify_trusted_regular_file /usr/local/lib/swir/core_runtime.py no
 verify_trusted_regular_file /usr/local/lib/swir/hardware_center_runtime.py no
 verify_trusted_regular_file /usr/local/lib/swir/hardware/hardware-service.mjs no
@@ -338,4 +349,4 @@ verify_trusted_regular_file /usr/libexec/swir/swir-peer-authorization-broker yes
   echo "SWIR package transaction broker service target is unexpected" >&2; exit 70;
 }
 
-printf 'SWIR graphical session staged: mode=%s theme=swir login=greetd compositor=weston native-shell=gtk4 native-apps=browser,player,photo-studio,pdf-viewer,calculator,clock,files,hardware,network,notes,settings,software,system-monitor,terminal,updates package-broker=peer-polkit-journaled\n' "$MODE"
+printf 'SWIR graphical session staged: mode=%s theme=swir login=greetd compositor=weston native-shell=gtk4 native-apps=backup,browser,player,photo-studio,pdf-viewer,calculator,clock,files,hardware,network,notes,settings,software,system-monitor,terminal,updates package-broker=peer-polkit-journaled\n' "$MODE"

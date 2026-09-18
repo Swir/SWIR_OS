@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=SWIR Backup & Restore
+Comment=Back up and restore SWIR user settings and application data
+Exec=/usr/local/bin/swir-backup
+TryExec=/usr/local/bin/swir-backup
+Icon=drive-harddisk-symbolic
+Terminal=false
+Categories=System;Utility;
+Keywords=backup;restore;recovery;SWIR;
+StartupNotify=true
