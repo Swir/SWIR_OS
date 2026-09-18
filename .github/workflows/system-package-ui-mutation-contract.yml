@@ -1,0 +1,114 @@
+name: System Package UI Mutation Contract
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'system/apps/package_transaction_client.py'
+      - 'system/apps/package_transaction_client.selftest.py'
+      - 'system/apps/package_mutation_flow.py'
+      - 'system/apps/package_mutation_flow.selftest.py'
+      - 'system/apps/swir-software-center.py'
+      - 'system/apps/swir-update-center.py'
+      - 'system/image/system-package-ui-runtime-provisioning.mjs'
+      - 'system/image/system-package-ui-runtime-provisioning.selftest.mjs'
+      - 'system/image/stage-package-ui-runtime.mjs'
+      - 'system/session/provision-graphical-session.sh'
+      - '.github/workflows/system-package-ui-mutation-contract.yml'
+  pull_request:
+    paths:
+      - 'system/apps/package_transaction_client.py'
+      - 'system/apps/package_transaction_client.selftest.py'
+      - 'system/apps/package_mutation_flow.py'
+      - 'system/apps/package_mutation_flow.selftest.py'
+      - 'system/apps/swir-software-center.py'
+      - 'system/apps/swir-update-center.py'
+      - 'system/image/system-package-ui-runtime-provisioning.mjs'
+      - 'system/image/system-package-ui-runtime-provisioning.selftest.mjs'
+      - 'system/image/stage-package-ui-runtime.mjs'
+      - 'system/session/provision-graphical-session.sh'
+      - '.github/workflows/system-package-ui-mutation-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: system-package-ui-mutation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Syntax and focused self-tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            system/apps/package_transaction_client.py \
+            system/apps/package_transaction_client.selftest.py \
+            system/apps/package_mutation_flow.py \
+            system/apps/package_mutation_flow.selftest.py \
+            system/apps/swir-software-center.py \
+            system/apps/swir-update-center.py
+          PYTHONPATH=system/apps python3 system/apps/package_transaction_client.selftest.py
+          PYTHONPATH=system/apps python3 system/apps/package_mutation_flow.selftest.py
+          node --check system/image/system-package-ui-runtime-provisioning.mjs
+          node --check system/image/system-package-ui-runtime-provisioning.selftest.mjs
+          node --check system/image/stage-package-ui-runtime.mjs
+          node system/image/system-package-ui-runtime-provisioning.selftest.mjs
+          bash -n system/session/provision-graphical-session.sh
+
+      - name: Verify explicit confirmation and no direct privilege path
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import ast
+          from pathlib import Path
+
+          ui_files = [
+              Path('system/apps/swir-software-center.py'),
+              Path('system/apps/swir-update-center.py'),
+          ]
+          for path in ui_files:
+              text = path.read_text(encoding='utf-8')
+              tree = ast.parse(text, filename=str(path))
+              imported = set()
+              calls = []
+              for node in ast.walk(tree):
+                  if isinstance(node, ast.Import):
+                      imported.update(alias.name.split('.')[0] for alias in node.names)
+                  elif isinstance(node, ast.ImportFrom) and node.module:
+                      imported.add(node.module.split('.')[0])
+                  elif isinstance(node, ast.Call):
+                      if isinstance(node.func, ast.Name): calls.append(node.func.id)
+                      elif isinstance(node.func, ast.Attribute): calls.append(node.func.attr)
+              assert 'subprocess' not in imported, f'{path}: subprocess import forbidden in GTK mutation surface'
+              assert 'PackageMutationFlow' in text, f'{path}: brokered mutation flow missing'
+              assert '_show_confirmation' in text and 'CONFIRMATION' in Path('system/apps/package_mutation_flow.py').read_text(), f'{path}: explicit confirmation binding missing'
+              assert 'os.system' not in text and 'Popen' not in calls, f'{path}: direct process execution forbidden'
+              assert '/usr/bin/apt-get' not in text and '/usr/bin/pkexec' not in text, f'{path}: direct privileged package tool path forbidden'
+          flow = Path('system/apps/package_mutation_flow.py').read_text(encoding='utf-8')
+          assert '_consumed_digests' in flow and 'CONFIRMATION_ALREADY_USED' in flow
+          assert 'self._client.authorize(preview)' in flow and 'self._client.commit(preview, envelope)' in flow
+          print('Package UI direct-privilege boundary check: OK')
+          PY
+
+      - name: Verify image/runtime integration contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'system/apps/package_transaction_client.py' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'system/apps/package_mutation_flow.py' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'stage-package-ui-runtime.mjs' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'nodejs' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'swir-package-transaction.service' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'peerAuthorizationRequired: true' system/image/system-package-ui-runtime-provisioning.mjs >/dev/null
+          grep -F 'runtimeKeyEmbeddedInImage: false' system/image/system-package-ui-runtime-provisioning.mjs >/dev/null
+          grep -F 'directUiPackageToolsAllowed: false' system/image/system-package-ui-runtime-provisioning.mjs >/dev/null
+          grep -F 'signedDistributionRepositoryPolicyRequired: true' system/image/system-package-ui-runtime-provisioning.mjs >/dev/null
