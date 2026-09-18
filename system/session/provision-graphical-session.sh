@@ -32,10 +32,12 @@ for source_file in \
   system/session/swir-session-launcher.sh \
   system/session/swir-shell.py \
   system/apps/core_runtime.py \
+  system/apps/hardware_center_runtime.py \
   system/apps/package_status_runtime.py \
   system/apps/package_transaction_client.py \
   system/apps/package_mutation_flow.py \
   system/apps/swir-files.py \
+  system/apps/swir-hardware-center.py \
   system/apps/swir-network-center.py \
   system/apps/swir-notes.py \
   system/apps/swir-settings.py \
@@ -43,6 +45,12 @@ for source_file in \
   system/apps/swir-system-monitor.py \
   system/apps/swir-terminal.py \
   system/apps/swir-update-center.py \
+  system/hardware/hardware-service.mjs \
+  system/hardware/driver-resolver.mjs \
+  system/hardware/driver-center-service.mjs \
+  system/hardware/driver-center-report.mjs \
+  system/hardware/hardware-catalog.json \
+  system/contracts/trusted-sources.json \
   system/image/stage-package-ui-runtime.mjs \
   system/image/system-package-ui-runtime-provisioning.mjs; do
   [[ -f "$SOURCE_ROOT/$source_file" && ! -L "$SOURCE_ROOT/$source_file" ]] || {
@@ -100,7 +108,8 @@ ensure_exact_symlink() {
 }
 
 # VTE is the trusted Debian GTK4 terminal widget used by the first-party SWIR Terminal.
-# Node.js is the distro-managed runtime for the root-owned SWIR package transaction broker.
+# Node.js is the distro-managed runtime for the root-owned SWIR package transaction broker
+# and the read-only Driver Center diagnostic report adapter.
 # Both are installed only through the already-configured signed Debian repositories.
 RUNTIME_PACKAGES=(gir1.2-vte-3.91 libvte-2.91-gtk4-0 nodejs)
 RUNTIME_MISSING=0
@@ -138,6 +147,8 @@ install -d -m 0755 \
   "$(safe_target /etc/greetd)" \
   "$(safe_target /usr/local/bin)" \
   "$(safe_target /usr/local/lib/swir)" \
+  "$(safe_target /usr/local/lib/swir/hardware)" \
+  "$(safe_target /usr/local/lib/swir/contracts)" \
   "$(safe_target /usr/share/wayland-sessions)" \
   "$(safe_target /usr/share/plymouth/themes/swir)" \
   "$(safe_target /etc/systemd/system/graphical.target.wants)"
@@ -145,10 +156,12 @@ install -d -m 0755 \
 install -m 0755 "$SOURCE_ROOT/system/session/swir-session-launcher.sh" "$(safe_target /usr/local/bin/swir-session)"
 install -m 0755 "$SOURCE_ROOT/system/session/swir-shell.py" "$(safe_target /usr/local/bin/swir-shell)"
 install -m 0644 "$SOURCE_ROOT/system/apps/core_runtime.py" "$(safe_target /usr/local/lib/swir/core_runtime.py)"
+install -m 0644 "$SOURCE_ROOT/system/apps/hardware_center_runtime.py" "$(safe_target /usr/local/lib/swir/hardware_center_runtime.py)"
 install -m 0644 "$SOURCE_ROOT/system/apps/package_status_runtime.py" "$(safe_target /usr/local/lib/swir/package_status_runtime.py)"
 install -m 0644 "$SOURCE_ROOT/system/apps/package_transaction_client.py" "$(safe_target /usr/local/lib/swir/package_transaction_client.py)"
 install -m 0644 "$SOURCE_ROOT/system/apps/package_mutation_flow.py" "$(safe_target /usr/local/lib/swir/package_mutation_flow.py)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-files.py" "$(safe_target /usr/local/bin/swir-files)"
+install -m 0755 "$SOURCE_ROOT/system/apps/swir-hardware-center.py" "$(safe_target /usr/local/bin/swir-hardware-center)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-network-center.py" "$(safe_target /usr/local/bin/swir-network-center)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-notes.py" "$(safe_target /usr/local/bin/swir-notes)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-settings.py" "$(safe_target /usr/local/bin/swir-settings)"
@@ -156,11 +169,18 @@ install -m 0755 "$SOURCE_ROOT/system/apps/swir-software-center.py" "$(safe_targe
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-system-monitor.py" "$(safe_target /usr/local/bin/swir-system-monitor)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-terminal.py" "$(safe_target /usr/local/bin/swir-terminal)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-update-center.py" "$(safe_target /usr/local/bin/swir-update-center)"
+install -m 0644 "$SOURCE_ROOT/system/hardware/hardware-service.mjs" "$(safe_target /usr/local/lib/swir/hardware/hardware-service.mjs)"
+install -m 0644 "$SOURCE_ROOT/system/hardware/driver-resolver.mjs" "$(safe_target /usr/local/lib/swir/hardware/driver-resolver.mjs)"
+install -m 0644 "$SOURCE_ROOT/system/hardware/driver-center-service.mjs" "$(safe_target /usr/local/lib/swir/hardware/driver-center-service.mjs)"
+install -m 0644 "$SOURCE_ROOT/system/hardware/driver-center-report.mjs" "$(safe_target /usr/local/lib/swir/hardware/driver-center-report.mjs)"
+install -m 0644 "$SOURCE_ROOT/system/hardware/hardware-catalog.json" "$(safe_target /usr/local/lib/swir/hardware/hardware-catalog.json)"
+install -m 0644 "$SOURCE_ROOT/system/contracts/trusted-sources.json" "$(safe_target /usr/local/lib/swir/contracts/trusted-sources.json)"
 install -m 0644 "$SOURCE_ROOT/system/boot/plymouth/swir.plymouth" "$(safe_target /usr/share/plymouth/themes/swir/swir.plymouth)"
 install -m 0644 "$SOURCE_ROOT/system/boot/plymouth/swir.script" "$(safe_target /usr/share/plymouth/themes/swir/swir.script)"
 chroot "$ROOTFS" /usr/bin/python3 -m py_compile \
   /usr/local/bin/swir-shell \
   /usr/local/bin/swir-files \
+  /usr/local/bin/swir-hardware-center \
   /usr/local/bin/swir-network-center \
   /usr/local/bin/swir-notes \
   /usr/local/bin/swir-settings \
@@ -169,6 +189,7 @@ chroot "$ROOTFS" /usr/bin/python3 -m py_compile \
   /usr/local/bin/swir-terminal \
   /usr/local/bin/swir-update-center \
   /usr/local/lib/swir/core_runtime.py \
+  /usr/local/lib/swir/hardware_center_runtime.py \
   /usr/local/lib/swir/package_status_runtime.py \
   /usr/local/lib/swir/package_transaction_client.py \
   /usr/local/lib/swir/package_mutation_flow.py
@@ -231,6 +252,7 @@ fi
 
 verify_trusted_regular_file /usr/local/bin/swir-shell yes
 verify_trusted_regular_file /usr/local/bin/swir-files yes
+verify_trusted_regular_file /usr/local/bin/swir-hardware-center yes
 verify_trusted_regular_file /usr/local/bin/swir-network-center yes
 verify_trusted_regular_file /usr/local/bin/swir-notes yes
 verify_trusted_regular_file /usr/local/bin/swir-settings yes
@@ -239,6 +261,13 @@ verify_trusted_regular_file /usr/local/bin/swir-system-monitor yes
 verify_trusted_regular_file /usr/local/bin/swir-terminal yes
 verify_trusted_regular_file /usr/local/bin/swir-update-center yes
 verify_trusted_regular_file /usr/local/lib/swir/core_runtime.py no
+verify_trusted_regular_file /usr/local/lib/swir/hardware_center_runtime.py no
+verify_trusted_regular_file /usr/local/lib/swir/hardware/hardware-service.mjs no
+verify_trusted_regular_file /usr/local/lib/swir/hardware/driver-resolver.mjs no
+verify_trusted_regular_file /usr/local/lib/swir/hardware/driver-center-service.mjs no
+verify_trusted_regular_file /usr/local/lib/swir/hardware/driver-center-report.mjs no
+verify_trusted_regular_file /usr/local/lib/swir/hardware/hardware-catalog.json no
+verify_trusted_regular_file /usr/local/lib/swir/contracts/trusted-sources.json no
 verify_trusted_regular_file /usr/local/lib/swir/package_status_runtime.py no
 verify_trusted_regular_file /usr/local/lib/swir/package_transaction_client.py no
 verify_trusted_regular_file /usr/local/lib/swir/package_mutation_flow.py no
@@ -253,4 +282,4 @@ verify_trusted_regular_file /usr/libexec/swir/swir-peer-authorization-broker yes
   echo "SWIR package transaction broker service target is unexpected" >&2; exit 70;
 }
 
-printf 'SWIR graphical session staged: mode=%s theme=swir login=greetd compositor=weston native-shell=gtk4 native-apps=files,network,notes,settings,software,system-monitor,terminal,updates package-broker=peer-polkit-journaled\n' "$MODE"
+printf 'SWIR graphical session staged: mode=%s theme=swir login=greetd compositor=weston native-shell=gtk4 native-apps=files,hardware,network,notes,settings,software,system-monitor,terminal,updates package-broker=peer-polkit-journaled\n' "$MODE"
