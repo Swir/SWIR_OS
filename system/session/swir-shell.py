@@ -156,6 +156,7 @@ LAUNCHERS: Final = (
     ("Photo Studio", (("/usr/local/bin/swir-photo-studio",),)),
     ("PDF Viewer", (("/usr/local/bin/swir-pdf-viewer",),)),
     ("Archive Manager", (("/usr/local/bin/swir-files", "--archive-manager"),)),
+    ("Screenshot", (("/usr/local/bin/swir-screenshot",),)),
     ("Calculator", (("/usr/local/bin/swir-calculator",),)),
     ("Clock", (("/usr/local/bin/swir-clock",),)),
     ("Backup & Restore", (("/usr/local/bin/swir-backup",),)),

@@ -7,6 +7,10 @@ on:
       - 'system/apps/swir-screenshot.py'
       - 'system/apps/swir-screenshot.desktop'
       - 'system/tests/fake-screenshot-portal.py'
+      - 'system/session/swir-shell.py'
+      - 'system/session/swir-session-launcher.sh'
+      - 'system/session/provision-graphical-session.sh'
+      - 'system/e2e/debian13-graphical-session-vm-e2e.sh'
       - 'system/SWIR-NATIVE-SCREENSHOT-TOOL-0.1.md'
       - '.github/workflows/system-native-screenshot-tool.yml'
   pull_request:
@@ -14,6 +18,10 @@ on:
       - 'system/apps/swir-screenshot.py'
       - 'system/apps/swir-screenshot.desktop'
       - 'system/tests/fake-screenshot-portal.py'
+      - 'system/session/swir-shell.py'
+      - 'system/session/swir-session-launcher.sh'
+      - 'system/session/provision-graphical-session.sh'
+      - 'system/e2e/debian13-graphical-session-vm-e2e.sh'
       - 'system/SWIR-NATIVE-SCREENSHOT-TOOL-0.1.md'
       - '.github/workflows/system-native-screenshot-tool.yml'
   workflow_dispatch:
@@ -39,8 +47,9 @@ jobs:
       - name: Compile and verify screenshot policy
         run: |
           set -euo pipefail
-          python3 -m py_compile system/apps/swir-screenshot.py system/tests/fake-screenshot-portal.py
+          python3 -m py_compile system/apps/swir-screenshot.py system/tests/fake-screenshot-portal.py system/session/swir-shell.py
           python3 system/apps/swir-screenshot.py --self-test
+          bash -n system/session/swir-session-launcher.sh system/session/provision-graphical-session.sh system/e2e/debian13-graphical-session-vm-e2e.sh
           desktop-file-validate system/apps/swir-screenshot.desktop
           grep -F 'PORTAL_BUS: Final = "org.freedesktop.portal.Desktop"' system/apps/swir-screenshot.py >/dev/null
           grep -F 'PORTAL_IFACE: Final = "org.freedesktop.portal.Screenshot"' system/apps/swir-screenshot.py >/dev/null
@@ -49,6 +58,26 @@ jobs:
           grep -F 'MAX_PIXELS: Final = 40_000_000' system/apps/swir-screenshot.py >/dev/null
           ! grep -RE 'shell *= *True|os\.system\(|/dev/(fb|dri)|\b(grim|scrot|gnome-screenshot|spectacle|import)\b' system/apps/swir-screenshot.py
           ! grep -RE "/usr/bin/(sudo|pkexec|su)([[:space:]\"']|$)|/bin/su([[:space:]\"']|$)" system/apps/swir-screenshot.py
+
+  shipping-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify canonical image and shell integration
+        run: |
+          set -euo pipefail
+          grep -F '("Screenshot", (("/usr/local/bin/swir-screenshot",),))' system/session/swir-shell.py >/dev/null
+          grep -F 'system/apps/swir-screenshot.py' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'system/apps/swir-screenshot.desktop' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'install -m 0755 "$SOURCE_ROOT/system/apps/swir-screenshot.py" "$(safe_target /usr/local/bin/swir-screenshot)"' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'install -m 0644 "$SOURCE_ROOT/system/apps/swir-screenshot.desktop" "$(safe_target /usr/share/applications/swir-screenshot.desktop)"' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'verify_trusted_regular_file /usr/local/bin/swir-screenshot yes' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'verify_trusted_regular_file /usr/share/applications/swir-screenshot.desktop no' system/session/provision-graphical-session.sh >/dev/null
+          grep -F "assert {'Files', 'Terminal', 'Settings', 'Screenshot', 'Install SWIR OS'} <= set(shell.get('launcherEntries', []))" system/session/swir-session-launcher.sh >/dev/null
+          grep -F "assert 'Screenshot' in e['shell']['launcherEntries']" system/e2e/debian13-graphical-session-vm-e2e.sh >/dev/null
+          grep -F '[ -x /usr/local/bin/swir-screenshot ] || fail screenshot-tool-missing' system/e2e/debian13-graphical-session-vm-e2e.sh >/dev/null
+          ! grep -F 'system/tests/fake-screenshot-portal.py' system/session/provision-graphical-session.sh
 
   wayland-portal-runtime:
     runs-on: ubuntu-24.04

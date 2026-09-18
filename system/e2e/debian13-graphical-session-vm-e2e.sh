@@ -76,6 +76,15 @@ chroot "$ROOTFS" /usr/bin/systemd-machine-id-setup
 bash "$REPO_ROOT/system/session/provision-graphical-session.sh" \
   --rootfs "$ROOTFS" --source-root "$REPO_ROOT" --e2e
 
+[[ -x "$ROOTFS/usr/local/bin/swir-screenshot" && ! -L "$ROOTFS/usr/local/bin/swir-screenshot" ]] || {
+  echo "provisioned Screenshot Tool executable missing or unsafe" >&2; exit 7;
+}
+[[ -f "$ROOTFS/usr/share/applications/swir-screenshot.desktop" && ! -L "$ROOTFS/usr/share/applications/swir-screenshot.desktop" ]] || {
+  echo "provisioned Screenshot Tool desktop entry missing or unsafe" >&2; exit 7;
+}
+[[ "$(stat -c '%u' "$ROOTFS/usr/local/bin/swir-screenshot")" == 0 ]] || { echo "Screenshot Tool must be root-owned in image" >&2; exit 7; }
+[[ "$(stat -c '%u' "$ROOTFS/usr/share/applications/swir-screenshot.desktop")" == 0 ]] || { echo "Screenshot desktop entry must be root-owned in image" >&2; exit 7; }
+
 install -d -m 0700 "$ROOTFS/var/lib/swir/graphical-e2e"
 
 cat > "$ROOTFS/usr/local/lib/swir/plymouth-e2e-proof" <<'GUEST'
@@ -147,6 +156,8 @@ systemctl is-active --quiet swir-plymouth-e2e-proof.service || fail plymouth-pro
 ! grep -Fq '[initial_session]' /etc/greetd/config.toml || fail greetd-autologin-used
 [ -f /etc/pam.d/greetd ] || fail greetd-pam-missing
 grep -Fq 'greetd-e2e-greeter.py' /etc/greetd/config.toml || fail e2e-greeter-not-configured
+[ -x /usr/local/bin/swir-screenshot ] || fail screenshot-tool-missing
+[ -f /usr/share/applications/swir-screenshot.desktop ] || fail screenshot-desktop-entry-missing
 
 SESSION_SRC=''
 i=0
@@ -178,13 +189,13 @@ assert shell.get('applicationId') == 'dev.swir.Shell'
 assert shell.get('nativeToolkit') == 'gtk4' and shell.get('displayProtocol') == 'wayland'
 assert shell.get('windowMapped') is True and shell.get('fullscreenRequested') is True
 assert shell.get('privilegedOperationsInShell') is False
-assert {'Files', 'Terminal', 'Settings', 'Install SWIR OS'} <= set(shell.get('launcherEntries', []))
+assert {'Files', 'Terminal', 'Settings', 'Screenshot', 'Install SWIR OS'} <= set(shell.get('launcherEntries', []))
 assert session.get('desktopShellClaim') is True
 assert plymouth.get('selectedTheme') == 'swir' and plymouth.get('activeDuringBoot') is True
 PY
 
 printf 'PASS\n' > "$STATUS"
-serial 'SWIR_GRAPHICAL_E2E_PASS plymouth=swir login=greetd pam=true wayland=weston desktop-shell=true toolkit=gtk4'
+serial 'SWIR_GRAPHICAL_E2E_PASS plymouth=swir login=greetd pam=true wayland=weston desktop-shell=true toolkit=gtk4 screenshot=provisioned'
 sync
 systemctl --no-block poweroff
 GUEST
@@ -362,6 +373,7 @@ assert e['session']['waylandSocketObserved'] is True and e['session']['waylandCl
 assert e['shell']['applicationId'] == 'dev.swir.Shell' and e['shell']['nativeToolkit'] == 'gtk4'
 assert e['shell']['displayProtocol'] == 'wayland' and e['shell']['windowMapped'] is True
 assert e['shell']['privilegedOperationsInShell'] is False
+assert 'Screenshot' in e['shell']['launcherEntries']
 assert e['productionDefaults']['testCredentialEmbeddedInProductionImage'] is False
 assert e['desktopShellClaim'] is True and e['secureBootClaim'] is False and e['hardwareQualificationClaim'] is False
 PY
