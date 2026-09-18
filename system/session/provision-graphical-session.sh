@@ -19,6 +19,7 @@ done
 ROOTFS="$(readlink -f "$ROOTFS")"
 [[ "$(stat -c '%u' "$ROOTFS")" = 0 ]] || { echo "rootfs must be root-owned" >&2; exit 78; }
 (( (8#$(stat -c '%a' "$ROOTFS") & 8#022) == 0 )) || { echo "rootfs must not be group/world writable" >&2; exit 78; }
+command -v node >/dev/null || { echo "host node runtime is required to stage the SWIR package UI runtime" >&2; exit 69; }
 
 if [[ -z "$SOURCE_ROOT" ]]; then
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -32,6 +33,8 @@ for source_file in \
   system/session/swir-shell.py \
   system/apps/core_runtime.py \
   system/apps/package_status_runtime.py \
+  system/apps/package_transaction_client.py \
+  system/apps/package_mutation_flow.py \
   system/apps/swir-files.py \
   system/apps/swir-network-center.py \
   system/apps/swir-notes.py \
@@ -39,7 +42,9 @@ for source_file in \
   system/apps/swir-software-center.py \
   system/apps/swir-system-monitor.py \
   system/apps/swir-terminal.py \
-  system/apps/swir-update-center.py; do
+  system/apps/swir-update-center.py \
+  system/image/stage-package-ui-runtime.mjs \
+  system/image/system-package-ui-runtime-provisioning.mjs; do
   [[ -f "$SOURCE_ROOT/$source_file" && ! -L "$SOURCE_ROOT/$source_file" ]] || {
     echo "required trusted source file missing or symlinked: $source_file" >&2
     exit 69
@@ -95,23 +100,24 @@ ensure_exact_symlink() {
 }
 
 # VTE is the trusted Debian GTK4 terminal widget used by the first-party SWIR Terminal.
-# Install it only through the already-configured signed APT repositories when absent.
-VTE_PACKAGES=(gir1.2-vte-3.91 libvte-2.91-gtk4-0)
-VTE_MISSING=0
-for pkg in "${VTE_PACKAGES[@]}"; do
-  chroot "$ROOTFS" dpkg-query -W -f='${db:Status-Abbrev}' "$pkg" 2>/dev/null | grep -qx 'ii ' || VTE_MISSING=1
+# Node.js is the distro-managed runtime for the root-owned SWIR package transaction broker.
+# Both are installed only through the already-configured signed Debian repositories.
+RUNTIME_PACKAGES=(gir1.2-vte-3.91 libvte-2.91-gtk4-0 nodejs)
+RUNTIME_MISSING=0
+for pkg in "${RUNTIME_PACKAGES[@]}"; do
+  chroot "$ROOTFS" dpkg-query -W -f='${db:Status-Abbrev}' "$pkg" 2>/dev/null | grep -qx 'ii ' || RUNTIME_MISSING=1
 done
-if [[ $VTE_MISSING -eq 1 ]]; then
-  chroot "$ROOTFS" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${VTE_PACKAGES[@]}"
+if [[ $RUNTIME_MISSING -eq 1 ]]; then
+  chroot "$ROOTFS" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${RUNTIME_PACKAGES[@]}"
 fi
 
-for pkg in greetd weston plymouth plymouth-themes wayland-utils dbus-user-session python3 python3-gi gir1.2-gtk-4.0 gir1.2-vte-3.91 libvte-2.91-gtk4-0 network-manager; do
+for pkg in greetd weston plymouth plymouth-themes wayland-utils dbus-user-session python3 python3-gi gir1.2-gtk-4.0 gir1.2-vte-3.91 libvte-2.91-gtk4-0 network-manager nodejs; do
   chroot "$ROOTFS" dpkg-query -W -f='${db:Status-Abbrev}' "$pkg" 2>/dev/null | grep -qx 'ii ' || {
-    echo "required graphical package is not installed: $pkg" >&2
+    echo "required graphical/runtime package is not installed: $pkg" >&2
     exit 69
   }
 done
-for file in /usr/sbin/greetd /usr/sbin/agreety /usr/bin/weston /usr/bin/wayland-info /usr/bin/plymouth /usr/sbin/plymouth-set-default-theme /usr/bin/python3.13 /usr/bin/nmcli /usr/bin/apt-cache /usr/bin/apt-get /usr/bin/dpkg-query; do
+for file in /usr/sbin/greetd /usr/sbin/agreety /usr/bin/weston /usr/bin/wayland-info /usr/bin/plymouth /usr/sbin/plymouth-set-default-theme /usr/bin/python3.13 /usr/bin/node /usr/bin/nmcli /usr/bin/apt-cache /usr/bin/apt-get /usr/bin/dpkg-query; do
   verify_trusted_regular_file "$file" yes
 done
 [[ -L "$ROOTFS/usr/bin/python3" && "$(readlink "$ROOTFS/usr/bin/python3")" == python3.13 ]] || {
@@ -120,6 +126,13 @@ done
 }
 verify_trusted_regular_file /usr/lib/systemd/system/greetd.service no
 verify_trusted_regular_file /usr/lib/systemd/system/graphical.target no
+
+# Stage the root-owned broker, peer-credential authorization service, signed
+# Debian repository policy and the broker's exact Node module dependency set.
+node "$SOURCE_ROOT/system/image/stage-package-ui-runtime.mjs" \
+  --rootfs "$ROOTFS" \
+  --source-root "$SOURCE_ROOT" \
+  --production
 
 install -d -m 0755 \
   "$(safe_target /etc/greetd)" \
@@ -133,6 +146,8 @@ install -m 0755 "$SOURCE_ROOT/system/session/swir-session-launcher.sh" "$(safe_t
 install -m 0755 "$SOURCE_ROOT/system/session/swir-shell.py" "$(safe_target /usr/local/bin/swir-shell)"
 install -m 0644 "$SOURCE_ROOT/system/apps/core_runtime.py" "$(safe_target /usr/local/lib/swir/core_runtime.py)"
 install -m 0644 "$SOURCE_ROOT/system/apps/package_status_runtime.py" "$(safe_target /usr/local/lib/swir/package_status_runtime.py)"
+install -m 0644 "$SOURCE_ROOT/system/apps/package_transaction_client.py" "$(safe_target /usr/local/lib/swir/package_transaction_client.py)"
+install -m 0644 "$SOURCE_ROOT/system/apps/package_mutation_flow.py" "$(safe_target /usr/local/lib/swir/package_mutation_flow.py)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-files.py" "$(safe_target /usr/local/bin/swir-files)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-network-center.py" "$(safe_target /usr/local/bin/swir-network-center)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-notes.py" "$(safe_target /usr/local/bin/swir-notes)"
@@ -154,7 +169,9 @@ chroot "$ROOTFS" /usr/bin/python3 -m py_compile \
   /usr/local/bin/swir-terminal \
   /usr/local/bin/swir-update-center \
   /usr/local/lib/swir/core_runtime.py \
-  /usr/local/lib/swir/package_status_runtime.py
+  /usr/local/lib/swir/package_status_runtime.py \
+  /usr/local/lib/swir/package_transaction_client.py \
+  /usr/local/lib/swir/package_mutation_flow.py
 
 cat > "$(safe_target /usr/share/wayland-sessions/swir.desktop)" <<'EOF'
 [Desktop Entry]
@@ -223,5 +240,17 @@ verify_trusted_regular_file /usr/local/bin/swir-terminal yes
 verify_trusted_regular_file /usr/local/bin/swir-update-center yes
 verify_trusted_regular_file /usr/local/lib/swir/core_runtime.py no
 verify_trusted_regular_file /usr/local/lib/swir/package_status_runtime.py no
+verify_trusted_regular_file /usr/local/lib/swir/package_transaction_client.py no
+verify_trusted_regular_file /usr/local/lib/swir/package_mutation_flow.py no
+verify_trusted_regular_file /usr/lib/swir/package-broker/ipc/swir-package-transaction-broker.mjs no
+verify_trusted_regular_file /usr/lib/systemd/system/swir-package-transaction.service no
+verify_trusted_regular_file /usr/libexec/swir/swir-peer-authorization-broker yes
 
-echo "SWIR graphical session staged: mode=$MODE theme=swir login=greetd compositor=weston native-shell=gtk4 native-apps=files,network,notes,settings,software,system-monitor,terminal,updates"
+[[ -L "$ROOTFS/etc/systemd/system/multi-user.target.wants/swir-package-transaction.service" ]] || {
+  echo "SWIR package transaction broker service is not enabled" >&2; exit 70;
+}
+[[ "$(readlink "$ROOTFS/etc/systemd/system/multi-user.target.wants/swir-package-transaction.service")" == /usr/lib/systemd/system/swir-package-transaction.service ]] || {
+  echo "SWIR package transaction broker service target is unexpected" >&2; exit 70;
+}
+
+printf 'SWIR graphical session staged: mode=%s theme=swir login=greetd compositor=weston native-shell=gtk4 native-apps=files,network,notes,settings,software,system-monitor,terminal,updates package-broker=peer-polkit-journaled\n' "$MODE"
