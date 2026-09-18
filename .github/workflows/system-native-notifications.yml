@@ -66,11 +66,15 @@ jobs:
           export WAYLAND_DISPLAY=wayland-swir-notifications
           export GDK_BACKEND=wayland
 
-          weston --backend=headless-backend.so --socket="$WAYLAND_DISPLAY" --idle-time=0 --log="$RUNTIME/weston.log" &
+          weston --backend=headless-backend.so --renderer=pixman --socket="$WAYLAND_DISPLAY" --idle-time=0 --log="$RUNTIME/weston.log" &
           WESTON_PID=$!
           cleanup() {
             kill "$WESTON_PID" 2>/dev/null || true
             wait "$WESTON_PID" 2>/dev/null || true
+            if [[ -s "$RUNTIME/weston.log" ]]; then
+              echo '--- weston.log ---'
+              cat "$RUNTIME/weston.log"
+            fi
           }
           trap cleanup EXIT
           for _ in $(seq 1 80); do
@@ -82,17 +86,26 @@ jobs:
 
           dbus-run-session -- bash -euo pipefail -c '
             export LIBGL_ALWAYS_SOFTWARE=1
+            export GSK_RENDERER=cairo
             export GTK_A11Y=none
             export SWIR_SHELL_E2E=1
             export SWIR_SHELL_EVIDENCE_PATH="$XDG_RUNTIME_DIR/shell.json"
             export SWIR_NOTIFICATION_E2E=1
             export SWIR_NOTIFICATION_EVIDENCE_PATH="$XDG_RUNTIME_DIR/notification.json"
 
-            python3 system/session/swir-shell.py &
+            python3 system/session/swir-shell.py >"$XDG_RUNTIME_DIR/shell.out" 2>"$XDG_RUNTIME_DIR/shell.err" &
             SHELL_PID=$!
             cleanup_shell() {
               kill "$SHELL_PID" 2>/dev/null || true
               wait "$SHELL_PID" 2>/dev/null || true
+              if [[ -s "$XDG_RUNTIME_DIR/shell.out" ]]; then
+                echo '"'"'--- shell.out ---'"'"'
+                cat "$XDG_RUNTIME_DIR/shell.out"
+              fi
+              if [[ -s "$XDG_RUNTIME_DIR/shell.err" ]]; then
+                echo '"'"'--- shell.err ---'"'"'
+                cat "$XDG_RUNTIME_DIR/shell.err"
+              fi
             }
             trap cleanup_shell EXIT
 
