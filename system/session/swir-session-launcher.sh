@@ -88,7 +88,7 @@ assert shell.get('windowMapped') is True
 assert shell.get('fullscreenRequested') is True
 assert shell.get('launcherProbePassed') is True
 assert shell.get('privilegedOperationsInShell') is False
-assert {'Files', 'Terminal', 'Settings', 'Install SWIR OS'} <= set(shell.get('launcherEntries', []))
+assert {'Files', 'Terminal', 'Settings', 'Screenshot', 'Install SWIR OS'} <= set(shell.get('launcherEntries', []))
 PY
 
   SESSION_ID="${XDG_SESSION_ID:-}"
