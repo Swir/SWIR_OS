@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=SWIR Archive Manager
+Comment=Inspect and safely extract local ZIP and TAR archives
+Exec=/usr/local/bin/swir-archive-manager %F
+TryExec=/usr/local/bin/swir-archive-manager
+Icon=package-x-generic
+Terminal=false
+Categories=Utility;FileTools;Archiving;
+MimeType=application/zip;application/x-tar;application/gzip;application/x-bzip2;application/x-xz;
+StartupNotify=true
+X-GNOME-UsesNotifications=false
