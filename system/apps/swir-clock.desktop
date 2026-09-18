@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=SWIR Clock
+Comment=Native clock, alarms and calendar basics for SWIR OS
+Exec=/usr/local/bin/swir-clock
+TryExec=/usr/local/bin/swir-clock
+Icon=org.gnome.clocks
+Terminal=false
+Categories=Utility;Clock;
+StartupNotify=true

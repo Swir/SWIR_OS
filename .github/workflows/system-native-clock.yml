@@ -1,0 +1,131 @@
+name: System Native Clock
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'system/apps/swir-clock.py'
+      - 'system/apps/swir-clock.desktop'
+      - 'system/session/swir-shell.py'
+      - 'system/session/provision-graphical-session.sh'
+      - 'system/SWIR-NATIVE-CLOCK-0.1.md'
+      - '.github/workflows/system-native-clock.yml'
+  pull_request:
+    paths:
+      - 'system/apps/swir-clock.py'
+      - 'system/apps/swir-clock.desktop'
+      - 'system/session/swir-shell.py'
+      - 'system/session/provision-graphical-session.sh'
+      - 'system/SWIR-NATIVE-CLOCK-0.1.md'
+      - '.github/workflows/system-native-clock.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: system-native-clock-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install static Clock dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends desktop-file-utils python3-gi gir1.2-gtk-4.0
+      - name: Compile and verify Clock safety contract
+        run: |
+          set -euo pipefail
+          python3 -m py_compile system/apps/swir-clock.py system/session/swir-shell.py
+          python3 system/apps/swir-clock.py --self-test
+          desktop-file-validate system/apps/swir-clock.desktop
+          bash -n system/session/provision-graphical-session.sh
+          grep -F 'Clock", (("/usr/local/bin/swir-clock",)' system/session/swir-shell.py >/dev/null
+          grep -F 'system/apps/swir-clock.py' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'system/apps/swir-clock.desktop' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'MAX_ALARMS: Final = 32' system/apps/swir-clock.py >/dev/null
+          grep -F 'MAX_LABEL_CHARS: Final = 80' system/apps/swir-clock.py >/dev/null
+          ! grep -RE 'shell *= *True|os\.system\(|subprocess\.' system/apps/swir-clock.py
+          ! grep -RE "/usr/bin/(sudo|pkexec|su)([[:space:]\"']|$)|/bin/su([[:space:]\"']|$)" system/apps/swir-clock.py
+
+  wayland-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install controlled GTK4 and Wayland runtime
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends weston dbus-daemon desktop-file-utils python3-gi gir1.2-gtk-4.0
+          sudo install -m 0755 system/apps/swir-clock.py /usr/local/bin/swir-clock
+          sudo install -m 0644 system/apps/swir-clock.desktop /usr/share/applications/swir-clock.desktop
+          sudo update-desktop-database /usr/share/applications
+          python3 system/apps/swir-clock.py --self-test
+      - name: Map Clock on Wayland and verify local utility path
+        run: |
+          set -euo pipefail
+          RUNTIME="${{ runner.temp }}/swir-clock-runtime"
+          mkdir -p "$RUNTIME"
+          chmod 0700 "$RUNTIME"
+          export XDG_RUNTIME_DIR="$RUNTIME"
+          export WAYLAND_DISPLAY=wayland-swir-clock
+          export GDK_BACKEND=wayland
+
+          weston --backend=headless-backend.so --socket="$WAYLAND_DISPLAY" --idle-time=0 --log="$RUNTIME/weston.log" &
+          WESTON_PID=$!
+          cleanup() { kill "$WESTON_PID" 2>/dev/null || true; wait "$WESTON_PID" 2>/dev/null || true; }
+          trap cleanup EXIT
+          for _ in $(seq 1 80); do
+            [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]] && break
+            kill -0 "$WESTON_PID"
+            sleep 0.25
+          done
+          [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]]
+
+          timeout --signal=TERM --kill-after=5s 25s dbus-run-session -- \
+            env LIBGL_ALWAYS_SOFTWARE=1 GTK_A11Y=none SWIR_APP_E2E=1 \
+                SWIR_APP_EVIDENCE_PATH="$RUNTIME/clock.json" \
+            python3 system/apps/swir-clock.py
+
+          python3 - "$RUNTIME/clock.json" <<'PY'
+          import json, sys
+          evidence = json.load(open(sys.argv[1], encoding='utf-8'))
+          assert evidence['schema'] == 'swir.native-clock-runtime-evidence/0.1'
+          assert evidence['passed'] is True
+          assert evidence['applicationId'] == 'dev.swir.Clock'
+          assert evidence['nativeToolkit'] == 'gtk4'
+          assert evidence['displayProtocol'] == 'wayland' and evidence['windowMapped'] is True
+          assert evidence['localTimeAvailable'] is True and evidence['calendarAvailable'] is True
+          assert evidence['alarmValidationPassed'] is True and evidence['alarmLimit'] == 32
+          assert evidence['alarmBackgroundServiceClaimed'] is False
+          assert evidence['networkAccess'] is False and evidence['privilegedOperations'] is False
+          assert evidence['selfUpdater'] is False
+          PY
+
+  debian13-target-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    container:
+      image: debian:trixie-slim
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify exact System Edition GTK4 target runtime
+        run: |
+          set -euo pipefail
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends desktop-file-utils python3 python3-gi gir1.2-gtk-4.0
+          python3 system/apps/swir-clock.py --self-test
+          desktop-file-validate system/apps/swir-clock.desktop
+          python3 - <<'PY'
+          import gi
+          gi.require_version('Gtk', '4.0')
+          from gi.repository import Gtk
+          assert Gtk.get_major_version() == 4
+          print('Debian 13 Clock target runtime: OK')
+          PY

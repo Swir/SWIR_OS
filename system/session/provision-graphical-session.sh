@@ -46,6 +46,8 @@ for source_file in \
   system/apps/swir-pdf-viewer.desktop \
   system/apps/swir-calculator.py \
   system/apps/swir-calculator.desktop \
+  system/apps/swir-clock.py \
+  system/apps/swir-clock.desktop \
   system/apps/swir-files.py \
   system/apps/swir-hardware-center.py \
   system/apps/swir-network-center.py \
@@ -193,6 +195,8 @@ install -m 0755 "$SOURCE_ROOT/system/apps/swir-pdf-viewer.py" "$(safe_target /us
 install -m 0644 "$SOURCE_ROOT/system/apps/swir-pdf-viewer.desktop" "$(safe_target /usr/share/applications/swir-pdf-viewer.desktop)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-calculator.py" "$(safe_target /usr/local/bin/swir-calculator)"
 install -m 0644 "$SOURCE_ROOT/system/apps/swir-calculator.desktop" "$(safe_target /usr/share/applications/swir-calculator.desktop)"
+install -m 0755 "$SOURCE_ROOT/system/apps/swir-clock.py" "$(safe_target /usr/local/bin/swir-clock)"
+install -m 0644 "$SOURCE_ROOT/system/apps/swir-clock.desktop" "$(safe_target /usr/share/applications/swir-clock.desktop)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-files.py" "$(safe_target /usr/local/bin/swir-files)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-hardware-center.py" "$(safe_target /usr/local/bin/swir-hardware-center)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-network-center.py" "$(safe_target /usr/local/bin/swir-network-center)"
@@ -217,6 +221,7 @@ chroot "$ROOTFS" /usr/bin/python3 -m py_compile \
   /usr/local/bin/swir-photo-studio \
   /usr/local/bin/swir-pdf-viewer \
   /usr/local/bin/swir-calculator \
+  /usr/local/bin/swir-clock \
   /usr/local/bin/swir-files \
   /usr/local/bin/swir-hardware-center \
   /usr/local/bin/swir-network-center \
@@ -300,6 +305,8 @@ verify_trusted_regular_file /usr/local/bin/swir-pdf-viewer yes
 verify_trusted_regular_file /usr/share/applications/swir-pdf-viewer.desktop no
 verify_trusted_regular_file /usr/local/bin/swir-calculator yes
 verify_trusted_regular_file /usr/share/applications/swir-calculator.desktop no
+verify_trusted_regular_file /usr/local/bin/swir-clock yes
+verify_trusted_regular_file /usr/share/applications/swir-clock.desktop no
 verify_trusted_regular_file /usr/local/bin/swir-files yes
 verify_trusted_regular_file /usr/local/bin/swir-hardware-center yes
 verify_trusted_regular_file /usr/local/bin/swir-network-center yes
@@ -331,4 +338,4 @@ verify_trusted_regular_file /usr/libexec/swir/swir-peer-authorization-broker yes
   echo "SWIR package transaction broker service target is unexpected" >&2; exit 70;
 }
 
-printf 'SWIR graphical session staged: mode=%s theme=swir login=greetd compositor=weston native-shell=gtk4 native-apps=browser,player,photo-studio,pdf-viewer,calculator,files,hardware,network,notes,settings,software,system-monitor,terminal,updates package-broker=peer-polkit-journaled\n' "$MODE"
+printf 'SWIR graphical session staged: mode=%s theme=swir login=greetd compositor=weston native-shell=gtk4 native-apps=browser,player,photo-studio,pdf-viewer,calculator,clock,files,hardware,network,notes,settings,software,system-monitor,terminal,updates package-broker=peer-polkit-journaled\n' "$MODE"
