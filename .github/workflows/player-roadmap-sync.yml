@@ -1,0 +1,86 @@
+name: Player Roadmap Sync
+
+on:
+  push:
+    branches: [docs/player-roadmap-sync]
+    paths:
+      - '.github/workflows/player-roadmap-sync.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: docs/player-roadmap-sync
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Record verified Player milestone and regenerate SVG progress
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          architecture = Path('SWIR-OS-ARCHITECTURE.md')
+          text = architecture.read_text(encoding='utf-8')
+          replacements = {
+              'ROADMAP-80.0%25-': 'ROADMAP-81.5%25-',
+              'DONE-52%2F65-': 'DONE-53%2F65-',
+              'SWIR OS roadmap progress — 80.0%, 52 of 65 verified deliverables': 'SWIR OS roadmap progress — 81.5%, 53 of 65 verified deliverables',
+              '| **52** | **13** | **65** | **80.0%** |': '| **53** | **12** | **65** | **81.5%** |',
+              '- [ ] native SWIR Player with library/playlists/media-key/notification integration': '- [x] native SWIR Player with library/playlists/media-key/notification integration',
+          }
+          for old, new in replacements.items():
+              if text.count(old) != 1:
+                  raise SystemExit(f'architecture anchor count for {old!r}: {text.count(old)}')
+              text = text.replace(old, new, 1)
+          browser_paragraph = ('The first-party SWIR Browser milestone is now verified on the native GTK4/WebKitGTK 6.0 path with tabs, bounded owner-only history/bookmarks, downloads, ephemeral private tabs, explicit permission prompts, Default Apps integration and approved alternative-browser handoff through Software Center. This closes the dedicated Browser roadmap item, not the broader daily-use suite.\n')
+          player_paragraph = ('\nThe first-party SWIR Player milestone is now verified on the native GTK4/GStreamer path for local audio/video playback, with bounded owner-only library and playlist persistence, MPRIS2 media-key integration, Gio notifications, desktop MIME integration and the distro-managed Debian 13 GStreamer runtime. Its dedicated Wayland gate maps the real GTK4 window and prerolls generated local media, while the Debian 13 target gate verifies the GTK4 video sink. The player remains unprivileged and has no self-updater or direct package mutation. This closes the dedicated Player roadmap item only; the broader daily-use suite, including the remaining media/document utilities, is still open.\n')
+          if text.count(browser_paragraph) != 1:
+              raise SystemExit(f'Browser milestone anchor count: {text.count(browser_paragraph)}')
+          text = text.replace(browser_paragraph, browser_paragraph + player_paragraph, 1)
+          architecture.write_text(text, encoding='utf-8')
+
+          readme = Path('README.md')
+          text = readme.read_text(encoding='utf-8')
+          replacements = {
+              'ROADMAP-80.0%25-': 'ROADMAP-81.5%25-',
+              'DONE-52%2F65-': 'DONE-53%2F65-',
+              'SWIR OS roadmap progress — 80.0%, 52 of 65 verified deliverables': 'SWIR OS roadmap progress — 81.5%, 53 of 65 verified deliverables',
+              '**Measured scope:** full Web → Desktop → System `Version roadmap`. **Project progress:** 52/65 = **80.0%**.': '**Measured scope:** full Web → Desktop → System `Version roadmap`. **Project progress:** 53/65 = **81.5%**.',
+              '**52 of 65 measurable roadmap deliverables are complete.**': '**53 of 65 measurable roadmap deliverables are complete.**',
+          }
+          for old, new in replacements.items():
+              if text.count(old) != 1:
+                  raise SystemExit(f'README anchor count for {old!r}: {text.count(old)}')
+              text = text.replace(old, new, 1)
+          browser_row = '| 🌍 **Native browser** | SWIR Browser now runs natively on GTK4/WebKitGTK 6.0 with tabs, bounded owner-only history/bookmarks, downloads, ephemeral private tabs, explicit permission prompts, Default Apps integration and approved alternative-browser handoff through Software Center. |\n'
+          player_row = '| 🎵 **Native Player** | SWIR Player now runs natively on GTK4/GStreamer for local audio/video, with bounded owner-only library/playlists, MPRIS2 media-key integration, Gio notifications, desktop MIME integration and separately verified Debian 13 GTK4 GStreamer runtime. It remains unprivileged and has no self-updater or direct package mutation. |\n'
+          if text.count(browser_row) != 1:
+              raise SystemExit(f'README Browser row anchor count: {text.count(browser_row)}')
+          text = text.replace(browser_row, browser_row + player_row, 1)
+          readme.write_text(text, encoding='utf-8')
+          PY
+          node scripts/generate-readme-progress.mjs
+          node scripts/generate-readme-progress.mjs --check
+          node scripts/validate-roadmap-progress.mjs
+          git diff --check
+      - name: Commit synchronized roadmap documentation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add SWIR-OS-ARCHITECTURE.md README.md assets/readme/progress-card.svg assets/readme/progress-mini.svg assets/readme/progress-template.svg
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m 'docs: record verified native Player milestone'
+          git push origin HEAD:docs/player-roadmap-sync
