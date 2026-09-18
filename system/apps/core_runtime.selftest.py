@@ -6,7 +6,7 @@ import os
 import pathlib
 import tempfile
 
-from core_runtime import SETTINGS_SCHEMA, UserSettingsStore, list_directory, resolve_directory, validate_settings
+from core_runtime import DEFAULT_THEME_ID, SETTINGS_SCHEMA, UserSettingsStore, list_directory, resolve_directory, validate_settings
 
 
 def expect_error(callable_obj, expected: type[BaseException]) -> None:
@@ -39,13 +39,21 @@ def main() -> None:
         assert ".hidden.txt" in [row.name for row in list_directory(home, include_hidden=True)]
 
         store = UserSettingsStore(root / "config")
-        assert store.load()["schema"] == SETTINGS_SCHEMA
-        saved = store.save({"appearance": "system", "language": "pl-PL", "clock24h": False})
+        defaults = store.load()
+        assert defaults["schema"] == SETTINGS_SCHEMA
+        assert defaults["themeId"] == DEFAULT_THEME_ID
+        saved = store.save({
+            "appearance": "system",
+            "language": "pl-PL",
+            "clock24h": False,
+            "themeId": "swir.midnight",
+        })
         assert saved == {
             "schema": SETTINGS_SCHEMA,
             "appearance": "system",
             "language": "pl-PL",
             "clock24h": False,
+            "themeId": "swir.midnight",
         }
         assert store.load() == saved
         assert (store.path.stat().st_mode & 0o777) == 0o600
@@ -54,6 +62,12 @@ def main() -> None:
         expect_error(lambda: validate_settings({"appearance": "neon-random"}), ValueError)
         expect_error(lambda: validate_settings({"language": "../../bad"}), ValueError)
         expect_error(lambda: validate_settings({"clock24h": "yes"}), ValueError)
+        expect_error(lambda: validate_settings({"themeId": "../../bad"}), ValueError)
+
+        # Existing schema-0.1 settings that predate themes remain compatible and
+        # get the accessibility-safe built-in default theme automatically.
+        legacy = validate_settings({"appearance": "dark", "language": "en", "clock24h": True})
+        assert legacy["themeId"] == DEFAULT_THEME_ID
 
         store.path.write_text(json.dumps({"schema": "future/9"}), encoding="utf-8")
         expect_error(store.load, ValueError)
