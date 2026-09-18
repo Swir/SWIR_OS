@@ -1,0 +1,156 @@
+name: System Native Player
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'system/apps/swir-player.py'
+      - 'system/apps/swir-player.desktop'
+      - 'system/session/swir-shell.py'
+      - 'system/session/provision-graphical-session.sh'
+      - 'system/SWIR-NATIVE-CORE-APPS-0.1.md'
+      - '.github/workflows/system-native-player.yml'
+  pull_request:
+    paths:
+      - 'system/apps/swir-player.py'
+      - 'system/apps/swir-player.desktop'
+      - 'system/session/swir-shell.py'
+      - 'system/session/provision-graphical-session.sh'
+      - 'system/SWIR-NATIVE-CORE-APPS-0.1.md'
+      - '.github/workflows/system-native-player.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: system-native-player-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install static contract dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends desktop-file-utils
+      - name: Compile and verify Player integration policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile system/apps/swir-player.py system/session/swir-shell.py
+          desktop-file-validate system/apps/swir-player.desktop
+          bash -n system/session/provision-graphical-session.sh
+          grep -F 'Player", (("/usr/local/bin/swir-player",)' system/session/swir-shell.py >/dev/null
+          grep -F 'system/apps/swir-player.py' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'system/apps/swir-player.desktop' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'gir1.2-gstreamer-1.0' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'gstreamer1.0-gtk4' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'MPRIS_NAME: Final = "org.mpris.MediaPlayer2.swir"' system/apps/swir-player.py >/dev/null
+          grep -F 'remoteUriInputAccepted": False' system/apps/swir-player.py >/dev/null
+          grep -F 'codecUpdatePath": "system-package-update-center"' system/apps/swir-player.py >/dev/null
+          ! grep -RE 'shell *= *True|os\.system\(' system/apps/swir-player.py
+          ! grep -RE "/usr/bin/(sudo|pkexec|su)([[:space:]\"']|$)|/bin/su([[:space:]\"']|$)" system/apps/swir-player.py
+
+  debian13-wayland-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    container:
+      image: debian:trixie-slim
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install exact Debian 13 GTK4/GStreamer runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ca-certificates dbus-daemon desktop-file-utils weston \
+            python3 python3-gi gir1.2-gtk-4.0 gir1.2-gstreamer-1.0 \
+            gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+            gstreamer1.0-gtk4
+          install -m 0755 system/apps/swir-player.py /usr/local/bin/swir-player
+          install -m 0644 system/apps/swir-player.desktop /usr/share/applications/swir-player.desktop
+          update-desktop-database /usr/share/applications
+          python3 system/apps/swir-player.py --self-test
+      - name: Map Player, preroll local media and verify runtime evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUNTIME="${{ runner.temp }}/swir-player-runtime"
+          CONFIG="${{ runner.temp }}/swir-player-config"
+          DATA="${{ runner.temp }}/swir-player-data"
+          mkdir -p "$RUNTIME" "$CONFIG" "$DATA"
+          chmod 0700 "$RUNTIME" "$CONFIG" "$DATA"
+          export XDG_RUNTIME_DIR="$RUNTIME"
+          export XDG_CONFIG_HOME="$CONFIG"
+          export XDG_DATA_HOME="$DATA"
+          export WAYLAND_DISPLAY=wayland-swir-player
+          export GDK_BACKEND=wayland
+          export PYTHONPATH="$GITHUB_WORKSPACE/system/apps"
+
+          python3 - "$RUNTIME/e2e.wav" <<'PY'
+          import math, struct, sys, wave
+          path = sys.argv[1]
+          rate = 8000
+          with wave.open(path, 'wb') as handle:
+              handle.setnchannels(1)
+              handle.setsampwidth(2)
+              handle.setframerate(rate)
+              frames = [int(5000 * math.sin(2 * math.pi * 440 * i / rate)) for i in range(rate // 2)]
+              handle.writeframes(b''.join(struct.pack('<h', value) for value in frames))
+          PY
+
+          weston --backend=headless-backend.so --socket="$WAYLAND_DISPLAY" --idle-time=0 --log="$RUNTIME/weston.log" &
+          WESTON_PID=$!
+          cleanup() { kill "$WESTON_PID" 2>/dev/null || true; wait "$WESTON_PID" 2>/dev/null || true; }
+          trap cleanup EXIT
+          for _ in $(seq 1 80); do
+            [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]] && break
+            kill -0 "$WESTON_PID"
+            sleep 0.25
+          done
+          [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]]
+
+          timeout --signal=TERM --kill-after=5s 30s \
+            dbus-run-session -- \
+            env LIBGL_ALWAYS_SOFTWARE=1 GTK_A11Y=none \
+                SWIR_APP_E2E=1 \
+                SWIR_APP_EVIDENCE_PATH="$RUNTIME/player.json" \
+                SWIR_PLAYER_E2E_MEDIA="$RUNTIME/e2e.wav" \
+            python3 system/apps/swir-player.py
+
+          python3 - "$RUNTIME/player.json" "$DATA/swir/player/library.json" <<'PY'
+          import json, pathlib, stat, sys
+          evidence = json.load(open(sys.argv[1], encoding='utf-8'))
+          library = json.load(open(sys.argv[2], encoding='utf-8'))
+          library_path = pathlib.Path(sys.argv[2])
+          assert evidence['schema'] == 'swir.native-player-runtime-evidence/0.1'
+          assert evidence['passed'] is True and evidence['applicationId'] == 'dev.swir.Player'
+          assert evidence['nativeToolkit'] == 'gtk4-gstreamer'
+          assert evidence['displayProtocol'] == 'wayland' and evidence['windowMapped'] is True
+          assert evidence['gstreamerPlaybin'] is True and evidence['gstreamerGtk4VideoSinkAvailable'] is True
+          assert evidence['pipelinePrerollPassed'] is True
+          assert evidence['localFilesOnly'] is True and evidence['remoteUriInputAccepted'] is False
+          assert evidence['libraryPersistent'] is True and evidence['libraryRowsBounded'] == 1000
+          assert evidence['playlistPersistent'] is True and evidence['playlistCountBounded'] == 100
+          assert evidence['playlistRowsBounded'] == 500
+          assert evidence['mpris2MediaKeyIntegration'] is True
+          assert evidence['mprisBusName'] == 'org.mpris.MediaPlayer2.swir'
+          assert evidence['notificationIntegration'] is True
+          assert evidence['ownerOnlyLibraryFile'] is True and evidence['atomicPersistence'] is True
+          assert evidence['privilegedOperations'] is False and evidence['selfUpdater'] is False
+          assert evidence['codecUpdatePath'] == 'system-package-update-center'
+          assert library['schema'] == 'swir.player-library/0.1'
+          assert len(library['tracks']) == 1
+          assert library['playlists']['E2E Playlist'] == [library['tracks'][0]['path']]
+          assert stat.S_IMODE(library_path.stat().st_mode) == 0o600
+          assert stat.S_IMODE(library_path.parent.stat().st_mode) == 0o700
+          PY
+
+          gio mime audio/mpeg | grep -F 'swir-player.desktop' >/dev/null
