@@ -20,7 +20,9 @@ from typing import Final
 SETTINGS_SCHEMA: Final = "swir.user-settings/0.1"
 MAX_SETTINGS_BYTES: Final = 64 * 1024
 _LANGUAGE_RE: Final = re.compile(r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$")
+_THEME_ID_RE: Final = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
 _ALLOWED_APPEARANCE: Final = frozenset({"dark", "system"})
+DEFAULT_THEME_ID: Final = "builtin.swir-dark"
 
 
 @dataclass(frozen=True)
@@ -85,6 +87,7 @@ def default_settings() -> dict[str, object]:
         "appearance": "dark",
         "language": "en",
         "clock24h": True,
+        "themeId": DEFAULT_THEME_ID,
     }
 
 
@@ -98,6 +101,7 @@ def validate_settings(value: object) -> dict[str, object]:
     appearance = value.get("appearance", result["appearance"])
     language = value.get("language", result["language"])
     clock24h = value.get("clock24h", result["clock24h"])
+    theme_id = value.get("themeId", result["themeId"])
 
     if appearance not in _ALLOWED_APPEARANCE:
         raise ValueError("unsupported appearance")
@@ -105,8 +109,10 @@ def validate_settings(value: object) -> dict[str, object]:
         raise ValueError("invalid BCP-47 language tag")
     if not isinstance(clock24h, bool):
         raise ValueError("clock24h must be boolean")
+    if not isinstance(theme_id, str) or len(theme_id) > 64 or not _THEME_ID_RE.fullmatch(theme_id):
+        raise ValueError("invalid themeId")
 
-    result.update(appearance=appearance, language=language, clock24h=clock24h)
+    result.update(appearance=appearance, language=language, clock24h=clock24h, themeId=theme_id)
     return result
 
 
