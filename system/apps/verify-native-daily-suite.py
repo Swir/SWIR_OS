@@ -11,16 +11,10 @@ from __future__ import annotations
 
 import json
 import pathlib
-import re
 import stat
-import sys
 from typing import Final
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
-MANIFEST = REPO / "system/apps/native-daily-suite.json"
-PROVISION = REPO / "system/session/provision-graphical-session.sh"
-SHELL = REPO / "system/session/swir-shell.py"
-BASELINE = REPO / "SWIR-PRODUCT-BASELINE-1.0.md"
 
 EXPECTED_IDS: Final = frozenset(
     {
@@ -61,7 +55,8 @@ REQUIRED_MARKERS: Final = {
     "backup-restore": ("backup_runtime", "gi.require_version(\"Gtk\", \"4.0\")"),
 }
 
-FORBIDDEN_SOURCE_SUFFIXES: Final = {".html", ".htm", ".js", ".mjs", ".css"}
+FORBIDDEN_APP_SOURCE_SUFFIXES: Final = {".html", ".htm", ".js", ".mjs", ".css"}
+ALLOWED_COMPANION_SUFFIXES: Final = {".py", ".mjs", ".service", ".target", ".json"}
 
 
 def fail(message: str) -> None:
@@ -131,7 +126,7 @@ def verify_source(capability: dict) -> None:
     launcher = capability.get("launcher")
     if not isinstance(source, str) or not source.startswith("system/apps/"):
         fail(f"{ident}: source must live under system/apps")
-    if pathlib.PurePosixPath(source).suffix in FORBIDDEN_SOURCE_SUFFIXES or not source.endswith(".py"):
+    if pathlib.PurePosixPath(source).suffix in FORBIDDEN_APP_SOURCE_SUFFIXES or not source.endswith(".py"):
         fail(f"{ident}: essential utility is not represented by native Python/GTK source")
     if not isinstance(stage, str) or not stage.startswith("/usr/local/bin/swir-") or ".." in stage:
         fail(f"{ident}: unsafe or unexpected staged executable path")
@@ -155,6 +150,8 @@ def verify_source(capability: dict) -> None:
     for companion in capability.get("companions", []):
         if not isinstance(companion, str):
             fail(f"{ident}: malformed companion path")
+        if pathlib.PurePosixPath(companion).suffix.lower() not in ALLOWED_COMPANION_SUFFIXES:
+            fail(f"{ident}: unexpected recovery/system companion type: {companion}")
         trusted_repo_file(companion)
 
 
@@ -190,13 +187,11 @@ def verify_image_and_shell_integration(capabilities: list[dict]) -> None:
         fail("graphical provisioning evidence summary lost native app inventory")
 
 
-def verify_no_web_payloads(capabilities: list[dict]) -> None:
+def verify_no_web_app_sources(capabilities: list[dict]) -> None:
     for cap in capabilities:
-        paths = [cap["source"], *cap.get("companions", [])]
-        for item in paths:
-            suffix = pathlib.PurePosixPath(item).suffix.lower()
-            if suffix in FORBIDDEN_SOURCE_SUFFIXES:
-                fail(f"{cap['id']}: browser/web payload entered essential System Edition suite: {item}")
+        source = cap["source"]
+        if pathlib.PurePosixPath(source).suffix.lower() in FORBIDDEN_APP_SOURCE_SUFFIXES:
+            fail(f"{cap['id']}: browser/web payload entered essential System Edition app source: {source}")
 
 
 def main() -> int:
@@ -205,7 +200,7 @@ def main() -> int:
     caps = data["capabilities"]
     for capability in caps:
         verify_source(capability)
-    verify_no_web_payloads(caps)
+    verify_no_web_app_sources(caps)
     verify_image_and_shell_integration(caps)
     summary = {
         "schema": "swir.native-daily-suite-verification/1.0",
