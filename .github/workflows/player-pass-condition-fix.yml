@@ -1,0 +1,45 @@
+name: Player Pass Condition Fix
+
+on:
+  push:
+    branches: [system/native-player-integration]
+    paths:
+      - '.github/workflows/player-pass-condition-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: system/native-player-integration
+          fetch-depth: 0
+      - name: Decouple Wayland functional evidence from target-only GTK4 video sink package
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('system/apps/swir-player.py')
+          text = path.read_text(encoding='utf-8')
+          old = '"passed": bool(preroll_ok and self._mpris_started and self.video_sink_available),'
+          new = '"passed": bool(preroll_ok and self._mpris_started),'
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one Player evidence pass anchor, got {text.count(old)}')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+          python3 -m py_compile system/apps/swir-player.py
+          git diff --check
+      - name: Commit correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add system/apps/swir-player.py
+          git commit -m 'fix: separate Player functional and target video-sink evidence'
+          git push origin HEAD:system/native-player-integration
