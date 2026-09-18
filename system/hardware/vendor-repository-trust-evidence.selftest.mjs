@@ -48,7 +48,7 @@ function mockFetch(url, options = {}) {
 }
 
 function mockTool(command, args) {
-  if (command === 'gpg' && args.includes('show-only')) {
+  if (command === 'gpg' && args.includes('--show-keys')) {
     return { stdout: `pub:-:4096:1:DEADBEEF:0:0::::\nfpr:::::::::${fingerprint}:\n`, stderr: '', status: 0 };
   }
   if (command === 'gpg' && args.includes('--dearmor')) return { stdout: '', stderr: '', status: 0 };
@@ -85,7 +85,7 @@ await assert.rejects(
   collectVendorRepositoryEvidence(profile.id, {
     fetchImpl: mockFetch,
     toolRunner(command, args) {
-      if (command === 'gpg' && args.includes('show-only')) {
+      if (command === 'gpg' && args.includes('--show-keys')) {
         return { stdout: 'pub:-:4096:1:DEADBEEF:0:0::::\nfpr:::::::::FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFDEADBEEF:\n', stderr: '', status: 0 };
       }
       return mockTool(command, args);
