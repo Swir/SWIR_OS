@@ -5,11 +5,17 @@ The application is unprivileged and deliberately non-destructive: source images
 are opened read-only, edits stay in memory with bounded undo/redo history, and
 users export an explicit copy in PNG/JPEG/WebP. There is no package mutation,
 self-updater, sudo/pkexec shortcut, or remote-URI input path.
+
+Advanced editing deliberately stays inside the distro-managed GdkPixbuf stack:
+center crop, exposure, brightness, contrast, saturation, grayscale and sepia are
+implemented as bounded in-memory transforms. No codec/plugin downloads or
+external image-processing commands are used.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import mimetypes
 import os
 import pathlib
@@ -25,7 +31,7 @@ gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk  # noqa: E402
 
 APP_ID: Final = "dev.swir.PhotoStudio"
-EVIDENCE_SCHEMA: Final = "swir.native-photo-studio-runtime-evidence/0.1"
+EVIDENCE_SCHEMA: Final = "swir.native-photo-studio-runtime-evidence/0.2"
 MAX_INPUT_BYTES: Final = 64 * 1024 * 1024
 MAX_PIXELS: Final = 40_000_000
 MAX_HISTORY: Final = 24
@@ -157,6 +163,125 @@ def _atomic_export(pixbuf: GdkPixbuf.Pixbuf, destination: pathlib.Path) -> None:
             pass
 
 
+def _clamp_channel(value: float) -> int:
+    return max(0, min(255, int(round(value))))
+
+
+def _pixbuf_from_tight_bytes(data: bytes | bytearray, width: int, height: int, channels: int, has_alpha: bool) -> GdkPixbuf.Pixbuf:
+    if width <= 0 or height <= 0 or width * height > MAX_PIXELS:
+        raise PhotoPolicyError("edit result dimensions exceed the verified bound")
+    expected = width * height * channels
+    if len(data) != expected:
+        raise PhotoPolicyError("internal pixel buffer size mismatch")
+    return GdkPixbuf.Pixbuf.new_from_bytes(
+        GLib.Bytes.new(bytes(data)),
+        GdkPixbuf.Colorspace.RGB,
+        has_alpha,
+        8,
+        width,
+        height,
+        width * channels,
+    )
+
+
+def _transform_pixels(
+    pixbuf: GdkPixbuf.Pixbuf,
+    *,
+    exposure_stops: float = 0.0,
+    brightness: float = 0.0,
+    contrast: float = 0.0,
+    saturation: float = 0.0,
+    grayscale: bool = False,
+    sepia: bool = False,
+) -> GdkPixbuf.Pixbuf:
+    """Apply bounded RGB adjustments while preserving alpha exactly."""
+    if not -2.0 <= exposure_stops <= 2.0:
+        raise PhotoPolicyError("exposure adjustment is outside the verified range")
+    if not -1.0 <= brightness <= 1.0:
+        raise PhotoPolicyError("brightness adjustment is outside the verified range")
+    if not -0.9 <= contrast <= 2.0:
+        raise PhotoPolicyError("contrast adjustment is outside the verified range")
+    if not -1.0 <= saturation <= 2.0:
+        raise PhotoPolicyError("saturation adjustment is outside the verified range")
+
+    width, height = pixbuf.get_width(), pixbuf.get_height()
+    channels = pixbuf.get_n_channels()
+    has_alpha = pixbuf.get_has_alpha()
+    if channels not in (3, 4) or channels != (4 if has_alpha else 3):
+        raise PhotoPolicyError("unsupported decoded pixel layout")
+
+    source = bytes(pixbuf.get_pixels())
+    source_stride = pixbuf.get_rowstride()
+    output = bytearray(width * height * channels)
+    exposure_factor = math.pow(2.0, exposure_stops)
+    contrast_factor = 1.0 + contrast
+    saturation_factor = 1.0 + saturation
+    brightness_delta = brightness * 255.0
+
+    for y in range(height):
+        for x in range(width):
+            src = y * source_stride + x * channels
+            dst = (y * width + x) * channels
+            r, g, b = float(source[src]), float(source[src + 1]), float(source[src + 2])
+
+            r *= exposure_factor
+            g *= exposure_factor
+            b *= exposure_factor
+            r = (r - 127.5) * contrast_factor + 127.5 + brightness_delta
+            g = (g - 127.5) * contrast_factor + 127.5 + brightness_delta
+            b = (b - 127.5) * contrast_factor + 127.5 + brightness_delta
+
+            luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+            r = luminance + (r - luminance) * saturation_factor
+            g = luminance + (g - luminance) * saturation_factor
+            b = luminance + (b - luminance) * saturation_factor
+
+            if grayscale:
+                gray = _clamp_channel(0.2126 * r + 0.7152 * g + 0.0722 * b)
+                r = g = b = float(gray)
+            elif sepia:
+                sr = 0.393 * r + 0.769 * g + 0.189 * b
+                sg = 0.349 * r + 0.686 * g + 0.168 * b
+                sb = 0.272 * r + 0.534 * g + 0.131 * b
+                r, g, b = sr, sg, sb
+
+            output[dst] = _clamp_channel(r)
+            output[dst + 1] = _clamp_channel(g)
+            output[dst + 2] = _clamp_channel(b)
+            if has_alpha:
+                output[dst + 3] = source[src + 3]
+
+    return _pixbuf_from_tight_bytes(output, width, height, channels, has_alpha)
+
+
+def _crop_pixbuf(pixbuf: GdkPixbuf.Pixbuf, x: int, y: int, width: int, height: int) -> GdkPixbuf.Pixbuf:
+    full_width, full_height = pixbuf.get_width(), pixbuf.get_height()
+    if width <= 0 or height <= 0 or x < 0 or y < 0:
+        raise PhotoPolicyError("crop rectangle must have positive dimensions")
+    if x + width > full_width or y + height > full_height:
+        raise PhotoPolicyError("crop rectangle exceeds the image bounds")
+    if width * height > MAX_PIXELS:
+        raise PhotoPolicyError("crop result exceeds the verified pixel bound")
+    result = pixbuf.new_subpixbuf(x, y, width, height)
+    return result.copy()
+
+
+def _center_crop(pixbuf: GdkPixbuf.Pixbuf, fraction: float = 0.8) -> GdkPixbuf.Pixbuf:
+    if not 0.1 <= fraction <= 1.0:
+        raise PhotoPolicyError("center-crop fraction is outside the verified range")
+    full_width, full_height = pixbuf.get_width(), pixbuf.get_height()
+    width = max(1, int(round(full_width * fraction)))
+    height = max(1, int(round(full_height * fraction)))
+    x = max(0, (full_width - width) // 2)
+    y = max(0, (full_height - height) // 2)
+    return _crop_pixbuf(pixbuf, x, y, width, height)
+
+
+def _first_rgb(pixbuf: GdkPixbuf.Pixbuf) -> tuple[int, int, int]:
+    pixels = bytes(pixbuf.get_pixels())
+    return pixels[0], pixels[1], pixels[2]
+
+
 @dataclass
 class EditHistory:
     states: list[GdkPixbuf.Pixbuf]
@@ -270,10 +395,10 @@ class SwirPhotoStudio(Gtk.Application):
             return
         window = Gtk.ApplicationWindow(application=self)
         window.set_title("SWIR Photo Studio")
-        window.set_default_size(1180, 780)
+        window.set_default_size(1220, 820)
         window.add_css_class("swir-app")
         self.window = window
-        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         window.set_child(root)
 
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -291,27 +416,51 @@ class SwirPhotoStudio(Gtk.Application):
             header.append(button)
         root.append(header)
 
-        toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
-        toolbar.add_css_class("swir-panel")
+        basic = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+        basic.add_css_class("swir-panel")
         for label, callback in (
-            ("↶ Rotate left", lambda *_: self._rotate(GdkPixbuf.PixbufRotation.COUNTERCLOCKWISE)),
-            ("↷ Rotate right", lambda *_: self._rotate(GdkPixbuf.PixbufRotation.CLOCKWISE)),
+            ("↶ Rotate", lambda *_: self._rotate(GdkPixbuf.PixbufRotation.COUNTERCLOCKWISE)),
+            ("↷ Rotate", lambda *_: self._rotate(GdkPixbuf.PixbufRotation.CLOCKWISE)),
             ("⇋ Flip H", lambda *_: self._flip(True)),
             ("⇅ Flip V", lambda *_: self._flip(False)),
+            ("Crop 80%", lambda *_: self._crop_center()),
             ("50%", lambda *_: self._resize(0.5)),
             ("200%", lambda *_: self._resize(2.0)),
         ):
             button = Gtk.Button(label=label)
             button.add_css_class("swir-button")
             button.connect("clicked", callback)
-            toolbar.append(button)
+            basic.append(button)
         self.undo_button = Gtk.Button(label="Undo")
         self.undo_button.connect("clicked", lambda *_: self._undo())
-        toolbar.append(self.undo_button)
+        basic.append(self.undo_button)
         self.redo_button = Gtk.Button(label="Redo")
         self.redo_button.connect("clicked", lambda *_: self._redo())
-        toolbar.append(self.redo_button)
-        root.append(toolbar)
+        basic.append(self.redo_button)
+        root.append(basic)
+
+        color = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+        color.add_css_class("swir-panel")
+        for label, callback in (
+            ("Exposure −", lambda *_: self._adjust(exposure_stops=-0.25, description="Exposure −0.25 EV.")),
+            ("Exposure +", lambda *_: self._adjust(exposure_stops=0.25, description="Exposure +0.25 EV.")),
+            ("Brightness −", lambda *_: self._adjust(brightness=-0.08, description="Brightness reduced.")),
+            ("Brightness +", lambda *_: self._adjust(brightness=0.08, description="Brightness increased.")),
+            ("Contrast −", lambda *_: self._adjust(contrast=-0.10, description="Contrast reduced.")),
+            ("Contrast +", lambda *_: self._adjust(contrast=0.10, description="Contrast increased.")),
+            ("Saturation −", lambda *_: self._adjust(saturation=-0.12, description="Saturation reduced.")),
+            ("Saturation +", lambda *_: self._adjust(saturation=0.12, description="Saturation increased.")),
+            ("B&W", lambda *_: self._adjust(grayscale=True, description="Grayscale filter applied.")),
+            ("Sepia", lambda *_: self._adjust(sepia=True, description="Sepia filter applied.")),
+        ):
+            button = Gtk.Button(label=label)
+            button.add_css_class("swir-button")
+            button.connect("clicked", callback)
+            color.append(button)
+        color_scroll = Gtk.ScrolledWindow()
+        color_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        color_scroll.set_child(color)
+        root.append(color_scroll)
 
         panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         panel.add_css_class("swir-panel")
@@ -400,6 +549,28 @@ class SwirPhotoStudio(Gtk.Application):
         result = current.scale_simple(width, height, GdkPixbuf.InterpType.BILINEAR)
         if result is not None:
             self._apply(result, f"Resized to {width} × {height}.")
+
+    def _crop_center(self) -> None:
+        history = self._require_image()
+        if history is None:
+            return
+        try:
+            result = _center_crop(history.current, 0.8)
+        except PhotoPolicyError as exc:
+            self._set_status(f"Crop refused: {exc}")
+            return
+        self._apply(result, f"Center crop applied: {result.get_width()} × {result.get_height()}.")
+
+    def _adjust(self, *, description: str, **kwargs) -> None:
+        history = self._require_image()
+        if history is None:
+            return
+        try:
+            result = _transform_pixels(history.current, **kwargs)
+        except PhotoPolicyError as exc:
+            self._set_status(f"Adjustment refused: {exc}")
+            return
+        self._apply(result, description)
 
     def _undo(self) -> None:
         history = self._require_image()
@@ -492,10 +663,13 @@ class SwirPhotoStudio(Gtk.Application):
             raise RuntimeError("refusing Photo Studio evidence outside XDG_RUNTIME_DIR")
         if not export_dir.is_dir() or _path_has_symlink(export_dir):
             raise RuntimeError("Photo Studio E2E export directory is invalid")
+
         source_bytes = source.read_bytes()
         self._open_path(source)
         assert self.history is not None
         original_size = (self.history.current.get_width(), self.history.current.get_height())
+        original_rgb = _first_rgb(self.history.current)
+
         self._rotate(GdkPixbuf.PixbufRotation.CLOCKWISE)
         rotated_size = (self.history.current.get_width(), self.history.current.get_height())
         self._flip(True)
@@ -506,11 +680,32 @@ class SwirPhotoStudio(Gtk.Application):
         redo_index = self.history.index
         self._resize(0.5)
         resized_size = (self.history.current.get_width(), self.history.current.get_height())
+        expected_resize = (max(1, int(round(rotated_size[0] * 0.5))), max(1, int(round(rotated_size[1] * 0.5))))
+
+        before_crop = (self.history.current.get_width(), self.history.current.get_height())
+        self._crop_center()
+        cropped_size = (self.history.current.get_width(), self.history.current.get_height())
+        expected_crop = (max(1, int(round(before_crop[0] * 0.8))), max(1, int(round(before_crop[1] * 0.8))))
+
+        before_exposure = _first_rgb(self.history.current)
+        self._adjust(exposure_stops=0.25, description="E2E exposure")
+        after_exposure = _first_rgb(self.history.current)
+        self._adjust(brightness=-0.05, description="E2E brightness")
+        after_brightness = _first_rgb(self.history.current)
+        self._adjust(contrast=0.10, description="E2E contrast")
+        after_contrast = _first_rgb(self.history.current)
+        self._adjust(saturation=0.15, description="E2E saturation")
+        after_saturation = _first_rgb(self.history.current)
+        self._adjust(grayscale=True, description="E2E grayscale")
+        grayscale_rgb = _first_rgb(self.history.current)
+        self._adjust(sepia=True, description="E2E sepia")
+        sepia_rgb = _first_rgb(self.history.current)
+
         png_path = export_dir / "edited.png"
         jpg_path = export_dir / "edited.jpg"
         self._export(png_path)
         self._export(jpg_path)
-        expected_resize = (max(1, int(round(rotated_size[0] * 0.5))), max(1, int(round(rotated_size[1] * 0.5))))
+
         payload = {
             "schema": EVIDENCE_SCHEMA,
             "passed": True,
@@ -528,14 +723,28 @@ class SwirPhotoStudio(Gtk.Application):
             "rotateVerified": rotated_size == (original_size[1], original_size[0]),
             "flipVerified": True,
             "resizeVerified": resized_size == expected_resize,
+            "cropVerified": cropped_size == expected_crop and cropped_size[0] < before_crop[0] and cropped_size[1] < before_crop[1],
+            "exposureVerified": after_exposure != before_exposure,
+            "brightnessVerified": after_brightness != after_exposure,
+            "contrastVerified": after_contrast != after_brightness,
+            "saturationVerified": after_saturation != after_contrast or len(set(after_contrast)) == 1,
+            "grayscaleVerified": grayscale_rgb[0] == grayscale_rgb[1] == grayscale_rgb[2],
+            "sepiaVerified": sepia_rgb != grayscale_rgb and sepia_rgb[0] >= sepia_rgb[2],
+            "initialPixelObserved": list(original_rgb),
             "exports": [png_path.name, jpg_path.name],
             "pngExport": png_path.is_file() and png_path.stat().st_size > 0,
             "jpegExport": jpg_path.is_file() and jpg_path.stat().st_size > 0,
             "atomicExport": True,
             "privilegedOperations": False,
+            "externalImageCommands": False,
             "selfUpdater": False,
         }
-        payload["passed"] = all((payload["sourceReadOnly"], payload["undoRedoVerified"], payload["rotateVerified"], payload["resizeVerified"], payload["pngExport"], payload["jpegExport"]))
+        required = (
+            "sourceReadOnly", "undoRedoVerified", "rotateVerified", "resizeVerified", "cropVerified",
+            "exposureVerified", "brightnessVerified", "contrastVerified", "saturationVerified",
+            "grayscaleVerified", "sepiaVerified", "pngExport", "jpegExport",
+        )
+        payload["passed"] = all(bool(payload[key]) for key in required)
         evidence_path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
         evidence_path.chmod(0o600)
         self._evidence_written = True
@@ -552,6 +761,7 @@ def _self_test() -> int:
         pixbuf.savev(str(source), "png", [], [])
         loaded = _load_pixbuf(_validated_local_image(source))
         history = EditHistory.from_pixbuf(loaded)
+
         rotated = history.current.rotate_simple(GdkPixbuf.PixbufRotation.CLOCKWISE)
         assert rotated is not None and (rotated.get_width(), rotated.get_height()) == (8, 12)
         history.push(rotated)
@@ -559,8 +769,40 @@ def _self_test() -> int:
         history.undo()
         assert history.can_redo
         history.redo()
+
+        cropped = _center_crop(history.current, 0.5)
+        assert (cropped.get_width(), cropped.get_height()) == (4, 6)
+        try:
+            _crop_pixbuf(history.current, 0, 0, 99, 99)
+        except PhotoPolicyError:
+            pass
+        else:
+            raise AssertionError("out-of-bounds crop must be rejected")
+
+        base_rgb = _first_rgb(history.current)
+        exposed = _transform_pixels(history.current, exposure_stops=0.25)
+        assert _first_rgb(exposed) != base_rgb
+        brighter = _transform_pixels(history.current, brightness=0.1)
+        assert _first_rgb(brighter) != base_rgb
+        contrasted = _transform_pixels(history.current, contrast=0.2)
+        assert _first_rgb(contrasted) != base_rgb
+        saturated = _transform_pixels(history.current, saturation=0.2)
+        assert _first_rgb(saturated) != base_rgb
+        gray = _transform_pixels(history.current, grayscale=True)
+        gr = _first_rgb(gray)
+        assert gr[0] == gr[1] == gr[2]
+        sepia = _transform_pixels(gray, sepia=True)
+        sr = _first_rgb(sepia)
+        assert sr != gr and sr[0] >= sr[2]
+        try:
+            _transform_pixels(history.current, exposure_stops=3.0)
+        except PhotoPolicyError:
+            pass
+        else:
+            raise AssertionError("out-of-range exposure must be rejected")
+
         output = root / "copy.jpg"
-        _atomic_export(history.current, output)
+        _atomic_export(sepia, output)
         assert output.is_file() and output.stat().st_size > 0
         assert (output.stat().st_mode & 0o777) == 0o600
         try:
