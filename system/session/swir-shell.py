@@ -26,9 +26,14 @@ if LIBDIR.is_dir() and str(LIBDIR) not in sys.path:
     sys.path.insert(0, str(LIBDIR))
 
 try:
-    from core_runtime import UserSettingsStore
+    from core_runtime import DEFAULT_THEME_ID, UserSettingsStore
+    from theme_runtime import ThemeStore, default_theme, theme_css
 except ImportError:
+    DEFAULT_THEME_ID = "builtin.swir-dark"
     UserSettingsStore = None  # type: ignore[assignment,misc]
+    ThemeStore = None  # type: ignore[assignment,misc]
+    default_theme = None  # type: ignore[assignment]
+    theme_css = None  # type: ignore[assignment]
 
 APP_ID: Final = "dev.swir.Shell"
 EVIDENCE_SCHEMA: Final = "swir.native-shell-runtime-evidence/0.1"
@@ -99,20 +104,41 @@ class SwirShell(Gtk.Application):
         self.e2e = os.environ.get("SWIR_SHELL_E2E", "0") == "1"
         self.evidence_written = False
         self.clock24h = True
+        self.theme_id = DEFAULT_THEME_ID
+        self.theme_fallback = False
+        self.theme_payload: dict[str, object] | None = None
+        settings: dict[str, object] = {}
         if UserSettingsStore is not None:
             try:
-                self.clock24h = bool(UserSettingsStore().load().get("clock24h", True))
+                settings = UserSettingsStore().load()
+                self.clock24h = bool(settings.get("clock24h", True))
             except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
                 print(f"SWIR shell ignored invalid user settings: {exc}", file=sys.stderr)
+        if ThemeStore is not None:
+            try:
+                self.theme_payload, self.theme_fallback = ThemeStore().load(settings.get("themeId", DEFAULT_THEME_ID))
+                self.theme_id = str(self.theme_payload["id"])
+            except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
+                print(f"SWIR shell recovered to the default theme: {exc}", file=sys.stderr)
+                self.theme_fallback = True
+                if default_theme is not None:
+                    self.theme_payload = default_theme()
+                    self.theme_id = str(self.theme_payload["id"])
 
     def do_startup(self) -> None:
         Gtk.Application.do_startup(self)
-        provider = Gtk.CssProvider()
-        provider.load_from_data(CSS)
         display = Gdk.Display.get_default()
         if display is None:
             raise RuntimeError("SWIR shell requires an active graphical display")
+        provider = Gtk.CssProvider()
+        provider.load_from_data(CSS)
         Gtk.StyleContext.add_provider_for_display(display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        if self.theme_payload is not None and theme_css is not None:
+            themed = Gtk.CssProvider()
+            themed.load_from_data(theme_css(self.theme_payload))
+            Gtk.StyleContext.add_provider_for_display(
+                display, themed, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1
+            )
 
     def do_activate(self) -> None:
         if self.window is not None:
@@ -240,6 +266,9 @@ class SwirShell(Gtk.Application):
             "launcherProbePassed": launcher_probe_passed,
             "privilegedOperationsInShell": False,
             "clock24h": self.clock24h,
+            "themeId": self.theme_id,
+            "themeFallbackToDefault": self.theme_fallback,
+            "themePackagesDataOnly": True,
         }
         path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
         path.chmod(0o600)
