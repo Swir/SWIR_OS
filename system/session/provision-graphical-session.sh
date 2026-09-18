@@ -40,6 +40,8 @@ for source_file in \
   system/apps/swir-browser.desktop \
   system/apps/swir-player.py \
   system/apps/swir-player.desktop \
+  system/apps/swir-photo-studio.py \
+  system/apps/swir-photo-studio.desktop \
   system/apps/swir-files.py \
   system/apps/swir-hardware-center.py \
   system/apps/swir-network-center.py \
@@ -112,15 +114,16 @@ ensure_exact_symlink() {
 }
 
 # First-party UI runtimes are installed only from the configured signed Debian
-# repositories. WebKitGTK and GStreamer are distro-managed so browser/media
-# security and codec updates stay in the SWIR package/update transaction path
-# instead of ad-hoc application self-updaters.
+# repositories. WebKitGTK, GStreamer and GdkPixbuf are distro-managed so
+# browser/media/image security updates stay in the SWIR package/update
+# transaction path instead of ad-hoc application self-updaters.
 RUNTIME_PACKAGES=(
   gir1.2-vte-3.91
   libvte-2.91-gtk4-0
   nodejs
   gir1.2-webkit-6.0
   gir1.2-gstreamer-1.0
+  gir1.2-gdkpixbuf-2.0
   gstreamer1.0-plugins-base
   gstreamer1.0-plugins-good
   gstreamer1.0-libav
@@ -135,7 +138,7 @@ if [[ $RUNTIME_MISSING -eq 1 ]]; then
   chroot "$ROOTFS" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${RUNTIME_PACKAGES[@]}"
 fi
 
-for pkg in greetd weston plymouth plymouth-themes wayland-utils dbus-user-session python3 python3-gi gir1.2-gtk-4.0 gir1.2-vte-3.91 libvte-2.91-gtk4-0 gir1.2-webkit-6.0 gir1.2-gstreamer-1.0 gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-libav gstreamer1.0-gtk4 network-manager nodejs desktop-file-utils; do
+for pkg in greetd weston plymouth plymouth-themes wayland-utils dbus-user-session python3 python3-gi gir1.2-gtk-4.0 gir1.2-vte-3.91 libvte-2.91-gtk4-0 gir1.2-webkit-6.0 gir1.2-gstreamer-1.0 gir1.2-gdkpixbuf-2.0 gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-libav gstreamer1.0-gtk4 network-manager nodejs desktop-file-utils; do
   chroot "$ROOTFS" dpkg-query -W -f='${db:Status-Abbrev}' "$pkg" 2>/dev/null | grep -qx 'ii ' || {
     echo "required graphical/runtime package is not installed: $pkg" >&2
     exit 69
@@ -178,6 +181,8 @@ install -m 0755 "$SOURCE_ROOT/system/apps/swir-browser.py" "$(safe_target /usr/l
 install -m 0644 "$SOURCE_ROOT/system/apps/swir-browser.desktop" "$(safe_target /usr/share/applications/swir-browser.desktop)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-player.py" "$(safe_target /usr/local/bin/swir-player)"
 install -m 0644 "$SOURCE_ROOT/system/apps/swir-player.desktop" "$(safe_target /usr/share/applications/swir-player.desktop)"
+install -m 0755 "$SOURCE_ROOT/system/apps/swir-photo-studio.py" "$(safe_target /usr/local/bin/swir-photo-studio)"
+install -m 0644 "$SOURCE_ROOT/system/apps/swir-photo-studio.desktop" "$(safe_target /usr/share/applications/swir-photo-studio.desktop)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-files.py" "$(safe_target /usr/local/bin/swir-files)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-hardware-center.py" "$(safe_target /usr/local/bin/swir-hardware-center)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-network-center.py" "$(safe_target /usr/local/bin/swir-network-center)"
@@ -199,6 +204,7 @@ chroot "$ROOTFS" /usr/bin/python3 -m py_compile \
   /usr/local/bin/swir-shell \
   /usr/local/bin/swir-browser \
   /usr/local/bin/swir-player \
+  /usr/local/bin/swir-photo-studio \
   /usr/local/bin/swir-files \
   /usr/local/bin/swir-hardware-center \
   /usr/local/bin/swir-network-center \
@@ -276,6 +282,8 @@ verify_trusted_regular_file /usr/local/bin/swir-browser yes
 verify_trusted_regular_file /usr/share/applications/swir-browser.desktop no
 verify_trusted_regular_file /usr/local/bin/swir-player yes
 verify_trusted_regular_file /usr/share/applications/swir-player.desktop no
+verify_trusted_regular_file /usr/local/bin/swir-photo-studio yes
+verify_trusted_regular_file /usr/share/applications/swir-photo-studio.desktop no
 verify_trusted_regular_file /usr/local/bin/swir-files yes
 verify_trusted_regular_file /usr/local/bin/swir-hardware-center yes
 verify_trusted_regular_file /usr/local/bin/swir-network-center yes
@@ -307,4 +315,4 @@ verify_trusted_regular_file /usr/libexec/swir/swir-peer-authorization-broker yes
   echo "SWIR package transaction broker service target is unexpected" >&2; exit 70;
 }
 
-printf 'SWIR graphical session staged: mode=%s theme=swir login=greetd compositor=weston native-shell=gtk4 native-apps=browser,player,files,hardware,network,notes,settings,software,system-monitor,terminal,updates package-broker=peer-polkit-journaled\n' "$MODE"
+printf 'SWIR graphical session staged: mode=%s theme=swir login=greetd compositor=weston native-shell=gtk4 native-apps=browser,player,photo-studio,files,hardware,network,notes,settings,software,system-monitor,terminal,updates package-broker=peer-polkit-journaled\n' "$MODE"
