@@ -8,6 +8,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import threading
 from dataclasses import dataclass
 from typing import Final
 
@@ -62,6 +63,15 @@ class CommandResult:
     returncode: int | None
     stdout: str
     stderr: str
+
+
+@dataclass(frozen=True)
+class DiagnosticsSnapshot:
+    os_name: str
+    kernel_version: str
+    uptime_seconds: float
+    failed: CommandResult
+    journal: CommandResult
 
 
 def read_meminfo() -> dict[str, int]:
@@ -197,6 +207,7 @@ class SwirSystemMonitor(Gtk.Application):
         self.listbox: Gtk.ListBox | None = None
         self.diag_summary: Gtk.Label | None = None
         self.diag_text: Gtk.TextView | None = None
+        self.diag_refresh: Gtk.Button | None = None
         self.e2e = os.environ.get("SWIR_APP_E2E", "0") == "1"
         self.evidence_path = os.environ.get("SWIR_APP_EVIDENCE_PATH", "")
         self.last_process_count = 0
@@ -205,6 +216,9 @@ class SwirSystemMonitor(Gtk.Application):
         self.journal_status = "not-run"
         self.failed_units_count = 0
         self.journal_visible_line_count = 0
+        self.diagnostics_running = False
+        self.diagnostics_ready = False
+        self.evidence_written = False
 
     def do_startup(self) -> None:
         Gtk.Application.do_startup(self)
@@ -275,9 +289,9 @@ class SwirSystemMonitor(Gtk.Application):
         self.diag_summary.set_hexpand(True)
         self.diag_summary.set_selectable(True)
         diag_toolbar.append(self.diag_summary)
-        refresh_diag = Gtk.Button(label="Refresh diagnostics")
-        refresh_diag.connect("clicked", self._on_refresh_diagnostics)
-        diag_toolbar.append(refresh_diag)
+        self.diag_refresh = Gtk.Button(label="Refresh diagnostics")
+        self.diag_refresh.connect("clicked", self._on_refresh_diagnostics)
+        diag_toolbar.append(self.diag_refresh)
         diagnostics.append(diag_toolbar)
 
         diag_scroller = Gtk.ScrolledWindow()
@@ -355,42 +369,86 @@ class SwirSystemMonitor(Gtk.Application):
         self._refresh_diagnostics()
 
     def _refresh_diagnostics(self) -> None:
-        assert self.diag_summary is not None and self.diag_text is not None
-        failed = run_read_only_command(FAILED_UNITS_COMMAND)
-        journal = run_read_only_command(JOURNAL_WARNINGS_COMMAND)
-        self.failed_units_status = failed.status
-        self.journal_status = journal.status
-        failed_lines = _nonempty_lines(failed.stdout, MAX_PROCESS_ROWS) if failed.status == "ok" else []
-        journal_lines = _nonempty_lines(journal.stdout, JOURNAL_LINE_LIMIT) if journal.status == "ok" else []
-        self.failed_units_count = len(failed_lines)
-        self.journal_visible_line_count = len(journal_lines)
+        assert self.diag_summary is not None and self.diag_refresh is not None
+        if self.diagnostics_running:
+            return
+        self.diagnostics_running = True
+        self.diagnostics_ready = False
+        self.diag_refresh.set_sensitive(False)
+        self.diag_summary.set_text("Refreshing bounded read-only diagnostics…")
+        threading.Thread(target=self._collect_diagnostics, name="swir-diagnostics", daemon=True).start()
 
+    def _collect_diagnostics(self) -> None:
         try:
             uptime = read_uptime_seconds()
         except (OSError, ValueError):
             uptime = 0.0
+        snapshot = DiagnosticsSnapshot(
+            os_name=read_os_release(),
+            kernel_version=read_kernel_version(),
+            uptime_seconds=uptime,
+            failed=run_read_only_command(FAILED_UNITS_COMMAND),
+            journal=run_read_only_command(JOURNAL_WARNINGS_COMMAND),
+        )
+        GLib.idle_add(self._apply_diagnostics, snapshot)
+
+    def _apply_diagnostics(self, snapshot: DiagnosticsSnapshot) -> bool:
+        assert self.diag_summary is not None and self.diag_text is not None and self.diag_refresh is not None
+        failed_lines = (
+            _nonempty_lines(snapshot.failed.stdout, MAX_PROCESS_ROWS)
+            if snapshot.failed.status == "ok"
+            else []
+        )
+        journal_lines = (
+            _nonempty_lines(snapshot.journal.stdout, JOURNAL_LINE_LIMIT)
+            if snapshot.journal.status == "ok"
+            else []
+        )
+        self.failed_units_status = snapshot.failed.status
+        self.journal_status = snapshot.journal.status
+        self.failed_units_count = len(failed_lines)
+        self.journal_visible_line_count = len(journal_lines)
+        self.diagnostics_running = False
+        self.diagnostics_ready = True
+        self.diag_refresh.set_sensitive(True)
 
         self.diag_summary.set_text(
-            f"Read-only diagnostics  •  failed units: {failed.status} ({len(failed_lines)})  •  "
-            f"boot journal: {journal.status} ({len(journal_lines)} visible lines)"
+            f"Read-only diagnostics  •  failed units: {snapshot.failed.status} ({len(failed_lines)})  •  "
+            f"boot journal: {snapshot.journal.status} ({len(journal_lines)} visible lines)"
         )
-        failed_body = "\n".join(failed_lines) if failed_lines else f"[{failed.status}] No readable failed-unit rows."
-        journal_body = "\n".join(journal_lines) if journal_lines else f"[{journal.status}] No readable warning/error rows."
+        failed_body = (
+            "\n".join(failed_lines)
+            if failed_lines
+            else f"[{snapshot.failed.status}] No readable failed-unit rows."
+        )
+        journal_body = (
+            "\n".join(journal_lines)
+            if journal_lines
+            else f"[{snapshot.journal.status}] No readable warning/error rows."
+        )
         body = (
             "SWIR OS Diagnostics — read only\n"
-            f"OS: {read_os_release()}\n"
-            f"Kernel: {read_kernel_version()}\n"
-            f"Uptime: {uptime / 3600.0:.1f} h\n\n"
-            f"Failed systemd units ({failed.status}):\n{failed_body}\n\n"
-            f"Recent boot warnings/errors — last {JOURNAL_LINE_LIMIT} lines max ({journal.status}):\n"
+            f"OS: {snapshot.os_name}\n"
+            f"Kernel: {snapshot.kernel_version}\n"
+            f"Uptime: {snapshot.uptime_seconds / 3600.0:.1f} h\n\n"
+            f"Failed systemd units ({snapshot.failed.status}):\n{failed_body}\n\n"
+            f"Recent boot warnings/errors — last {JOURNAL_LINE_LIMIT} lines max ({snapshot.journal.status}):\n"
             f"{journal_body}\n\n"
             "Safety: fixed absolute command paths, no shell, no elevation, bounded timeout/output."
         )
         self.diag_text.get_buffer().set_text(body[:MAX_COMMAND_OUTPUT_CHARS])
+        return False
 
     def _on_mapped(self, _window: Gtk.Window) -> None:
         if not self.e2e or not self.evidence_path:
             return
+        GLib.timeout_add(100, self._write_e2e_when_ready)
+
+    def _write_e2e_when_ready(self) -> bool:
+        if self.evidence_written:
+            return False
+        if not self.diagnostics_ready:
+            return True
         path = pathlib.Path(self.evidence_path)
         runtime_text = os.environ.get("XDG_RUNTIME_DIR", "")
         if not runtime_text or path.parent.resolve() != pathlib.Path(runtime_text).resolve():
@@ -408,6 +466,7 @@ class SwirSystemMonitor(Gtk.Application):
             "memTotalKiB": self.last_mem_total_kib,
             "diagnosticsReadOnly": True,
             "diagnosticsShell": False,
+            "diagnosticsAsync": True,
             "systemctlAbsolutePath": SYSTEMCTL_PATH,
             "journalctlAbsolutePath": JOURNALCTL_PATH,
             "diagnosticsCommandTimeoutSeconds": COMMAND_TIMEOUT_SECONDS,
@@ -421,7 +480,9 @@ class SwirSystemMonitor(Gtk.Application):
         }
         path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
         path.chmod(0o600)
+        self.evidence_written = True
         GLib.timeout_add(250, self._finish_e2e)
+        return False
 
     def _finish_e2e(self) -> bool:
         self.quit()
