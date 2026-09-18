@@ -73,7 +73,7 @@ LAUNCHERS: Final = (
     ("Browser", (("/usr/local/bin/swir-browser",),)),
     ("Player", (("/usr/local/bin/swir-player",),)),
     ("Photo Studio", (("/usr/local/bin/swir-photo-studio",),)),
-    ("Archive Manager", (("/usr/local/bin/swir-archive-manager",),)),
+    ("Archive Manager", (("/usr/local/bin/swir-files", "--archive-manager"),)),
     ("Terminal", (("/usr/local/bin/swir-terminal",),)),
     ("Notes", (("/usr/local/bin/swir-notes",),)),
     ("Settings", (("/usr/local/bin/swir-settings",), ("/usr/bin/gnome-control-center",))),
