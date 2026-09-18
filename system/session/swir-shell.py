@@ -26,8 +26,7 @@ if LIBDIR.is_dir() and str(LIBDIR) not in sys.path:
     sys.path.insert(0, str(LIBDIR))
 
 try:
-    from core_runtime import DEFAULT_THEME_ID, UserSettingsStore
-    from theme_runtime import ThemeStore, default_theme, theme_css
+    from core_runtime import DEFAULT_THEME_ID, ThemeStore, UserSettingsStore, default_theme, theme_css
 except ImportError:
     DEFAULT_THEME_ID = "builtin.swir-dark"
     UserSettingsStore = None  # type: ignore[assignment,misc]
