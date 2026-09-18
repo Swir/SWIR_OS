@@ -69,7 +69,16 @@ def main() -> None:
     assert [name for name, _ in client.calls] == ["preview", "authorize", "commit"]
 
     expect_error("CONFIRMATION_ALREADY_USED", lambda: flow.commit(intent, intent.confirmation_digest))
-    assert [name for name, _ in client.calls] == ["preview", "authorize", "commit"], "single-use preview replayed"
+    assert [name for name, _ in client.calls] == ["preview", "authorize", "commit"], "single-use intent replayed"
+
+    # A fresh preview of the same unchanged plan must be usable. Only the old
+    # UI intent is consumed; the package-plan digest is not globally blacklisted.
+    fresh = flow.prepare("install", "nano")
+    assert fresh.confirmation_digest == intent.confirmation_digest
+    assert fresh._single_use_token != intent._single_use_token
+    transaction2 = flow.commit(fresh, fresh.confirmation_digest)
+    assert transaction2["state"] == "committed"
+    assert [name for name, _ in client.calls] == ["preview", "authorize", "commit", "preview", "authorize", "commit"]
 
     expect_error("INVALID_OPERATION", lambda: flow.prepare("upgrade-all", "nano"))
     client.enabled = False
