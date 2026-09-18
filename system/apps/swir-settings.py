@@ -18,7 +18,8 @@ LIBDIR = pathlib.Path("/usr/local/lib/swir")
 if LIBDIR.is_dir() and str(LIBDIR) not in sys.path:
     sys.path.insert(0, str(LIBDIR))
 
-from core_runtime import UserSettingsStore  # noqa: E402
+from core_runtime import DEFAULT_THEME_ID, UserSettingsStore  # noqa: E402
+from theme_runtime import ThemePolicyError, ThemeStore  # noqa: E402
 
 APP_ID: Final = "dev.swir.Settings"
 EVIDENCE_SCHEMA: Final = "swir.native-settings-runtime-evidence/0.1"
@@ -62,10 +63,14 @@ class SwirSettings(Gtk.Application):
         self.clock24h: Gtk.CheckButton | None = None
         self.browser_combo: Gtk.ComboBoxText | None = None
         self.browser_apps: dict[str, Gio.AppInfo] = {}
+        self.theme_combo: Gtk.ComboBoxText | None = None
+        self.theme_store = ThemeStore()
         self.status: Gtk.Label | None = None
         self.store = UserSettingsStore()
         self.e2e = os.environ.get("SWIR_APP_E2E", "0") == "1"
         self.evidence_path = os.environ.get("SWIR_APP_EVIDENCE_PATH", "")
+        self.theme_e2e_package = os.environ.get("SWIR_THEME_E2E_PACKAGE", "")
+        self.theme_import_verified = False
 
     def do_startup(self) -> None:
         Gtk.Application.do_startup(self)
@@ -110,6 +115,15 @@ class SwirSettings(Gtk.Application):
         elif self.browser_apps:
             self.browser_combo.set_active(0)
 
+    def _load_themes(self, selected_id: str) -> None:
+        assert self.theme_combo is not None
+        self.theme_combo.remove_all()
+        themes = self.theme_store.list_themes()
+        for theme in themes:
+            self.theme_combo.append(str(theme["id"]), str(theme["name"]))
+        if not self.theme_combo.set_active_id(selected_id):
+            self.theme_combo.set_active_id(DEFAULT_THEME_ID)
+
     def do_activate(self) -> None:
         if self.window is not None:
             self.window.present()
@@ -117,7 +131,7 @@ class SwirSettings(Gtk.Application):
         settings = self.store.load()
         window = Gtk.ApplicationWindow(application=self)
         window.set_title("SWIR Settings")
-        window.set_default_size(780, 720)
+        window.set_default_size(780, 760)
         window.add_css_class("swir-app")
         self.window = window
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -167,7 +181,7 @@ class SwirSettings(Gtk.Application):
 
         appearance_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
         appearance_card.add_css_class("swir-card")
-        appearance_title = Gtk.Label(label="Appearance")
+        appearance_title = Gtk.Label(label="Appearance & Shell Themes")
         appearance_title.add_css_class("swir-section")
         appearance_title.set_xalign(0)
         appearance_card.append(appearance_title)
@@ -176,7 +190,31 @@ class SwirSettings(Gtk.Application):
         self.appearance.append("system", "Follow system preference")
         self.appearance.set_active_id(str(settings["appearance"]))
         appearance_card.append(self._row("Color preference", self.appearance))
-        note = Gtk.Label(label="Theme packages and accessibility-safe shell skins remain a separate roadmap milestone.", wrap=True)
+
+        self.theme_combo = Gtk.ComboBoxText()
+        self.theme_combo.set_hexpand(True)
+        self._load_themes(str(settings.get("themeId", DEFAULT_THEME_ID)))
+        appearance_card.append(self._row("Shell theme / skin", self.theme_combo))
+
+        theme_actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        import_theme = Gtk.Button(label="Import .swirtheme")
+        import_theme.add_css_class("swir-button")
+        import_theme.connect("clicked", self._choose_theme_package)
+        theme_actions.append(import_theme)
+        reset_theme = Gtk.Button(label="Reset to SWIR Default")
+        reset_theme.add_css_class("swir-button")
+        reset_theme.connect("clicked", self._reset_theme)
+        theme_actions.append(reset_theme)
+        appearance_card.append(theme_actions)
+
+        note = Gtk.Label(
+            label=(
+                "Theme packages are local data-only JSON: only allowlisted colors, spacing, radius and font scale "
+                "are accepted. Scripts, CSS injection, URLs and privileged code are rejected. "
+                "Low-contrast themes fail validation and the shell always falls back to SWIR Default."
+            ),
+            wrap=True,
+        )
         note.add_css_class("swir-muted")
         note.set_xalign(0)
         appearance_card.append(note)
@@ -228,6 +266,50 @@ class SwirSettings(Gtk.Application):
         window.connect("map", self._on_mapped)
         window.present()
 
+    def _choose_theme_package(self, _button: Gtk.Button | None = None) -> None:
+        if self.window is None:
+            return
+        dialog = Gtk.FileChooserNative(
+            title="Import SWIR Theme",
+            transient_for=self.window,
+            action=Gtk.FileChooserAction.OPEN,
+            accept_label="Import",
+            cancel_label="Cancel",
+        )
+        file_filter = Gtk.FileFilter()
+        file_filter.set_name("SWIR Theme packages")
+        file_filter.add_pattern("*.swirtheme")
+        dialog.add_filter(file_filter)
+        dialog.connect("response", self._on_theme_file_response)
+        dialog.show()
+
+    def _on_theme_file_response(self, dialog: Gtk.FileChooserNative, response: int) -> None:
+        try:
+            if response != Gtk.ResponseType.ACCEPT:
+                return
+            selected = dialog.get_file()
+            if selected is None or not selected.is_native():
+                raise ThemePolicyError("only local theme packages are accepted")
+            path = selected.get_path()
+            if not path:
+                raise ThemePolicyError("theme path could not be resolved")
+            theme = self.theme_store.install(path)
+            assert self.theme_combo is not None
+            self._load_themes(str(theme["id"]))
+            if self.status is not None:
+                self.status.set_text(f"Imported {theme['name']}. Save to activate it on the next shell start.")
+        except (OSError, RuntimeError, ThemePolicyError) as exc:
+            if self.status is not None:
+                self.status.set_text(f"Theme import rejected: {exc}")
+        finally:
+            dialog.destroy()
+
+    def _reset_theme(self, _button: Gtk.Button | None = None) -> None:
+        if self.theme_combo is not None:
+            self.theme_combo.set_active_id(DEFAULT_THEME_ID)
+        if self.status is not None:
+            self.status.set_text("SWIR Default selected. Save to activate it.")
+
     def _apply_browser_default(self, _button: Gtk.Button | None = None) -> bool:
         assert self.browser_combo is not None
         key = self.browser_combo.get_active_id()
@@ -248,18 +330,27 @@ class SwirSettings(Gtk.Application):
         return not failed
 
     def _payload(self) -> dict[str, object]:
-        assert self.language is not None and self.appearance is not None and self.clock24h is not None
+        assert self.language is not None and self.appearance is not None and self.clock24h is not None and self.theme_combo is not None
         return {
             "language": self.language.get_active_id() or "en",
             "appearance": self.appearance.get_active_id() or "dark",
             "clock24h": self.clock24h.get_active(),
+            "themeId": self.theme_combo.get_active_id() or DEFAULT_THEME_ID,
         }
 
     def _save(self, _button: Gtk.Button | None = None) -> dict[str, object]:
         payload = self.store.save(self._payload())
         if self.status is not None:
-            self.status.set_text("Saved securely to your SWIR user profile.")
+            self.status.set_text("Saved securely to your SWIR user profile. Theme changes apply on the next shell start.")
         return payload
+
+    def _prepare_theme_e2e(self) -> None:
+        if not self.theme_e2e_package:
+            return
+        theme = self.theme_store.install(self.theme_e2e_package)
+        assert self.theme_combo is not None
+        self._load_themes(str(theme["id"]))
+        self.theme_import_verified = True
 
     def _on_mapped(self, _window: Gtk.Window) -> None:
         if not self.e2e or not self.evidence_path:
@@ -268,7 +359,9 @@ class SwirSettings(Gtk.Application):
         runtime_text = os.environ.get("XDG_RUNTIME_DIR", "")
         if not runtime_text or path.parent.resolve() != pathlib.Path(runtime_text).resolve():
             raise RuntimeError("refusing SWIR Settings evidence path outside XDG_RUNTIME_DIR")
+        self._prepare_theme_e2e()
         saved = self._save()
+        installed_ids = [str(theme["id"]) for theme in self.theme_store.list_themes()]
         payload = {
             "schema": EVIDENCE_SCHEMA,
             "passed": True,
@@ -285,6 +378,12 @@ class SwirSettings(Gtk.Application):
             "browserHandlerCount": len(self.browser_apps),
             "browserDefaultMutationOnExplicitActionOnly": True,
             "browserHandlerTypes": list(BROWSER_HANDLER_TYPES),
+            "themeFramework": True,
+            "themeId": saved["themeId"],
+            "themeImportVerified": self.theme_import_verified,
+            "themePackagesDataOnly": True,
+            "defaultThemeRecoveryAvailable": DEFAULT_THEME_ID in installed_ids,
+            "installedThemeIds": installed_ids,
         }
         path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
         path.chmod(0o600)
