@@ -50,6 +50,7 @@ jobs:
           grep -F 'system/apps/swir-pdf-viewer.py' system/session/provision-graphical-session.sh >/dev/null
           grep -F 'system/apps/swir-pdf-viewer.desktop' system/session/provision-graphical-session.sh >/dev/null
           grep -F 'gir1.2-poppler-0.18' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'python3-gi-cairo' system/session/provision-graphical-session.sh >/dev/null
           grep -F 'MAX_PAGES: Final = 4000' system/apps/swir-pdf-viewer.py >/dev/null
           grep -F 'MAX_PDF_BYTES: Final = 512 * 1024 * 1024' system/apps/swir-pdf-viewer.py >/dev/null
           grep -F 'remoteUriInputAccepted' system/apps/swir-pdf-viewer.py >/dev/null
@@ -85,11 +86,13 @@ jobs:
           python3 - "$RUNTIME/sample.pdf" <<'PY'
           import pathlib, sys
           path = pathlib.Path(sys.argv[1])
+          stream = b'BT /F1 18 Tf 32 92 Td (SWIR PDF Viewer E2E) Tj ET\n'
+          stream_object = b'<< /Length %d >>\nstream\n' % len(stream) + stream + b'endstream'
           objects = [
               b'<< /Type /Catalog /Pages 2 0 R >>',
               b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
               b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 320 180] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
-              b'<< /Length 54 >>\nstream\nBT /F1 18 Tf 32 92 Td (SWIR PDF Viewer E2E) Tj ET\nendstream',
+              stream_object,
               b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
           ]
           data = bytearray(b'%PDF-1.4\n%SWIR\n')
