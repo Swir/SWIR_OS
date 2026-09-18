@@ -1,0 +1,149 @@
+name: System Native Archive Manager
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'system/apps/swir-files.py'
+      - 'system/session/swir-shell.py'
+      - 'system/SWIR-NATIVE-ARCHIVE-MANAGER-0.1.md'
+      - '.github/workflows/system-native-archive-manager.yml'
+  pull_request:
+    paths:
+      - 'system/apps/swir-files.py'
+      - 'system/session/swir-shell.py'
+      - 'system/SWIR-NATIVE-ARCHIVE-MANAGER-0.1.md'
+      - '.github/workflows/system-native-archive-manager.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: system-native-archive-manager-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GTK4 static contract runtime
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3-gi gir1.2-gtk-4.0
+      - name: Compile and verify Archive Manager safety policy
+        run: |
+          set -euo pipefail
+          python3 -m py_compile system/apps/swir-files.py system/session/swir-shell.py
+          python3 system/apps/swir-files.py --archive-self-test
+          grep -F 'Archive Manager", (("/usr/local/bin/swir-files", "--archive-manager"),)' system/session/swir-shell.py >/dev/null
+          grep -F 'MAX_ARCHIVE_ENTRIES: Final = 5000' system/apps/swir-files.py >/dev/null
+          grep -F 'MAX_ARCHIVE_EXPANDED_BYTES: Final = 2 * 1024 * 1024 * 1024' system/apps/swir-files.py >/dev/null
+          grep -F 'O_NOFOLLOW' system/apps/swir-files.py >/dev/null
+          grep -F 'O_EXCL' system/apps/swir-files.py >/dev/null
+          grep -F 'encrypted ZIP members are not supported' system/apps/swir-files.py >/dev/null
+          grep -F 'links, devices and special archive members are not accepted' system/apps/swir-files.py >/dev/null
+          ! grep -RE 'shell *= *True|os\.system\(' system/apps/swir-files.py system/session/swir-shell.py
+          ! grep -RE "/usr/bin/(sudo|pkexec|su)([[:space:]\"']|$)|/bin/su([[:space:]\"']|$)" system/apps/swir-files.py
+
+  wayland-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install controlled GTK4 and Wayland runtime
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends weston dbus-daemon python3-gi gir1.2-gtk-4.0
+          python3 system/apps/swir-files.py --archive-self-test
+      - name: Map Archive Manager on Wayland and verify safe extraction
+        run: |
+          set -euo pipefail
+          RUNTIME="${{ runner.temp }}/swir-archive-runtime"
+          DEST="$RUNTIME/destination"
+          mkdir -p "$RUNTIME" "$DEST"
+          chmod 0700 "$RUNTIME" "$DEST"
+          export XDG_RUNTIME_DIR="$RUNTIME"
+          export WAYLAND_DISPLAY=wayland-swir-archive
+          export GDK_BACKEND=wayland
+
+          python3 - "$RUNTIME/sample.zip" <<'PY'
+          import sys, zipfile
+          with zipfile.ZipFile(sys.argv[1], 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+              archive.writestr('docs/readme.txt', b'SWIR Archive Manager E2E\n')
+              archive.writestr('folder/nested.txt', b'nested\n')
+          PY
+
+          weston --backend=headless-backend.so --socket="$WAYLAND_DISPLAY" --idle-time=0 --log="$RUNTIME/weston.log" &
+          WESTON_PID=$!
+          cleanup() { kill "$WESTON_PID" 2>/dev/null || true; wait "$WESTON_PID" 2>/dev/null || true; }
+          trap cleanup EXIT
+          for _ in $(seq 1 80); do
+            [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]] && break
+            kill -0 "$WESTON_PID"
+            sleep 0.25
+          done
+          [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]]
+
+          timeout --signal=TERM --kill-after=5s 30s \
+            dbus-run-session -- \
+            env LIBGL_ALWAYS_SOFTWARE=1 GTK_A11Y=none \
+                SWIR_APP_E2E=1 \
+                SWIR_APP_EVIDENCE_PATH="$RUNTIME/archive.json" \
+                SWIR_ARCHIVE_E2E_INPUT="$RUNTIME/sample.zip" \
+                SWIR_ARCHIVE_E2E_DESTINATION="$DEST" \
+            python3 system/apps/swir-files.py --archive-manager
+
+          python3 - "$RUNTIME/archive.json" "$DEST" <<'PY'
+          import json, pathlib, stat, sys
+          evidence = json.load(open(sys.argv[1], encoding='utf-8'))
+          destination = pathlib.Path(sys.argv[2])
+          assert evidence['schema'] == 'swir.native-archive-manager-runtime-evidence/0.1'
+          assert evidence['passed'] is True
+          assert evidence['applicationId'] == 'dev.swir.ArchiveManager'
+          assert evidence['nativeToolkit'] == 'gtk4-python-stdlib-archive'
+          assert evidence['displayProtocol'] == 'wayland' and evidence['windowMapped'] is True
+          assert evidence['entryCount'] == 2
+          assert evidence['pathTraversalAccepted'] is False
+          assert evidence['symlinkMembersAccepted'] is False
+          assert evidence['specialMembersAccepted'] is False
+          assert evidence['exclusiveNoFollowWrites'] is True
+          assert evidence['privilegedOperations'] is False and evidence['selfUpdater'] is False
+          root = pathlib.Path(evidence['extractionRoot'])
+          assert root.parent == destination.resolve()
+          assert stat.S_IMODE(root.stat().st_mode) == 0o700
+          readme = root / 'docs' / 'readme.txt'
+          nested = root / 'folder' / 'nested.txt'
+          assert readme.read_bytes() == b'SWIR Archive Manager E2E\n'
+          assert nested.read_bytes() == b'nested\n'
+          assert stat.S_IMODE(readme.stat().st_mode) == 0o600
+          assert stat.S_IMODE(nested.stat().st_mode) == 0o600
+          assert not (destination.parent / 'escape.txt').exists()
+          PY
+
+  debian13-target-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    container:
+      image: debian:trixie-slim
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify exact System Edition GTK4/Python target runtime
+        run: |
+          set -euo pipefail
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3 python3-gi gir1.2-gtk-4.0
+          python3 -m py_compile system/apps/swir-files.py system/session/swir-shell.py
+          python3 system/apps/swir-files.py --archive-self-test
+          python3 - <<'PY'
+          import gi, tarfile, zipfile
+          gi.require_version('Gtk', '4.0')
+          from gi.repository import Gtk
+          assert Gtk.get_major_version() == 4
+          assert hasattr(zipfile, 'ZipFile') and hasattr(tarfile, 'open')
+          print('Debian 13 Archive Manager target runtime: OK')
+          PY
