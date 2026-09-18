@@ -8,6 +8,7 @@ on:
       - 'system/apps/swir-photo-studio.desktop'
       - 'system/session/swir-shell.py'
       - 'system/session/provision-graphical-session.sh'
+      - 'system/SWIR-NATIVE-PHOTO-STUDIO-0.1.md'
       - 'system/SWIR-NATIVE-CORE-APPS-0.1.md'
       - '.github/workflows/system-native-photo-studio.yml'
   pull_request:
@@ -16,6 +17,7 @@ on:
       - 'system/apps/swir-photo-studio.desktop'
       - 'system/session/swir-shell.py'
       - 'system/session/provision-graphical-session.sh'
+      - 'system/SWIR-NATIVE-PHOTO-STUDIO-0.1.md'
       - 'system/SWIR-NATIVE-CORE-APPS-0.1.md'
       - '.github/workflows/system-native-photo-studio.yml'
   workflow_dispatch:
@@ -51,9 +53,18 @@ jobs:
           grep -F 'gir1.2-gdkpixbuf-2.0' system/session/provision-graphical-session.sh >/dev/null
           grep -F 'MAX_HISTORY: Final = 24' system/apps/swir-photo-studio.py >/dev/null
           grep -F 'MAX_PIXELS: Final = 40_000_000' system/apps/swir-photo-studio.py >/dev/null
+          grep -F 'swir.native-photo-studio-runtime-evidence/0.2' system/apps/swir-photo-studio.py >/dev/null
+          grep -F 'def _crop_pixbuf(' system/apps/swir-photo-studio.py >/dev/null
+          grep -F 'def _transform_pixels(' system/apps/swir-photo-studio.py >/dev/null
+          grep -F 'exposure_stops=0.25' system/apps/swir-photo-studio.py >/dev/null
+          grep -F 'grayscale=True' system/apps/swir-photo-studio.py >/dev/null
+          grep -F 'sepia=True' system/apps/swir-photo-studio.py >/dev/null
           grep -F 'remoteUriInputAccepted' system/apps/swir-photo-studio.py >/dev/null
+          grep -F 'externalImageCommands' system/apps/swir-photo-studio.py >/dev/null
+          grep -F 'SWIR Native Photo Studio 0.2' system/SWIR-NATIVE-PHOTO-STUDIO-0.1.md >/dev/null
           ! grep -RE 'shell *= *True|os\.system\(' system/apps/swir-photo-studio.py
           ! grep -RE "/usr/bin/(sudo|pkexec|su)([[:space:]\"']|$)|/bin/su([[:space:]\"']|$)" system/apps/swir-photo-studio.py
+          ! grep -RE 'subprocess\.|Popen\(|ImageMagick|GraphicsMagick|ffmpeg' system/apps/swir-photo-studio.py
 
   wayland-runtime:
     runs-on: ubuntu-24.04
@@ -71,7 +82,7 @@ jobs:
           sudo install -m 0644 system/apps/swir-photo-studio.desktop /usr/share/applications/swir-photo-studio.desktop
           sudo update-desktop-database /usr/share/applications
           python3 system/apps/swir-photo-studio.py --self-test
-      - name: Map Photo Studio on Wayland and verify edit/export path
+      - name: Map Photo Studio on Wayland and verify advanced edit/export path
         run: |
           set -euo pipefail
           RUNTIME="${{ runner.temp }}/swir-photo-runtime"
@@ -116,7 +127,7 @@ jobs:
           evidence = json.load(open(sys.argv[1], encoding='utf-8'))
           source = pathlib.Path(sys.argv[2])
           export_dir = pathlib.Path(sys.argv[3])
-          assert evidence['schema'] == 'swir.native-photo-studio-runtime-evidence/0.1'
+          assert evidence['schema'] == 'swir.native-photo-studio-runtime-evidence/0.2'
           assert evidence['passed'] is True
           assert evidence['applicationId'] == 'dev.swir.PhotoStudio'
           assert evidence['nativeToolkit'] == 'gtk4-gdkpixbuf'
@@ -125,8 +136,12 @@ jobs:
           assert evidence['localFilesOnly'] is True and evidence['remoteUriInputAccepted'] is False
           assert evidence['historyBound'] == 24 and evidence['undoRedoVerified'] is True
           assert evidence['rotateVerified'] is True and evidence['flipVerified'] is True and evidence['resizeVerified'] is True
+          assert evidence['cropVerified'] is True
+          assert evidence['exposureVerified'] is True and evidence['brightnessVerified'] is True
+          assert evidence['contrastVerified'] is True and evidence['saturationVerified'] is True
+          assert evidence['grayscaleVerified'] is True and evidence['sepiaVerified'] is True
           assert evidence['pngExport'] is True and evidence['jpegExport'] is True and evidence['atomicExport'] is True
-          assert evidence['privilegedOperations'] is False and evidence['selfUpdater'] is False
+          assert evidence['privilegedOperations'] is False and evidence['externalImageCommands'] is False and evidence['selfUpdater'] is False
           for name in ('edited.png', 'edited.jpg'):
               path = export_dir / name
               assert path.is_file() and path.stat().st_size > 0
@@ -153,8 +168,11 @@ jobs:
           import gi
           gi.require_version('Gtk', '4.0')
           gi.require_version('GdkPixbuf', '2.0')
-          from gi.repository import GdkPixbuf, Gtk
+          from gi.repository import GdkPixbuf, GLib, Gtk
           pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, True, 8, 16, 16)
+          data = GLib.Bytes.new(bytes([32, 64, 128, 255]) * 16 * 16)
+          rebuilt = GdkPixbuf.Pixbuf.new_from_bytes(data, GdkPixbuf.Colorspace.RGB, True, 8, 16, 16, 64)
+          assert rebuilt.get_width() == 16 and rebuilt.get_height() == 16
           assert pixbuf.get_width() == 16 and Gtk.get_major_version() == 4
           print('Debian 13 Photo Studio target runtime: OK')
           PY
