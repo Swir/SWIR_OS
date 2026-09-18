@@ -167,12 +167,24 @@ class SwirShell(Gtk.Application):
         center.append(card)
         root.append(center)
 
-        dock = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        # The native app suite keeps growing, so the launcher surface must not
+        # force a single unbounded horizontal minimum width. FlowBox keeps the
+        # shell usable on the low-resolution virtual/physical displays used by
+        # installers and small screens while retaining every fixed launcher.
+        dock = Gtk.FlowBox()
         dock.add_css_class("swir-dock")
-        dock.set_halign(Gtk.Align.CENTER)
+        dock.set_selection_mode(Gtk.SelectionMode.NONE)
+        dock.set_homogeneous(True)
+        dock.set_row_spacing(8)
+        dock.set_column_spacing(10)
+        dock.set_min_children_per_line(2)
+        dock.set_max_children_per_line(5)
+        dock.set_halign(Gtk.Align.FILL)
+        dock.set_hexpand(True)
         for label, candidates in LAUNCHERS:
             button = Gtk.Button(label=label)
             button.add_css_class("swir-launcher")
+            button.set_hexpand(True)
             button.connect("clicked", self._launch, label, candidates)
             dock.append(button)
         root.append(dock)
