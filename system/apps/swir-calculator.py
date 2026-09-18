@@ -117,7 +117,10 @@ class SafeCalculator:
         if isinstance(node, ast.Constant):
             if isinstance(node.value, bool) or not isinstance(node.value, (int, float)):
                 raise CalculatorError("only numeric constants are allowed")
-            value = float(node.value)
+            try:
+                value = float(node.value)
+            except (OverflowError, ValueError) as exc:
+                raise CalculatorError("numeric constant is outside the supported range") from exc
             cls._validate_result(value)
             return value
         if isinstance(node, ast.UnaryOp) and type(node.op) in cls._unary_ops:
@@ -140,10 +143,13 @@ class SafeCalculator:
         raise CalculatorError("only arithmetic operators are allowed")
 
     @staticmethod
-    def _validate_result(value: float) -> None:
-        if not math.isfinite(value):
+    def _validate_result(value: object) -> None:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise CalculatorError("result must be a real number")
+        numeric = float(value)
+        if not math.isfinite(numeric):
             raise CalculatorError("result must be finite")
-        if abs(value) > MAX_ABS_VALUE:
+        if abs(numeric) > MAX_ABS_VALUE:
             raise CalculatorError("result is outside the supported range")
 
 
@@ -172,6 +178,7 @@ def _self_test() -> int:
         "[1, 2, 3]",
         "1 / 0",
         "2 ** 13",
+        "(-1) ** 0.5",
         "True + 1",
         "1e101",
     ):
