@@ -1,0 +1,170 @@
+name: System Native PDF Viewer
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'system/apps/swir-pdf-viewer.py'
+      - 'system/apps/swir-pdf-viewer.desktop'
+      - 'system/session/swir-shell.py'
+      - 'system/session/provision-graphical-session.sh'
+      - 'system/SWIR-NATIVE-PDF-VIEWER-0.1.md'
+      - '.github/workflows/system-native-pdf-viewer.yml'
+  pull_request:
+    paths:
+      - 'system/apps/swir-pdf-viewer.py'
+      - 'system/apps/swir-pdf-viewer.desktop'
+      - 'system/session/swir-shell.py'
+      - 'system/session/provision-graphical-session.sh'
+      - 'system/SWIR-NATIVE-PDF-VIEWER-0.1.md'
+      - '.github/workflows/system-native-pdf-viewer.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: system-native-pdf-viewer-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install static contract dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            desktop-file-utils python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-poppler-0.18
+      - name: Compile and verify PDF Viewer integration policy
+        run: |
+          set -euo pipefail
+          python3 -m py_compile system/apps/swir-pdf-viewer.py system/session/swir-shell.py
+          python3 system/apps/swir-pdf-viewer.py --self-test
+          desktop-file-validate system/apps/swir-pdf-viewer.desktop
+          bash -n system/session/provision-graphical-session.sh
+          grep -F 'PDF Viewer", (("/usr/local/bin/swir-pdf-viewer",)' system/session/swir-shell.py >/dev/null
+          grep -F 'system/apps/swir-pdf-viewer.py' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'system/apps/swir-pdf-viewer.desktop' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'gir1.2-poppler-0.18' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'MAX_PAGES: Final = 4000' system/apps/swir-pdf-viewer.py >/dev/null
+          grep -F 'MAX_PDF_BYTES: Final = 512 * 1024 * 1024' system/apps/swir-pdf-viewer.py >/dev/null
+          grep -F 'remoteUriInputAccepted' system/apps/swir-pdf-viewer.py >/dev/null
+          ! grep -RE 'shell *= *True|os\.system\(' system/apps/swir-pdf-viewer.py
+          ! grep -RE "/usr/bin/(sudo|pkexec|su)([[:space:]\"']|$)|/bin/su([[:space:]\"']|$)" system/apps/swir-pdf-viewer.py
+
+  wayland-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install controlled GTK4, Poppler and Wayland runtime
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            weston dbus-daemon desktop-file-utils libglib2.0-bin \
+            python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-poppler-0.18
+          sudo install -m 0755 system/apps/swir-pdf-viewer.py /usr/local/bin/swir-pdf-viewer
+          sudo install -m 0644 system/apps/swir-pdf-viewer.desktop /usr/share/applications/swir-pdf-viewer.desktop
+          sudo update-desktop-database /usr/share/applications
+          python3 system/apps/swir-pdf-viewer.py --self-test
+      - name: Map PDF Viewer on Wayland and verify local render path
+        run: |
+          set -euo pipefail
+          RUNTIME="${{ runner.temp }}/swir-pdf-runtime"
+          mkdir -p "$RUNTIME"
+          chmod 0700 "$RUNTIME"
+          export XDG_RUNTIME_DIR="$RUNTIME"
+          export WAYLAND_DISPLAY=wayland-swir-pdf
+          export GDK_BACKEND=wayland
+
+          python3 - "$RUNTIME/sample.pdf" <<'PY'
+          import pathlib, sys
+          path = pathlib.Path(sys.argv[1])
+          objects = [
+              b'<< /Type /Catalog /Pages 2 0 R >>',
+              b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+              b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 320 180] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
+              b'<< /Length 54 >>\nstream\nBT /F1 18 Tf 32 92 Td (SWIR PDF Viewer E2E) Tj ET\nendstream',
+              b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+          ]
+          data = bytearray(b'%PDF-1.4\n%SWIR\n')
+          offsets = [0]
+          for idx, obj in enumerate(objects, 1):
+              offsets.append(len(data))
+              data.extend(f'{idx} 0 obj\n'.encode())
+              data.extend(obj)
+              data.extend(b'\nendobj\n')
+          xref = len(data)
+          data.extend(f'xref\n0 {len(objects)+1}\n'.encode())
+          data.extend(b'0000000000 65535 f \n')
+          for offset in offsets[1:]:
+              data.extend(f'{offset:010d} 00000 n \n'.encode())
+          data.extend(f'trailer\n<< /Size {len(objects)+1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n'.encode())
+          path.write_bytes(data)
+          PY
+
+          weston --backend=headless-backend.so --socket="$WAYLAND_DISPLAY" --idle-time=0 --log="$RUNTIME/weston.log" &
+          WESTON_PID=$!
+          cleanup() { kill "$WESTON_PID" 2>/dev/null || true; wait "$WESTON_PID" 2>/dev/null || true; }
+          trap cleanup EXIT
+          for _ in $(seq 1 80); do
+            [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]] && break
+            kill -0 "$WESTON_PID"
+            sleep 0.25
+          done
+          [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]]
+
+          timeout --signal=TERM --kill-after=5s 30s \
+            dbus-run-session -- \
+            env LIBGL_ALWAYS_SOFTWARE=1 GTK_A11Y=none \
+                SWIR_APP_E2E=1 \
+                SWIR_APP_EVIDENCE_PATH="$RUNTIME/pdf.json" \
+                SWIR_PDF_E2E_FILE="$RUNTIME/sample.pdf" \
+            python3 system/apps/swir-pdf-viewer.py
+
+          python3 - "$RUNTIME/pdf.json" "$RUNTIME/sample.pdf" <<'PY'
+          import json, pathlib, sys
+          evidence = json.load(open(sys.argv[1], encoding='utf-8'))
+          source = pathlib.Path(sys.argv[2])
+          assert evidence['schema'] == 'swir.native-pdf-viewer-runtime-evidence/0.1'
+          assert evidence['passed'] is True
+          assert evidence['applicationId'] == 'dev.swir.PdfViewer'
+          assert evidence['nativeToolkit'] == 'gtk4-poppler'
+          assert evidence['displayProtocol'] == 'wayland' and evidence['windowMapped'] is True
+          assert evidence['sourceReadOnly'] is True and source.is_file()
+          assert evidence['localFilesOnly'] is True and evidence['remoteUriInputAccepted'] is False
+          assert evidence['renderVerified'] is True and evidence['pageCount'] == 1
+          assert evidence['pageLimit'] == 4000 and evidence['fileSizeLimitBytes'] == 536870912
+          assert evidence['privilegedOperations'] is False and evidence['selfUpdater'] is False
+          PY
+          gio mime application/pdf | grep -F 'swir-pdf-viewer.desktop' >/dev/null
+
+  debian13-target-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    container:
+      image: debian:trixie-slim
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify exact System Edition GTK4/Poppler target runtime
+        run: |
+          set -euo pipefail
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            desktop-file-utils python3 python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-poppler-0.18
+          python3 system/apps/swir-pdf-viewer.py --self-test
+          desktop-file-validate system/apps/swir-pdf-viewer.desktop
+          python3 - <<'PY'
+          import gi
+          gi.require_version('Gtk', '4.0')
+          gi.require_version('Poppler', '0.18')
+          from gi.repository import Gtk, Poppler
+          assert Gtk.get_major_version() == 4
+          assert hasattr(Poppler.Document, 'new_from_file')
+          print('Debian 13 PDF Viewer target runtime: OK')
+          PY
