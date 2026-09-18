@@ -1,0 +1,163 @@
+name: System Shell Themes
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'system/apps/core_runtime.py'
+      - 'system/apps/core_runtime.selftest.py'
+      - 'system/apps/swir-settings.py'
+      - 'system/session/swir-shell.py'
+      - 'system/SWIR-SHELL-THEMES-0.1.md'
+      - '.github/workflows/system-shell-themes.yml'
+  pull_request:
+    paths:
+      - 'system/apps/core_runtime.py'
+      - 'system/apps/core_runtime.selftest.py'
+      - 'system/apps/swir-settings.py'
+      - 'system/session/swir-shell.py'
+      - 'system/SWIR-SHELL-THEMES-0.1.md'
+      - '.github/workflows/system-shell-themes.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: system-shell-themes-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate data-only theme policy and compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            system/apps/core_runtime.py \
+            system/apps/core_runtime.selftest.py \
+            system/apps/swir-settings.py \
+            system/session/swir-shell.py
+          PYTHONPATH=system/apps python3 system/apps/core_runtime.selftest.py
+          grep -F 'THEME_SCHEMA: Final = "swir.theme/1.0"' system/apps/core_runtime.py >/dev/null
+          grep -F 'theme text/background contrast is below the accessibility minimum' system/apps/core_runtime.py >/dev/null
+          grep -F 'defaultThemeRecoveryAvailable' system/apps/swir-settings.py >/dev/null
+          grep -F 'themeFallbackToDefault' system/session/swir-shell.py >/dev/null
+          ! grep -RE 'eval\(|exec\(|os\.system\(|shell *= *True' system/apps/core_runtime.py system/apps/swir-settings.py system/session/swir-shell.py
+
+  wayland-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install controlled GTK4 and Wayland runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends weston python3-gi gir1.2-gtk-4.0
+      - name: Import, apply and recover SWIR shell themes on Wayland
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUNTIME="${{ runner.temp }}/swir-theme-runtime"
+          CONFIG="${{ runner.temp }}/swir-theme-config"
+          DATA="${{ runner.temp }}/swir-theme-data"
+          mkdir -p "$RUNTIME" "$CONFIG" "$DATA"
+          chmod 0700 "$RUNTIME" "$CONFIG" "$DATA"
+          export XDG_RUNTIME_DIR="$RUNTIME"
+          export XDG_CONFIG_HOME="$CONFIG"
+          export XDG_DATA_HOME="$DATA"
+          export WAYLAND_DISPLAY=wayland-swir-theme
+          export GDK_BACKEND=wayland
+          export PYTHONPATH="$GITHUB_WORKSPACE/system/apps"
+
+          cat > "$RUNTIME/midnight.swirtheme" <<'JSON'
+          {
+            "schema": "swir.theme/1.0",
+            "id": "swir.midnight",
+            "name": "Midnight",
+            "tokens": {
+              "background": "#000000",
+              "surface": "#101820",
+              "primary": "#0088FF",
+              "accent": "#62E5FF",
+              "text": "#FFFFFF",
+              "muted": "#A7C2D2",
+              "border": "#31566A",
+              "radius": 10,
+              "spacing": 12,
+              "fontScale": 1.05
+            }
+          }
+          JSON
+          chmod 0600 "$RUNTIME/midnight.swirtheme"
+
+          weston --backend=headless-backend.so --socket="$WAYLAND_DISPLAY" --idle-time=0 --log="$RUNTIME/weston.log" &
+          WESTON_PID=$!
+          cleanup() { kill "$WESTON_PID" 2>/dev/null || true; wait "$WESTON_PID" 2>/dev/null || true; }
+          trap cleanup EXIT
+          for _ in $(seq 1 80); do
+            [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]] && break
+            kill -0 "$WESTON_PID"
+            sleep 0.25
+          done
+          [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]]
+
+          SWIR_APP_E2E=1 \
+          SWIR_APP_EVIDENCE_PATH="$RUNTIME/settings-theme.json" \
+          SWIR_THEME_E2E_PACKAGE="$RUNTIME/midnight.swirtheme" \
+          timeout --signal=TERM --kill-after=5s 25s python3 system/apps/swir-settings.py
+
+          run_shell_probe() {
+            local evidence="$1"
+            rm -f "$evidence"
+            SWIR_SHELL_E2E=1 SWIR_SHELL_EVIDENCE_PATH="$evidence" python3 system/session/swir-shell.py &
+            local pid=$!
+            for _ in $(seq 1 80); do
+              [[ -s "$evidence" ]] && break
+              kill -0 "$pid" 2>/dev/null || break
+              sleep 0.25
+            done
+            [[ -s "$evidence" ]]
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+          }
+
+          run_shell_probe "$RUNTIME/shell-themed.json"
+
+          python3 - "$RUNTIME/settings-theme.json" "$RUNTIME/shell-themed.json" "$CONFIG/swir/settings.json" "$DATA/swir/themes/swir.midnight.swirtheme" <<'PY'
+          import json, pathlib, stat, sys
+          settings = json.load(open(sys.argv[1], encoding='utf-8'))
+          shell = json.load(open(sys.argv[2], encoding='utf-8'))
+          stored = json.load(open(sys.argv[3], encoding='utf-8'))
+          installed = pathlib.Path(sys.argv[4])
+          assert settings['passed'] is True and settings['themeFramework'] is True
+          assert settings['themeImportVerified'] is True and settings['themePackagesDataOnly'] is True
+          assert settings['defaultThemeRecoveryAvailable'] is True
+          assert settings['themeId'] == 'swir.midnight' == stored['themeId']
+          assert shell['passed'] is True and shell['themeId'] == 'swir.midnight'
+          assert shell['themeFallbackToDefault'] is False and shell['themePackagesDataOnly'] is True
+          assert installed.is_file() and stat.S_IMODE(installed.stat().st_mode) == 0o600
+          PY
+
+          PYTHONPATH=system/apps python3 - <<'PY'
+          from core_runtime import UserSettingsStore
+          store = UserSettingsStore()
+          current = store.load()
+          current['themeId'] = 'missing.theme'
+          store.save(current)
+          PY
+          run_shell_probe "$RUNTIME/shell-recovered.json"
+          python3 - "$RUNTIME/shell-recovered.json" <<'PY'
+          import json, sys
+          evidence = json.load(open(sys.argv[1], encoding='utf-8'))
+          assert evidence['passed'] is True
+          assert evidence['themeId'] == 'builtin.swir-dark'
+          assert evidence['themeFallbackToDefault'] is True
+          assert evidence['themePackagesDataOnly'] is True
+          PY
