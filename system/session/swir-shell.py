@@ -22,6 +22,7 @@ from typing import Final
 import gi
 
 gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
 
 LIBDIR = pathlib.Path("/usr/local/lib/swir")
@@ -401,10 +402,15 @@ class NotificationService:
             GLib.source_remove(old_timer)
         self.active[ident] = note
         self.history.append(note)
-        self.on_present(note)
+        GLib.idle_add(self._deliver_present, note)
         if timeout > 0:
             self.timers[ident] = GLib.timeout_add(timeout, self._expire, ident)
         return note
+
+    def _deliver_present(self, note: NativeNotification) -> bool:
+        if self.active.get(note.id) == note:
+            self.on_present(note)
+        return False
 
     def _expire(self, ident: int) -> bool:
         self.timers.pop(ident, None)
@@ -450,7 +456,7 @@ class SwirShell(Gtk.Application):
         self.theme_id = DEFAULT_THEME_ID
         self.theme_fallback = False
         self.theme_payload: dict[str, object] | None = None
-        self.toast_revealer: Gtk.Revealer | None = None
+        self.toast_panel: Gtk.Box | None = None
         self.toast_summary: Gtk.Label | None = None
         self.toast_body: Gtk.Label | None = None
         self.toast_actions: Gtk.Box | None = None
@@ -596,15 +602,13 @@ class SwirShell(Gtk.Application):
             dock.append(button)
         root.append(dock)
 
-        self.toast_revealer = Gtk.Revealer()
-        self.toast_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_LEFT)
-        self.toast_revealer.set_halign(Gtk.Align.END)
-        self.toast_revealer.set_valign(Gtk.Align.START)
-        self.toast_revealer.set_margin_top(72)
-        self.toast_revealer.set_margin_end(18)
-        toast = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7)
-        toast.add_css_class("swir-notification")
-        toast.set_size_request(380, -1)
+        self.toast_panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7)
+        self.toast_panel.add_css_class("swir-notification")
+        self.toast_panel.set_size_request(380, -1)
+        self.toast_panel.set_halign(Gtk.Align.END)
+        self.toast_panel.set_valign(Gtk.Align.START)
+        self.toast_panel.set_margin_top(72)
+        self.toast_panel.set_margin_end(18)
         toast_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self.toast_summary = Gtk.Label()
         self.toast_summary.add_css_class("swir-notification-title")
@@ -616,15 +620,15 @@ class SwirShell(Gtk.Application):
         dismiss.add_css_class("swir-notification-button")
         dismiss.connect("clicked", self._dismiss_current_notification)
         toast_header.append(dismiss)
-        toast.append(toast_header)
+        self.toast_panel.append(toast_header)
         self.toast_body = Gtk.Label(wrap=True)
         self.toast_body.set_xalign(0)
         self.toast_body.set_max_width_chars(52)
-        toast.append(self.toast_body)
+        self.toast_panel.append(self.toast_body)
         self.toast_actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        toast.append(self.toast_actions)
-        self.toast_revealer.set_child(toast)
-        overlay.add_overlay(self.toast_revealer)
+        self.toast_panel.append(self.toast_actions)
+        self.toast_panel.set_visible(False)
+        overlay.add_overlay(self.toast_panel)
 
         self._refresh_notification_history()
         GLib.timeout_add_seconds(1, self._update_clock)
@@ -671,16 +675,16 @@ class SwirShell(Gtk.Application):
                 button.add_css_class("swir-notification-button")
                 button.connect("clicked", self._notification_action_clicked, note.id, key)
                 self.toast_actions.append(button)
-        if self.toast_revealer is not None:
-            self.toast_revealer.set_reveal_child(True)
+        if self.toast_panel is not None:
+            self.toast_panel.set_visible(True)
         self._refresh_notification_history()
         self._write_notification_evidence(note)
 
     def _notification_closed(self, ident: int, _reason: int) -> None:
         if ident == self.current_notification_id:
             self.current_notification_id = 0
-            if self.toast_revealer is not None:
-                self.toast_revealer.set_reveal_child(False)
+            if self.toast_panel is not None:
+                self.toast_panel.set_visible(False)
 
     def _notification_action_clicked(self, _button: Gtk.Button, ident: int, key: str) -> None:
         if self.notification_service is None:
