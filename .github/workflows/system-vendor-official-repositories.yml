@@ -5,6 +5,8 @@ on:
     paths:
       - 'system/hardware/vendor-official-repository-service.mjs'
       - 'system/hardware/vendor-official-repository-service.selftest.mjs'
+      - 'system/hardware/vendor-repository-trust-evidence.mjs'
+      - 'system/hardware/vendor-repository-trust-evidence.selftest.mjs'
       - 'system/hardware/vendor-repositories.example.json'
       - 'system/SWIR-VENDOR-OFFICIAL-REPOSITORIES-0.1.md'
       - '.github/workflows/system-vendor-official-repositories.yml'
@@ -12,6 +14,8 @@ on:
     paths:
       - 'system/hardware/vendor-official-repository-service.mjs'
       - 'system/hardware/vendor-official-repository-service.selftest.mjs'
+      - 'system/hardware/vendor-repository-trust-evidence.mjs'
+      - 'system/hardware/vendor-repository-trust-evidence.selftest.mjs'
       - 'system/hardware/vendor-repositories.example.json'
       - 'system/SWIR-VENDOR-OFFICIAL-REPOSITORIES-0.1.md'
       - '.github/workflows/system-vendor-official-repositories.yml'
@@ -23,13 +27,22 @@ permissions:
 jobs:
   policy:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Syntax-check vendor repository boundary
+        run: |
+          node --check system/hardware/vendor-official-repository-service.mjs
+          node --check system/hardware/vendor-official-repository-service.selftest.mjs
+          node --check system/hardware/vendor-repository-trust-evidence.mjs
+          node --check system/hardware/vendor-repository-trust-evidence.selftest.mjs
       - name: Run policy self-test
         run: node system/hardware/vendor-official-repository-service.selftest.mjs
+      - name: Run evidence self-test
+        run: node system/hardware/vendor-repository-trust-evidence.selftest.mjs
       - name: Verify production root-owned policy boundary
         run: |
           set -euo pipefail
@@ -58,9 +71,38 @@ jobs:
             echo 'Symlink vendor policy was incorrectly accepted' >&2
             exit 1
           fi
+      - name: Qualify pinned NVIDIA Debian 13 repository evidence
+        run: |
+          set -euo pipefail
+          command -v gpg >/dev/null
+          command -v gpgv >/dev/null
+          EVIDENCE="${RUNNER_TEMP}/nvidia-debian13-evidence.json"
+          node system/hardware/vendor-repository-trust-evidence.mjs --probe nvidia-debian13-amd64 > "${EVIDENCE}"
+          node - "${EVIDENCE}" <<'NODE'
+          const fs = require('node:fs');
+          const evidence = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          const assert = (condition, message) => { if (!condition) throw new Error(message); };
+          assert(evidence.schema === 'swir.vendor-repository-evidence/0.1', 'unexpected evidence schema');
+          assert(evidence.qualificationOnly === true, 'evidence must remain qualification-only');
+          assert(evidence.authorizesMutation === false, 'evidence must not authorize mutation');
+          assert(evidence.authorizesRepositoryEnablement === false, 'evidence must not authorize repository enablement');
+          assert(evidence.profileId === 'nvidia-debian13-amd64', 'unexpected evidence profile');
+          assert(evidence.repositoryId === 'nvidia-cuda-debian13-x86_64', 'unexpected repository id');
+          assert(evidence.hardwareVendor === '10de', 'unexpected hardware vendor id');
+          assert(evidence.distribution?.id === 'debian' && evidence.distribution?.versionId === '13' && evidence.distribution?.architecture === 'x86_64', 'unexpected platform binding');
+          assert(/^[A-F0-9]{40}$/.test(evidence.key?.fingerprint || ''), 'missing full signing-key fingerprint');
+          assert(evidence.key.fingerprint.endsWith('8793F200'), 'signing key does not match reviewed NVIDIA key id');
+          assert(evidence.inRelease?.validSignaturePrimaryFingerprint === evidence.key.fingerprint, 'InRelease signature is not bound to the fetched primary key');
+          assert(Array.isArray(evidence.packages?.verified) && evidence.packages.verified.includes('cuda-keyring') && evidence.packages.verified.includes('nvidia-open'), 'required NVIDIA packages were not verified in Packages.gz');
+          console.log(`qualified ${evidence.repositoryId} key=${evidence.key.fingerprint} packages=${evidence.packages.verified.join(',')}`);
+          NODE
       - name: Assert no mutation or direct-download shortcut
         run: |
           set -euo pipefail
           grep -F "mutationRequiresExistingJournaledPackageBroker: true" system/hardware/vendor-official-repository-service.mjs >/dev/null
           grep -F "productionNetworkFetchImplemented: false" system/hardware/vendor-official-repository-service.mjs >/dev/null
+          grep -F "qualificationOnly: true" system/hardware/vendor-repository-trust-evidence.mjs >/dev/null
+          grep -F "authorizesMutation: false" system/hardware/vendor-repository-trust-evidence.mjs >/dev/null
+          grep -F "authorizesRepositoryEnablement: false" system/hardware/vendor-repository-trust-evidence.mjs >/dev/null
           ! grep -RE "child_process|exec\(|spawn\(|sudo|pkexec|curl|wget|fetch\(" system/hardware/vendor-official-repository-service.mjs
+          ! grep -RE "apt-get|apt install|dpkg|sources\.list|trusted\.gpg|sudo|pkexec" system/hardware/vendor-repository-trust-evidence.mjs
