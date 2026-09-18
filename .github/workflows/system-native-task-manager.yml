@@ -1,0 +1,158 @@
+name: System Native Task Manager
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'system/apps/swir-system-monitor.py'
+      - 'system/SWIR-NATIVE-TASK-MANAGER-0.1.md'
+      - 'system/SWIR-NATIVE-DIAGNOSTICS-0.1.md'
+      - '.github/workflows/system-native-task-manager.yml'
+  pull_request:
+    paths:
+      - 'system/apps/swir-system-monitor.py'
+      - 'system/SWIR-NATIVE-TASK-MANAGER-0.1.md'
+      - 'system/SWIR-NATIVE-DIAGNOSTICS-0.1.md'
+      - '.github/workflows/system-native-task-manager.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: system-native-task-manager-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  policy-and-signal-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GTK4 runtime for self-test
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3-gi gir1.2-gtk-4.0
+      - name: Verify bounded same-user process control
+        run: |
+          set -euo pipefail
+          python3 -m py_compile system/apps/swir-system-monitor.py
+          python3 system/apps/swir-system-monitor.py --self-test
+          grep -F 'MAX_FILTER_CHARS: Final = 80' system/apps/swir-system-monitor.py >/dev/null
+          grep -F 'signal.pidfd_send_signal(fd, signal.SIGTERM, None, 0)' system/apps/swir-system-monitor.py >/dev/null
+          grep -F 'os.kill(pid, signal.SIGTERM)' system/apps/swir-system-monitor.py >/dev/null
+          grep -F 'processTerminationSameUidOnly": True' system/apps/swir-system-monitor.py >/dev/null
+          grep -F 'processTerminationRequiresConfirmation": True' system/apps/swir-system-monitor.py >/dev/null
+          grep -F 'processIdentityRevalidated": True' system/apps/swir-system-monitor.py >/dev/null
+          grep -F 'processAncestorProtection": True' system/apps/swir-system-monitor.py >/dev/null
+          ! grep -F 'SIGKILL' system/apps/swir-system-monitor.py
+          ! grep -RE '/usr/bin/(sudo|pkexec|su)|/bin/su|os\.killpg\(' system/apps/swir-system-monitor.py
+      - name: Exercise real SIGTERM on an owned disposable child
+        run: |
+          set -euo pipefail
+          sleep 30 &
+          CHILD_PID=$!
+          cleanup() { kill "$CHILD_PID" 2>/dev/null || true; wait "$CHILD_PID" 2>/dev/null || true; }
+          trap cleanup EXIT
+          python3 - "$CHILD_PID" <<'PY'
+          import importlib.util
+          import os
+          import pathlib
+          import sys
+
+          pid = int(sys.argv[1])
+          path = pathlib.Path('system/apps/swir-system-monitor.py')
+          spec = importlib.util.spec_from_file_location('swir_system_monitor_task_test', path)
+          assert spec and spec.loader
+          module = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = module
+          spec.loader.exec_module(module)
+          ident = module.read_process_identity(pid)
+          target = module.ProcessRow(pid=ident.pid, name=ident.name, rss_kib=0, uid=ident.uid, start_ticks=ident.start_ticks)
+          module.terminate_same_user_process(target)
+          print(f'sent safe SIGTERM to disposable child {pid}')
+          PY
+          set +e
+          wait "$CHILD_PID"
+          STATUS=$?
+          set -e
+          trap - EXIT
+          [[ "$STATUS" -eq 143 ]]
+
+  wayland-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install controlled GTK4 and Wayland runtime
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends weston python3-gi gir1.2-gtk-4.0 systemd
+      - name: Map Task Manager and verify safety evidence
+        run: |
+          set -euo pipefail
+          RUNTIME="${{ runner.temp }}/swir-task-manager-runtime"
+          mkdir -p "$RUNTIME"
+          chmod 0700 "$RUNTIME"
+          export XDG_RUNTIME_DIR="$RUNTIME"
+          export WAYLAND_DISPLAY=wayland-swir-task-manager
+          export GDK_BACKEND=wayland
+
+          weston --backend=headless-backend.so --socket="$WAYLAND_DISPLAY" --idle-time=0 --log="$RUNTIME/weston.log" &
+          WESTON_PID=$!
+          cleanup() { kill "$WESTON_PID" 2>/dev/null || true; wait "$WESTON_PID" 2>/dev/null || true; }
+          trap cleanup EXIT
+          for _ in $(seq 1 80); do
+            [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]] && break
+            kill -0 "$WESTON_PID"
+            sleep 0.25
+          done
+          [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]]
+
+          EVIDENCE="$RUNTIME/task-manager.json"
+          timeout --signal=TERM --kill-after=5s 25s \
+            env SWIR_APP_E2E=1 SWIR_APP_EVIDENCE_PATH="$EVIDENCE" \
+            python3 system/apps/swir-system-monitor.py
+
+          python3 - "$EVIDENCE" <<'PY'
+          import json, sys
+          evidence = json.load(open(sys.argv[1], encoding='utf-8'))
+          assert evidence['schema'] == 'swir.native-system-monitor-runtime-evidence/0.1'
+          assert evidence['passed'] is True
+          assert evidence['applicationId'] == 'dev.swir.SystemMonitor'
+          assert evidence['displayProtocol'] == 'wayland' and evidence['windowMapped'] is True
+          assert evidence['privilegedOperations'] is False
+          assert evidence['processFilterMaxChars'] == 80
+          assert evidence['processTerminationEnabled'] is True
+          assert evidence['processTerminationSignal'] == 'SIGTERM'
+          assert evidence['processTerminationSameUidOnly'] is True
+          assert evidence['processTerminationRequiresConfirmation'] is True
+          assert evidence['processIdentityRevalidated'] is True
+          assert evidence['processAncestorProtection'] is True
+          assert evidence['processTerminationUsesShell'] is False
+          assert evidence['processTerminationElevates'] is False
+          assert evidence['diagnosticsReadOnly'] is True
+          PY
+
+  debian13-target-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    container:
+      image: debian:trixie-slim
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Debian 13 GTK4 target and task-manager self-test
+        run: |
+          set -euo pipefail
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3 python3-gi gir1.2-gtk-4.0
+          python3 -m py_compile system/apps/swir-system-monitor.py
+          python3 system/apps/swir-system-monitor.py --self-test
+          python3 - <<'PY'
+          import os, signal
+          assert hasattr(os, 'pidfd_open')
+          assert hasattr(signal, 'pidfd_send_signal')
+          print('Debian 13 safe task-manager runtime: OK')
+          PY

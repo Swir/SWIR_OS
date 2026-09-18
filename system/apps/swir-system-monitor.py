@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-"""SWIR System Monitor — first-party native GTK4 process/resource and diagnostics viewer."""
+"""SWIR System Monitor — native GTK4 task manager, resource viewer and diagnostics surface."""
 
 from __future__ import annotations
 
 import json
 import os
 import pathlib
+import signal
 import subprocess
 import sys
+import tempfile
 import threading
 from dataclasses import dataclass
-from typing import Final
+from typing import Callable, Final
 
 import gi
 
@@ -20,6 +22,8 @@ from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 APP_ID: Final = "dev.swir.SystemMonitor"
 EVIDENCE_SCHEMA: Final = "swir.native-system-monitor-runtime-evidence/0.1"
 MAX_PROCESS_ROWS: Final = 200
+MAX_PROCESS_NAME_CHARS: Final = 120
+MAX_FILTER_CHARS: Final = 80
 COMMAND_TIMEOUT_SECONDS: Final = 3
 MAX_COMMAND_OUTPUT_CHARS: Final = 64 * 1024
 JOURNAL_LINE_LIMIT: Final = 50
@@ -38,6 +42,7 @@ JOURNAL_WARNINGS_COMMAND: Final = (
     "short-monotonic",
 )
 ALLOWED_DIAGNOSTIC_COMMANDS: Final = frozenset({FAILED_UNITS_COMMAND, JOURNAL_WARNINGS_COMMAND})
+PROC_ROOT: Final = pathlib.Path("/proc")
 
 CSS = b"""
 window.swir-app { background: #02050A; color: #F4FAFF; }
@@ -47,14 +52,25 @@ window.swir-app { background: #02050A; color: #F4FAFF; }
 .swir-metric { background: #07111C; border: 1px solid rgba(98,229,255,0.28); border-radius: 12px; padding: 10px 14px; }
 .swir-row { padding: 7px 10px; border-bottom: 1px solid rgba(98,229,255,0.08); }
 .swir-diag { background: #07111C; border: 1px solid rgba(98,229,255,0.18); border-radius: 12px; padding: 12px; }
+.swir-control { background: #07111C; color: #F4FAFF; border: 1px solid rgba(0,136,255,0.72); border-radius: 10px; padding: 7px 10px; }
+.swir-danger { background: #2A0A0A; color: #FFD9D9; border: 1px solid #F06A6A; border-radius: 10px; padding: 7px 12px; }
 """
-
 
 @dataclass(frozen=True)
 class ProcessRow:
     pid: int
     name: str
     rss_kib: int
+    uid: int
+    start_ticks: int
+
+
+@dataclass(frozen=True)
+class ProcessIdentity:
+    pid: int
+    name: str
+    uid: int
+    start_ticks: int
 
 
 @dataclass(frozen=True)
@@ -74,6 +90,10 @@ class DiagnosticsSnapshot:
     journal: CommandResult
 
 
+class ProcessTerminationError(RuntimeError):
+    """Raised when a process does not satisfy the safe same-user SIGTERM contract."""
+
+
 def read_meminfo() -> dict[str, int]:
     values: dict[str, int] = {}
     with open("/proc/meminfo", encoding="utf-8") as handle:
@@ -90,14 +110,67 @@ def read_uptime_seconds() -> float:
         return float(handle.read().split()[0])
 
 
-def read_processes(limit: int = MAX_PROCESS_ROWS) -> list[ProcessRow]:
+def _parse_status(path: pathlib.Path) -> tuple[int, int, str]:
+    uid = -1
+    ppid = -1
+    name = ""
+    with path.open(encoding="utf-8") as handle:
+        for raw in handle:
+            if raw.startswith("Uid:"):
+                parts = raw.split()
+                if len(parts) >= 2 and parts[1].isdigit():
+                    uid = int(parts[1])
+            elif raw.startswith("PPid:"):
+                parts = raw.split()
+                if len(parts) >= 2 and parts[1].isdigit():
+                    ppid = int(parts[1])
+            elif raw.startswith("Name:"):
+                name = raw.split(":", 1)[1].strip()
+    if uid < 0:
+        raise ProcessTerminationError("process UID is unavailable")
+    return uid, ppid, name[:MAX_PROCESS_NAME_CHARS]
+
+
+def _parse_start_ticks(stat_text: str) -> int:
+    close = stat_text.rfind(")")
+    if close <= 0:
+        raise ProcessTerminationError("process stat record is malformed")
+    tail = stat_text[close + 1 :].strip().split()
+    # /proc/PID/stat field 22 (starttime); tail starts at field 3.
+    if len(tail) <= 19 or not tail[19].isdigit():
+        raise ProcessTerminationError("process start identity is unavailable")
+    return int(tail[19])
+
+
+def read_process_identity(pid: int, proc_root: pathlib.Path = PROC_ROOT) -> ProcessIdentity:
+    if not isinstance(pid, int) or pid <= 0:
+        raise ProcessTerminationError("invalid process id")
+    entry = proc_root / str(pid)
+    try:
+        uid, _ppid, status_name = _parse_status(entry / "status")
+        stat_text = (entry / "stat").read_text(encoding="utf-8")
+        start_ticks = _parse_start_ticks(stat_text)
+        comm_name = (entry / "comm").read_text(encoding="utf-8").strip()
+    except ProcessTerminationError:
+        raise
+    except (FileNotFoundError, PermissionError, ProcessLookupError, OSError, UnicodeError) as exc:
+        raise ProcessTerminationError("process is no longer available") from exc
+    name = (comm_name or status_name or f"pid-{pid}")[:MAX_PROCESS_NAME_CHARS]
+    return ProcessIdentity(pid=pid, name=name, uid=uid, start_ticks=start_ticks)
+
+
+def read_processes(limit: int = MAX_PROCESS_ROWS, proc_root: pathlib.Path = PROC_ROOT) -> list[ProcessRow]:
     rows: list[ProcessRow] = []
-    for entry in pathlib.Path("/proc").iterdir():
+    try:
+        entries = list(proc_root.iterdir())
+    except OSError:
+        return rows
+    for entry in entries:
         if not entry.name.isdigit():
             continue
         pid = int(entry.name)
         try:
-            name = (entry / "comm").read_text(encoding="utf-8").strip()
+            identity = read_process_identity(pid, proc_root)
             rss_kib = 0
             with (entry / "status").open(encoding="utf-8") as handle:
                 for line in handle:
@@ -106,11 +179,82 @@ def read_processes(limit: int = MAX_PROCESS_ROWS) -> list[ProcessRow]:
                         if len(parts) >= 2 and parts[1].isdigit():
                             rss_kib = int(parts[1])
                         break
-        except (FileNotFoundError, PermissionError, ProcessLookupError, OSError, UnicodeError):
+        except (ProcessTerminationError, FileNotFoundError, PermissionError, ProcessLookupError, OSError, UnicodeError):
             continue
-        rows.append(ProcessRow(pid=pid, name=name[:120], rss_kib=rss_kib))
+        rows.append(
+            ProcessRow(
+                pid=identity.pid,
+                name=identity.name,
+                rss_kib=rss_kib,
+                uid=identity.uid,
+                start_ticks=identity.start_ticks,
+            )
+        )
     rows.sort(key=lambda row: (-row.rss_kib, row.pid))
-    return rows[:limit]
+    return rows[: max(0, min(int(limit), MAX_PROCESS_ROWS))]
+
+
+def _ancestor_pids(proc_root: pathlib.Path = PROC_ROOT, start_pid: int | None = None) -> set[int]:
+    current = os.getpid() if start_pid is None else int(start_pid)
+    protected: set[int] = set()
+    for _ in range(64):
+        if current <= 0 or current in protected:
+            break
+        protected.add(current)
+        if current == 1:
+            break
+        try:
+            _uid, ppid, _name = _parse_status(proc_root / str(current) / "status")
+        except (ProcessTerminationError, OSError, UnicodeError):
+            break
+        if ppid <= 0 or ppid == current:
+            break
+        current = ppid
+    protected.update({1, os.getpid(), os.getppid()})
+    return protected
+
+
+def _send_sigterm_pidfd(pid: int) -> None:
+    """Send SIGTERM to one PID, preferring a pidfd to avoid PID-reuse races."""
+    if hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal"):
+        fd = os.pidfd_open(pid, 0)
+        try:
+            signal.pidfd_send_signal(fd, signal.SIGTERM, None, 0)
+        finally:
+            os.close(fd)
+        return
+    os.kill(pid, signal.SIGTERM)
+
+
+def terminate_same_user_process(
+    target: ProcessRow | ProcessIdentity,
+    *,
+    proc_root: pathlib.Path = PROC_ROOT,
+    current_uid: int | None = None,
+    protected_pids: set[int] | None = None,
+    sender: Callable[[int], None] | None = None,
+) -> None:
+    """Revalidate process identity and send only SIGTERM to a same-user process."""
+    uid = os.getuid() if current_uid is None else int(current_uid)
+    protected = _ancestor_pids(proc_root) if protected_pids is None else set(protected_pids)
+    if target.pid <= 1 or target.pid in protected:
+        raise ProcessTerminationError("SWIR protects the current session and its ancestor processes")
+    if target.uid != uid:
+        raise ProcessTerminationError("only processes owned by the signed-in user can be ended")
+
+    live = read_process_identity(target.pid, proc_root)
+    if live.uid != uid:
+        raise ProcessTerminationError("process ownership changed before termination")
+    if live.start_ticks != target.start_ticks:
+        raise ProcessTerminationError("process identity changed; refusing a reused PID")
+    if live.name != target.name:
+        raise ProcessTerminationError("process identity changed; refresh before ending it")
+
+    send = _send_sigterm_pidfd if sender is None else sender
+    try:
+        send(target.pid)
+    except (PermissionError, ProcessLookupError, OSError) as exc:
+        raise ProcessTerminationError(f"could not send SIGTERM: {exc}") from exc
 
 
 def format_mib(kib: int) -> str:
@@ -141,11 +285,7 @@ def read_kernel_version() -> str:
 
 
 def _diagnostic_env() -> dict[str, str]:
-    env = {
-        "PATH": "/usr/bin:/bin",
-        "LANG": "C.UTF-8",
-        "LC_ALL": "C.UTF-8",
-    }
+    env = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"}
     for key in ("DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR"):
         value = os.environ.get(key)
         if value:
@@ -180,10 +320,7 @@ def run_read_only_command(argv: tuple[str, ...]) -> CommandResult:
         if isinstance(stderr, bytes):
             stderr = stderr.decode("utf-8", errors="replace")
         return CommandResult(
-            "timeout",
-            None,
-            stdout[:MAX_COMMAND_OUTPUT_CHARS],
-            stderr[:MAX_COMMAND_OUTPUT_CHARS],
+            "timeout", None, stdout[:MAX_COMMAND_OUTPUT_CHARS], stderr[:MAX_COMMAND_OUTPUT_CHARS]
         )
     except OSError:
         return CommandResult("unavailable", None, "", "")
@@ -199,12 +336,99 @@ def _nonempty_lines(text: str, limit: int) -> list[str]:
     return [line for line in text.splitlines() if line.strip()][:limit]
 
 
+def _write_fake_process(root: pathlib.Path, pid: int, uid: int, start_ticks: int, name: str, ppid: int = 1) -> ProcessRow:
+    entry = root / str(pid)
+    entry.mkdir(parents=True)
+    (entry / "status").write_text(
+        f"Name:\t{name}\nUid:\t{uid}\t{uid}\t{uid}\t{uid}\nPPid:\t{ppid}\nVmRSS:\t1024 kB\n",
+        encoding="utf-8",
+    )
+    # Fields 3..21 contain 19 values before field 22=starttime.
+    tail = ["S"] + [str(ppid)] + ["0"] * 17 + [str(start_ticks)] + ["0"] * 4
+    (entry / "stat").write_text(f"{pid} ({name}) " + " ".join(tail) + "\n", encoding="utf-8")
+    (entry / "comm").write_text(name + "\n", encoding="utf-8")
+    ident = read_process_identity(pid, root)
+    return ProcessRow(pid=pid, name=ident.name, rss_kib=1024, uid=ident.uid, start_ticks=ident.start_ticks)
+
+
+def _self_test() -> int:
+    with tempfile.TemporaryDirectory(prefix="swir-task-manager-selftest-") as tmp:
+        root = pathlib.Path(tmp)
+        sent: list[int] = []
+
+        safe = _write_fake_process(root, 4242, 1000, 777, "safe-test")
+        terminate_same_user_process(
+            safe,
+            proc_root=root,
+            current_uid=1000,
+            protected_pids={1, 99},
+            sender=sent.append,
+        )
+        assert sent == [4242]
+
+        foreign = _write_fake_process(root, 4343, 1001, 888, "foreign-test")
+        try:
+            terminate_same_user_process(
+                foreign,
+                proc_root=root,
+                current_uid=1000,
+                protected_pids={1},
+                sender=sent.append,
+            )
+        except ProcessTerminationError:
+            pass
+        else:
+            raise AssertionError("foreign-user process termination was accepted")
+
+        protected = _write_fake_process(root, 4444, 1000, 999, "protected-test")
+        try:
+            terminate_same_user_process(
+                protected,
+                proc_root=root,
+                current_uid=1000,
+                protected_pids={1, 4444},
+                sender=sent.append,
+            )
+        except ProcessTerminationError:
+            pass
+        else:
+            raise AssertionError("protected process termination was accepted")
+
+        reused = _write_fake_process(root, 4545, 1000, 111, "reused-test")
+        (root / "4545" / "stat").write_text(
+            "4545 (reused-test) " + " ".join(["S", "1"] + ["0"] * 17 + ["222"] + ["0"] * 4) + "\n",
+            encoding="utf-8",
+        )
+        try:
+            terminate_same_user_process(
+                reused,
+                proc_root=root,
+                current_uid=1000,
+                protected_pids={1},
+                sender=sent.append,
+            )
+        except ProcessTerminationError:
+            pass
+        else:
+            raise AssertionError("PID-reuse identity mismatch was accepted")
+
+        rows = read_processes(proc_root=root)
+        assert rows and len(rows) <= MAX_PROCESS_ROWS
+        assert MAX_FILTER_CHARS == 80
+
+    print("SWIR System Monitor task-manager self-test: OK")
+    return 0
+
+
 class SwirSystemMonitor(Gtk.Application):
     def __init__(self) -> None:
         super().__init__(application_id=APP_ID)
         self.window: Gtk.ApplicationWindow | None = None
         self.metrics: Gtk.Label | None = None
         self.listbox: Gtk.ListBox | None = None
+        self.process_filter: Gtk.Entry | None = None
+        self.end_process_button: Gtk.Button | None = None
+        self.process_status: Gtk.Label | None = None
         self.diag_summary: Gtk.Label | None = None
         self.diag_text: Gtk.TextView | None = None
         self.diag_refresh: Gtk.Button | None = None
@@ -236,7 +460,7 @@ class SwirSystemMonitor(Gtk.Application):
 
         window = Gtk.ApplicationWindow(application=self)
         window.set_title("SWIR System Monitor")
-        window.set_default_size(980, 680)
+        window.set_default_size(1040, 720)
         window.add_css_class("swir-app")
         self.window = window
 
@@ -267,11 +491,37 @@ class SwirSystemMonitor(Gtk.Application):
         self.metrics.set_selectable(True)
         overview.append(self.metrics)
 
+        process_toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.process_filter = Gtk.Entry()
+        self.process_filter.set_placeholder_text("Filter by process name or PID")
+        self.process_filter.set_max_length(MAX_FILTER_CHARS)
+        self.process_filter.set_hexpand(True)
+        self.process_filter.add_css_class("swir-control")
+        self.process_filter.connect("changed", self._on_process_filter_changed)
+        process_toolbar.append(self.process_filter)
+
+        self.end_process_button = Gtk.Button(label="End Process")
+        self.end_process_button.add_css_class("swir-danger")
+        self.end_process_button.set_sensitive(False)
+        self.end_process_button.set_tooltip_text("Send SIGTERM to the selected process owned by your user")
+        self.end_process_button.connect("clicked", self._on_end_process_clicked)
+        process_toolbar.append(self.end_process_button)
+        overview.append(process_toolbar)
+
+        self.process_status = Gtk.Label(
+            label="Select a process to inspect it. Ending a process requires confirmation and never elevates privileges."
+        )
+        self.process_status.add_css_class("swir-muted")
+        self.process_status.set_xalign(0)
+        self.process_status.set_wrap(True)
+        overview.append(self.process_status)
+
         scroller = Gtk.ScrolledWindow()
         scroller.set_hexpand(True)
         scroller.set_vexpand(True)
         self.listbox = Gtk.ListBox()
-        self.listbox.set_selection_mode(Gtk.SelectionMode.NONE)
+        self.listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self.listbox.connect("row-selected", self._on_process_selected)
         scroller.set_child(self.listbox)
         overview.append(scroller)
         notebook.append_page(overview, Gtk.Label(label="Processes"))
@@ -321,8 +571,21 @@ class SwirSystemMonitor(Gtk.Application):
             self.listbox.remove(child)
             child = next_child
 
+    def _on_process_filter_changed(self, _entry: Gtk.Entry) -> None:
+        self._refresh()
+
+    def _filtered_processes(self, processes: list[ProcessRow]) -> list[ProcessRow]:
+        query = ""
+        if self.process_filter is not None:
+            query = self.process_filter.get_text().strip().casefold()[:MAX_FILTER_CHARS]
+        if not query:
+            return processes
+        return [row for row in processes if query in row.name.casefold() or query in str(row.pid)]
+
     def _refresh(self) -> bool:
         assert self.metrics is not None and self.listbox is not None
+        selected = self._selected_process()
+        selected_identity = (selected.pid, selected.start_ticks) if selected else None
         try:
             mem = read_meminfo()
             uptime = read_uptime_seconds()
@@ -337,16 +600,19 @@ class SwirSystemMonitor(Gtk.Application):
         used = max(0, total - available)
         self.last_process_count = len(processes)
         self.last_mem_total_kib = total
+        visible = self._filtered_processes(processes)
         self.metrics.set_text(
             f"Memory {format_mib(used)} / {format_mib(total)}  •  "
             f"Load {load[0]:.2f} {load[1]:.2f} {load[2]:.2f}  •  "
-            f"Uptime {uptime / 3600.0:.1f} h"
+            f"Uptime {uptime / 3600.0:.1f} h  •  Processes {len(processes)}"
         )
 
         self._clear_rows()
-        for process in processes:
+        reselection: Gtk.ListBoxRow | None = None
+        for process in visible:
             row = Gtk.ListBoxRow()
             row.add_css_class("swir-row")
+            row.swir_process = process  # type: ignore[attr-defined]
             box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
             pid = Gtk.Label(label=str(process.pid))
             pid.set_width_chars(8)
@@ -363,7 +629,82 @@ class SwirSystemMonitor(Gtk.Application):
             box.append(rss)
             row.set_child(box)
             self.listbox.append(row)
+            if selected_identity == (process.pid, process.start_ticks):
+                reselection = row
+        if reselection is not None:
+            self.listbox.select_row(reselection)
+        else:
+            self._set_end_button_sensitive(False)
         return True
+
+    def _selected_process(self) -> ProcessRow | None:
+        if self.listbox is None:
+            return None
+        row = self.listbox.get_selected_row()
+        return getattr(row, "swir_process", None) if row is not None else None
+
+    def _set_end_button_sensitive(self, enabled: bool) -> None:
+        if self.end_process_button is not None:
+            self.end_process_button.set_sensitive(enabled)
+
+    def _on_process_selected(self, _listbox: Gtk.ListBox, row: Gtk.ListBoxRow | None) -> None:
+        process = getattr(row, "swir_process", None) if row is not None else None
+        if process is None:
+            self._set_end_button_sensitive(False)
+            return
+        protected = _ancestor_pids()
+        can_end = process.uid == os.getuid() and process.pid > 1 and process.pid not in protected
+        self._set_end_button_sensitive(can_end)
+        if self.process_status is not None:
+            if can_end:
+                self.process_status.set_text(
+                    f"Selected PID {process.pid} • {process.name} • {format_mib(process.rss_kib)} • "
+                    "End Process sends SIGTERM only after explicit confirmation."
+                )
+            else:
+                self.process_status.set_text(
+                    f"Selected PID {process.pid} • {process.name}. This process is protected or not owned by your user."
+                )
+
+    def _on_end_process_clicked(self, _button: Gtk.Button) -> None:
+        process = self._selected_process()
+        if process is None or self.window is None:
+            return
+        dialog = Gtk.MessageDialog(
+            transient_for=self.window,
+            modal=True,
+            message_type=Gtk.MessageType.WARNING,
+            buttons=Gtk.ButtonsType.NONE,
+            text=f"End {process.name}?",
+        )
+        dialog.format_secondary_text(
+            f"SWIR will send SIGTERM to PID {process.pid}. Unsaved work in that process may be lost. "
+            "The action is limited to your user and the process identity is revalidated immediately before signaling."
+        )
+        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        dialog.add_button("End Process", Gtk.ResponseType.ACCEPT)
+        dialog.connect("response", self._on_end_process_response, process)
+        dialog.present()
+
+    def _on_end_process_response(
+        self, dialog: Gtk.MessageDialog, response: int, process: ProcessRow
+    ) -> None:
+        dialog.destroy()
+        if response != Gtk.ResponseType.ACCEPT:
+            if self.process_status is not None:
+                self.process_status.set_text("Process termination cancelled. No signal was sent.")
+            return
+        try:
+            terminate_same_user_process(process)
+        except ProcessTerminationError as exc:
+            if self.process_status is not None:
+                self.process_status.set_text(f"Process was not ended: {exc}")
+        else:
+            if self.process_status is not None:
+                self.process_status.set_text(
+                    f"SIGTERM sent to PID {process.pid} ({process.name}). Refreshing process list."
+                )
+        self._refresh()
 
     def _on_refresh_diagnostics(self, _button: Gtk.Button) -> None:
         self._refresh_diagnostics()
@@ -434,7 +775,8 @@ class SwirSystemMonitor(Gtk.Application):
             f"Failed systemd units ({snapshot.failed.status}):\n{failed_body}\n\n"
             f"Recent boot warnings/errors — last {JOURNAL_LINE_LIMIT} lines max ({snapshot.journal.status}):\n"
             f"{journal_body}\n\n"
-            "Safety: fixed absolute command paths, no shell, no elevation, bounded timeout/output."
+            "Safety: fixed absolute command paths, no shell, no elevation, bounded timeout/output. "
+            "The separate Processes tab may send same-user SIGTERM after explicit confirmation."
         )
         self.diag_text.get_buffer().set_text(body[:MAX_COMMAND_OUTPUT_CHARS])
         return False
@@ -464,6 +806,16 @@ class SwirSystemMonitor(Gtk.Application):
             "processRowsBounded": MAX_PROCESS_ROWS,
             "visibleProcessCount": self.last_process_count,
             "memTotalKiB": self.last_mem_total_kib,
+            "processFilterMaxChars": MAX_FILTER_CHARS,
+            "processTerminationEnabled": True,
+            "processTerminationSignal": "SIGTERM",
+            "processTerminationSameUidOnly": True,
+            "processTerminationRequiresConfirmation": True,
+            "processIdentityRevalidated": True,
+            "processAncestorProtection": True,
+            "processTerminationUsesShell": False,
+            "processTerminationElevates": False,
+            "pidfdPreferred": hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal"),
             "diagnosticsReadOnly": True,
             "diagnosticsShell": False,
             "diagnosticsAsync": True,
@@ -490,4 +842,6 @@ class SwirSystemMonitor(Gtk.Application):
 
 
 if __name__ == "__main__":
+    if "--self-test" in sys.argv:
+        raise SystemExit(_self_test())
     raise SystemExit(SwirSystemMonitor().run(sys.argv))
