@@ -67,6 +67,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # systemd-analyze validates ExecStart paths as well as unit syntax. Stage
+          # inert CI-only artifacts at the production paths so verification tests
+          # the actual units instead of failing merely because the image has not
+          # been provisioned on the GitHub runner.
+          sudo install -d -m 0755 /usr/libexec/swir /usr/lib/swir/package-broker/ipc
+          sudo install -m 0755 /bin/true /usr/libexec/swir/swir-peer-authorization-broker
+          sudo install -m 0644 system/ipc/swir-package-transaction-broker.mjs \
+            /usr/lib/swir/package-broker/ipc/swir-package-transaction-broker.mjs
           UNIT_PATH="$GITHUB_WORKSPACE/system/ipc:/usr/lib/systemd/system:/lib/systemd/system"
           sudo env SYSTEMD_UNIT_PATH="$UNIT_PATH" systemd-analyze verify \
             system/ipc/swir-peer-authorization.socket \
