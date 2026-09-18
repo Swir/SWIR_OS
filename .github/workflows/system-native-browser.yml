@@ -82,7 +82,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            weston python3-gi gir1.2-gtk-4.0 gir1.2-webkit-6.0 desktop-file-utils
+            weston dbus-daemon python3-gi gir1.2-gtk-4.0 gir1.2-webkit-6.0 desktop-file-utils
           sudo install -m 0755 system/apps/swir-browser.py /usr/local/bin/swir-browser
       - name: Map native browser and verify runtime evidence
         shell: bash
@@ -114,8 +114,17 @@ jobs:
           done
           [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]]
 
+          # GitHub's hosted container denies the nested network namespace operation
+          # used by WebKitGTK/bubblewrap (RTM_NEWADDR on loopback). WebKit upstream
+          # provides this explicitly-dangerous switch for test processes. It is set
+          # only for this disposable CI process; System Edition production leaves the
+          # WebKit sandbox enabled. DMABUF is likewise disabled only for headless CI.
           timeout --signal=TERM --kill-after=5s 35s \
-            env SWIR_APP_E2E=1 SWIR_APP_EVIDENCE_PATH="$RUNTIME/browser.json" \
+            dbus-run-session -- \
+            env WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 \
+                WEBKIT_DISABLE_DMABUF_RENDERER=1 \
+                LIBGL_ALWAYS_SOFTWARE=1 \
+                SWIR_APP_E2E=1 SWIR_APP_EVIDENCE_PATH="$RUNTIME/browser.json" \
             python3 system/apps/swir-browser.py
 
           python3 - "$RUNTIME/browser.json" <<'PY'
