@@ -19,7 +19,8 @@
     {"id":"calculator","source":"system/apps/swir-calculator.py","stage":"/usr/local/bin/swir-calculator","launcher":"Calculator"},
     {"id":"screenshot","source":"system/apps/swir-screenshot.py","stage":"/usr/local/bin/swir-screenshot","launcher":"Screenshot"},
     {"id":"clock","source":"system/apps/swir-clock.py","stage":"/usr/local/bin/swir-clock","launcher":"Clock"},
-    {"id":"system-monitor-diagnostics","source":"system/apps/swir-system-monitor.py","stage":"/usr/local/bin/swir-system-monitor","launcher":"System Monitor"},
+    {"id":"system-monitor","source":"system/apps/swir-system-monitor.py","stage":"/usr/local/bin/swir-system-monitor","launcher":"System Monitor"},
+    {"id":"logs-diagnostics","source":"system/apps/swir-system-monitor.py","stage":"/usr/local/bin/swir-system-monitor","launcher":"System Monitor"},
     {"id":"backup-restore","source":"system/apps/swir-backup.py","stage":"/usr/local/bin/swir-backup","launcher":"Backup & Restore","companions":["system/apps/backup_runtime.py","system/recovery/recovery-mode-agent.mjs","system/recovery/recovery-mode-provisioning.mjs","system/recovery/swir-recovery.service","system/recovery/swir-recovery.target"]}
   ]
 }
