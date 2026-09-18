@@ -31,12 +31,15 @@ for source_file in \
   system/session/swir-session-launcher.sh \
   system/session/swir-shell.py \
   system/apps/core_runtime.py \
+  system/apps/package_status_runtime.py \
   system/apps/swir-files.py \
   system/apps/swir-network-center.py \
   system/apps/swir-notes.py \
   system/apps/swir-settings.py \
+  system/apps/swir-software-center.py \
   system/apps/swir-system-monitor.py \
-  system/apps/swir-terminal.py; do
+  system/apps/swir-terminal.py \
+  system/apps/swir-update-center.py; do
   [[ -f "$SOURCE_ROOT/$source_file" && ! -L "$SOURCE_ROOT/$source_file" ]] || {
     echo "required trusted source file missing or symlinked: $source_file" >&2
     exit 69
@@ -108,7 +111,7 @@ for pkg in greetd weston plymouth plymouth-themes wayland-utils dbus-user-sessio
     exit 69
   }
 done
-for file in /usr/sbin/greetd /usr/sbin/agreety /usr/bin/weston /usr/bin/wayland-info /usr/bin/plymouth /usr/sbin/plymouth-set-default-theme /usr/bin/python3.13 /usr/bin/nmcli; do
+for file in /usr/sbin/greetd /usr/sbin/agreety /usr/bin/weston /usr/bin/wayland-info /usr/bin/plymouth /usr/sbin/plymouth-set-default-theme /usr/bin/python3.13 /usr/bin/nmcli /usr/bin/apt-cache /usr/bin/apt-get /usr/bin/dpkg-query; do
   verify_trusted_regular_file "$file" yes
 done
 [[ -L "$ROOTFS/usr/bin/python3" && "$(readlink "$ROOTFS/usr/bin/python3")" == python3.13 ]] || {
@@ -129,12 +132,15 @@ install -d -m 0755 \
 install -m 0755 "$SOURCE_ROOT/system/session/swir-session-launcher.sh" "$(safe_target /usr/local/bin/swir-session)"
 install -m 0755 "$SOURCE_ROOT/system/session/swir-shell.py" "$(safe_target /usr/local/bin/swir-shell)"
 install -m 0644 "$SOURCE_ROOT/system/apps/core_runtime.py" "$(safe_target /usr/local/lib/swir/core_runtime.py)"
+install -m 0644 "$SOURCE_ROOT/system/apps/package_status_runtime.py" "$(safe_target /usr/local/lib/swir/package_status_runtime.py)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-files.py" "$(safe_target /usr/local/bin/swir-files)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-network-center.py" "$(safe_target /usr/local/bin/swir-network-center)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-notes.py" "$(safe_target /usr/local/bin/swir-notes)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-settings.py" "$(safe_target /usr/local/bin/swir-settings)"
+install -m 0755 "$SOURCE_ROOT/system/apps/swir-software-center.py" "$(safe_target /usr/local/bin/swir-software-center)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-system-monitor.py" "$(safe_target /usr/local/bin/swir-system-monitor)"
 install -m 0755 "$SOURCE_ROOT/system/apps/swir-terminal.py" "$(safe_target /usr/local/bin/swir-terminal)"
+install -m 0755 "$SOURCE_ROOT/system/apps/swir-update-center.py" "$(safe_target /usr/local/bin/swir-update-center)"
 install -m 0644 "$SOURCE_ROOT/system/boot/plymouth/swir.plymouth" "$(safe_target /usr/share/plymouth/themes/swir/swir.plymouth)"
 install -m 0644 "$SOURCE_ROOT/system/boot/plymouth/swir.script" "$(safe_target /usr/share/plymouth/themes/swir/swir.script)"
 chroot "$ROOTFS" /usr/bin/python3 -m py_compile \
@@ -143,9 +149,12 @@ chroot "$ROOTFS" /usr/bin/python3 -m py_compile \
   /usr/local/bin/swir-network-center \
   /usr/local/bin/swir-notes \
   /usr/local/bin/swir-settings \
+  /usr/local/bin/swir-software-center \
   /usr/local/bin/swir-system-monitor \
   /usr/local/bin/swir-terminal \
-  /usr/local/lib/swir/core_runtime.py
+  /usr/local/bin/swir-update-center \
+  /usr/local/lib/swir/core_runtime.py \
+  /usr/local/lib/swir/package_status_runtime.py
 
 cat > "$(safe_target /usr/share/wayland-sessions/swir.desktop)" <<'EOF'
 [Desktop Entry]
@@ -208,8 +217,11 @@ verify_trusted_regular_file /usr/local/bin/swir-files yes
 verify_trusted_regular_file /usr/local/bin/swir-network-center yes
 verify_trusted_regular_file /usr/local/bin/swir-notes yes
 verify_trusted_regular_file /usr/local/bin/swir-settings yes
+verify_trusted_regular_file /usr/local/bin/swir-software-center yes
 verify_trusted_regular_file /usr/local/bin/swir-system-monitor yes
 verify_trusted_regular_file /usr/local/bin/swir-terminal yes
+verify_trusted_regular_file /usr/local/bin/swir-update-center yes
 verify_trusted_regular_file /usr/local/lib/swir/core_runtime.py no
+verify_trusted_regular_file /usr/local/lib/swir/package_status_runtime.py no
 
-echo "SWIR graphical session staged: mode=$MODE theme=swir login=greetd compositor=weston native-shell=gtk4 native-apps=files,network,notes,settings,system-monitor,terminal"
+echo "SWIR graphical session staged: mode=$MODE theme=swir login=greetd compositor=weston native-shell=gtk4 native-apps=files,network,notes,settings,software,system-monitor,terminal,updates"

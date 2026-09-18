@@ -1,0 +1,266 @@
+#!/usr/bin/env python3
+"""SWIR Software Center — native package discovery and installed-app surface.
+
+The initial System Edition UI is deliberately non-privileged: it reads local
+APT/dpkg metadata, supports bounded package search and exposes no install/remove
+control until the UI can be connected to the existing journaled package
+transaction broker without weakening its Polkit and confirmation boundaries.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import pathlib
+import sys
+import threading
+from typing import Final
+
+import gi
+
+gi.require_version("Gtk", "4.0")
+from gi.repository import Gdk, GLib, Gtk  # noqa: E402
+
+LIBDIR = pathlib.Path("/usr/local/lib/swir")
+if LIBDIR.is_dir() and str(LIBDIR) not in sys.path:
+    sys.path.insert(0, str(LIBDIR))
+
+from package_status_runtime import (  # noqa: E402
+    MAX_PACKAGE_ROWS,
+    PackageRow,
+    list_installed,
+    normalize_search_term,
+    search_available,
+    tools_status,
+)
+
+APP_ID: Final = "dev.swir.SoftwareCenter"
+EVIDENCE_SCHEMA: Final = "swir.native-software-center-runtime-evidence/0.1"
+
+CSS = b"""
+window.swir-app { background: #02050A; color: #F4FAFF; }
+.swir-header { background: #07111C; border-bottom: 1px solid #0088FF; padding: 10px 14px; }
+.swir-brand { color: #62E5FF; font-size: 18px; font-weight: 800; }
+.swir-muted { color: #8DA8B8; }
+.swir-status { background: #07111C; border: 1px solid rgba(98,229,255,0.28); border-radius: 12px; padding: 9px 12px; }
+.swir-row { padding: 8px 10px; border-bottom: 1px solid rgba(98,229,255,0.08); }
+.swir-name { color: #EAF9FF; font-weight: 700; }
+.swir-button { background: #07111C; color: #F4FAFF; border: 1px solid #0088FF; border-radius: 10px; padding: 7px 12px; }
+.swir-button:hover { border-color: #62E5FF; }
+entry { background: #07111C; color: #F4FAFF; border: 1px solid rgba(98,229,255,0.35); border-radius: 10px; padding: 7px 10px; }
+"""
+
+
+class SwirSoftwareCenter(Gtk.Application):
+    def __init__(self) -> None:
+        super().__init__(application_id=APP_ID)
+        self.window: Gtk.ApplicationWindow | None = None
+        self.listbox: Gtk.ListBox | None = None
+        self.status_label: Gtk.Label | None = None
+        self.search_entry: Gtk.Entry | None = None
+        self.generation = 0
+        self.mode = "installed"
+        self.visible_rows = 0
+        self.last_query_ok = False
+        self.e2e = os.environ.get("SWIR_APP_E2E", "0") == "1"
+        self.evidence_path = os.environ.get("SWIR_APP_EVIDENCE_PATH", "")
+
+    def do_startup(self) -> None:
+        Gtk.Application.do_startup(self)
+        provider = Gtk.CssProvider()
+        provider.load_from_data(CSS)
+        display = Gdk.Display.get_default()
+        if display is None:
+            raise RuntimeError("SWIR Software Center requires a graphical display")
+        Gtk.StyleContext.add_provider_for_display(display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+    def do_activate(self) -> None:
+        if self.window is not None:
+            self.window.present()
+            return
+
+        window = Gtk.ApplicationWindow(application=self)
+        window.set_title("SWIR Software Center")
+        window.set_default_size(1040, 720)
+        window.add_css_class("swir-app")
+        self.window = window
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        window.set_child(root)
+
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        header.add_css_class("swir-header")
+        brand = Gtk.Label(label="◆  SWIR Software Center")
+        brand.add_css_class("swir-brand")
+        brand.set_xalign(0)
+        header.append(brand)
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        header.append(spacer)
+        installed = Gtk.Button(label="Installed")
+        installed.add_css_class("swir-button")
+        installed.connect("clicked", self._installed_clicked)
+        header.append(installed)
+        root.append(header)
+
+        search_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        search_row.set_margin_start(12)
+        search_row.set_margin_end(12)
+        self.search_entry = Gtk.Entry()
+        self.search_entry.set_hexpand(True)
+        self.search_entry.set_placeholder_text("Search local package metadata")
+        self.search_entry.set_max_length(64)
+        self.search_entry.connect("activate", self._search_entry_activated)
+        search_row.append(self.search_entry)
+        search = Gtk.Button(label="Search")
+        search.add_css_class("swir-button")
+        search.connect("clicked", self._search_clicked)
+        search_row.append(search)
+        root.append(search_row)
+
+        self.status_label = Gtk.Label(label="Loading installed packages…", wrap=True)
+        self.status_label.set_xalign(0)
+        self.status_label.set_margin_start(12)
+        self.status_label.set_margin_end(12)
+        self.status_label.add_css_class("swir-status")
+        root.append(self.status_label)
+
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_hexpand(True)
+        scroller.set_vexpand(True)
+        self.listbox = Gtk.ListBox()
+        self.listbox.set_selection_mode(Gtk.SelectionMode.NONE)
+        scroller.set_child(self.listbox)
+        root.append(scroller)
+
+        footer = Gtk.Label(
+            label="Discovery only • install/remove remains behind the journaled SWIR package transaction broker",
+            wrap=True,
+        )
+        footer.add_css_class("swir-muted")
+        footer.set_xalign(0)
+        footer.set_margin_start(12)
+        footer.set_margin_end(12)
+        footer.set_margin_bottom(8)
+        root.append(footer)
+
+        window.connect("map", self._on_mapped)
+        window.present()
+        self._load_installed()
+
+    def _clear_rows(self) -> None:
+        assert self.listbox is not None
+        child = self.listbox.get_first_child()
+        while child is not None:
+            next_child = child.get_next_sibling()
+            self.listbox.remove(child)
+            child = next_child
+
+    def _render_rows(self, rows: list[PackageRow], *, message: str) -> None:
+        assert self.listbox is not None and self.status_label is not None
+        self._clear_rows()
+        self.visible_rows = len(rows)
+        self.status_label.set_text(message)
+        for package in rows:
+            row = Gtk.ListBoxRow()
+            row.add_css_class("swir-row")
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            name = Gtk.Label(label=package.name)
+            name.add_css_class("swir-name")
+            name.set_xalign(0)
+            name.set_selectable(True)
+            box.append(name)
+            detail_text = package.version
+            if package.description:
+                detail_text = f"{package.version}  •  {package.description}"
+            detail = Gtk.Label(label=detail_text, ellipsize=3)
+            detail.add_css_class("swir-muted")
+            detail.set_xalign(0)
+            detail.set_tooltip_text(detail_text)
+            box.append(detail)
+            row.set_child(box)
+            self.listbox.append(row)
+
+    def _begin_query(self, worker, *, mode: str, pending: str) -> None:
+        assert self.status_label is not None
+        self.generation += 1
+        generation = self.generation
+        self.mode = mode
+        self.status_label.set_text(pending)
+
+        def run() -> None:
+            try:
+                rows, ok, error = worker()
+            except (OSError, ValueError) as exc:
+                rows, ok, error = [], False, str(exc)
+            GLib.idle_add(self._finish_query, generation, rows, ok, error, mode)
+
+        threading.Thread(target=run, name=f"swir-software-{mode}", daemon=True).start()
+
+    def _finish_query(self, generation: int, rows: list[PackageRow], ok: bool, error: str, mode: str) -> bool:
+        if generation != self.generation:
+            return False
+        self.last_query_ok = ok
+        if not ok:
+            self._render_rows([], message=f"Package metadata unavailable: {error}")
+            return False
+        noun = "installed packages" if mode == "installed" else "search results"
+        suffix = f" (showing first {MAX_PACKAGE_ROWS})" if len(rows) >= MAX_PACKAGE_ROWS else ""
+        self._render_rows(rows, message=f"{len(rows)} {noun}{suffix}")
+        return False
+
+    def _load_installed(self) -> None:
+        self._begin_query(lambda: list_installed(), mode="installed", pending="Loading installed packages…")
+
+    def _installed_clicked(self, _button: Gtk.Button) -> None:
+        self._load_installed()
+
+    def _search_entry_activated(self, _entry: Gtk.Entry) -> None:
+        self._start_search()
+
+    def _search_clicked(self, _button: Gtk.Button) -> None:
+        self._start_search()
+
+    def _start_search(self) -> None:
+        assert self.search_entry is not None and self.status_label is not None
+        raw = self.search_entry.get_text()
+        try:
+            term = normalize_search_term(raw)
+        except ValueError as exc:
+            self.status_label.set_text(str(exc))
+            return
+        self._begin_query(lambda: search_available(term), mode="search", pending=f"Searching for “{term}”…")
+
+    def _on_mapped(self, _window: Gtk.Window) -> None:
+        if not self.e2e or not self.evidence_path:
+            return
+        path = pathlib.Path(self.evidence_path)
+        runtime_text = os.environ.get("XDG_RUNTIME_DIR", "")
+        if not runtime_text or path.parent.resolve() != pathlib.Path(runtime_text).resolve():
+            raise RuntimeError("refusing Software Center evidence path outside XDG_RUNTIME_DIR")
+        status = tools_status()
+        payload = {
+            "schema": EVIDENCE_SCHEMA,
+            "passed": status["aptCache"] and status["dpkgQuery"],
+            "applicationId": APP_ID,
+            "nativeToolkit": "gtk4",
+            "displayProtocol": "wayland",
+            "windowMapped": True,
+            "privilegedOperations": False,
+            "mutationControlsExposed": False,
+            "packageTransactionBrokerBypassed": False,
+            "readOnlyMetadata": True,
+            "packageRowsBounded": MAX_PACKAGE_ROWS,
+            "tools": status,
+        }
+        path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+        path.chmod(0o600)
+        GLib.timeout_add(350, self._finish_e2e)
+
+    def _finish_e2e(self) -> bool:
+        self.quit()
+        return False
+
+
+if __name__ == "__main__":
+    raise SystemExit(SwirSoftwareCenter().run(sys.argv))
