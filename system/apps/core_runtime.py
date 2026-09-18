@@ -14,6 +14,7 @@ import math
 import os
 import pathlib
 import re
+import sys
 import tempfile
 from dataclasses import dataclass
 from typing import Final
@@ -428,3 +429,9 @@ class ThemeStore:
             return self._read_package(target), False
         except ThemePolicyError:
             return default_theme(), True
+
+
+# Compatibility alias: Settings historically imported a dedicated theme module.
+# Runtime code is consolidated into this already-staged core module so image
+# provisioning keeps a single trusted implementation/source of truth.
+sys.modules.setdefault("theme_runtime", sys.modules[__name__])
