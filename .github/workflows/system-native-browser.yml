@@ -48,6 +48,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          bash -n system/session/provision-graphical-session.sh
           python3 -m py_compile \
             system/apps/swir-browser.py \
             system/apps/swir-settings.py \
@@ -68,7 +69,7 @@ jobs:
           grep -F 'externalInstallAutoCommit": False' system/apps/swir-software-center.py >/dev/null
           grep -F '("/usr/local/bin/swir-software-center", "--install", "firefox-esr")' system/apps/swir-browser.py >/dev/null
           ! grep -RE 'shell *= *True|os\.system\(' system/apps/swir-browser.py system/apps/swir-settings.py system/apps/swir-software-center.py
-          ! grep -RE '/usr/bin/(sudo|pkexec|su)([[:space:]\"'"']|$)|/bin/su([[:space:]\"'"']|$)' system/apps/swir-browser.py system/apps/swir-settings.py system/apps/swir-software-center.py
+          ! grep -RE "/usr/bin/(sudo|pkexec|su)([[:space:]\"']|$)|/bin/su([[:space:]\"']|$)" system/apps/swir-browser.py system/apps/swir-settings.py system/apps/swir-software-center.py
 
   wayland-runtime:
     runs-on: ubuntu-24.04
@@ -118,7 +119,7 @@ jobs:
             python3 system/apps/swir-browser.py
 
           python3 - "$RUNTIME/browser.json" <<'PY'
-          import json, pathlib, sys
+          import json, sys
           evidence = json.load(open(sys.argv[1], encoding='utf-8'))
           assert evidence['schema'] == 'swir.native-browser-runtime-evidence/0.1'
           assert evidence['passed'] is True and evidence['applicationId'] == 'dev.swir.Browser'
@@ -148,11 +149,6 @@ jobs:
           export XDG_RUNTIME_DIR="${{ runner.temp }}/swir-browser-runtime"
           export XDG_CONFIG_HOME="${{ runner.temp }}/swir-browser-config"
           export XDG_DATA_HOME="${{ runner.temp }}/swir-browser-data"
-          export WAYLAND_DISPLAY=wayland-swir-browser
-          export GDK_BACKEND=wayland
-          export PYTHONPATH="$GITHUB_WORKSPACE/system/apps"
-          # The previous step intentionally stopped Weston with its EXIT trap, so this
-          # step validates handler discovery directly through Gio rather than mapping UI.
           python3 - <<'PY'
           from gi.repository import Gio
           apps = Gio.AppInfo.get_all_for_type('x-scheme-handler/http')
