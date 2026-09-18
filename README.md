@@ -12,8 +12,8 @@
 [![Desktop Windows Build](https://github.com/Swir/SWIR_OS/actions/workflows/desktop-windows-build.yml/badge.svg)](https://github.com/Swir/SWIR_OS/actions/workflows/desktop-windows-build.yml)
 [![Roadmap Contract](https://github.com/Swir/SWIR_OS/actions/workflows/roadmap-contract.yml/badge.svg)](https://github.com/Swir/SWIR_OS/actions/workflows/roadmap-contract.yml)
 
-![Roadmap](https://img.shields.io/badge/ROADMAP-78.5%25-02050A?style=for-the-badge&logoColor=62E5FF)
-![Completed](https://img.shields.io/badge/DONE-51%2F65-02050A?style=for-the-badge&logoColor=62E5FF)
+![Roadmap](https://img.shields.io/badge/ROADMAP-80.0%25-02050A?style=for-the-badge&logoColor=62E5FF)
+![Completed](https://img.shields.io/badge/DONE-52%2F65-02050A?style=for-the-badge&logoColor=62E5FF)
 ![Status](https://img.shields.io/badge/STATUS-IN%20PROGRESS-02050A?style=for-the-badge&logoColor=62E5FF)
 
 [![Author](https://img.shields.io/badge/Author-Swir-0088FF?style=flat-square&logo=github)](https://github.com/Swir)
@@ -31,9 +31,9 @@
 
 ## 📊 Project status
 
-<img width="100%" src="assets/readme/progress-card.svg" alt="SWIR OS roadmap progress — 78.5%, 51 of 65 verified deliverables" />
+<img width="100%" src="assets/readme/progress-card.svg" alt="SWIR OS roadmap progress — 80.0%, 52 of 65 verified deliverables" />
 
-**Measured scope:** full Web → Desktop → System `Version roadmap`. **Project progress:** 51/65 = **78.5%**. **Release readiness:** not ready; physical Live USB qualification, the complete native application suite and other release gates remain open.
+**Measured scope:** full Web → Desktop → System `Version roadmap`. **Project progress:** 52/65 = **80.0%**. **Release readiness:** not ready; physical Live USB qualification, the complete native application suite and other release gates remain open.
 
 SWIR OS is actively being developed as three connected editions: a browser-based Web Edition, a Windows Desktop Edition with native adapters, and a real Linux-native System Edition intended to run from removable media and install to disk as a standalone operating system.
 
@@ -45,11 +45,8 @@ SWIR OS is actively being developed as three connected editions: a browser-based
 
 ### Overall roadmap
 
-```text
-████████████████░░░░ 78.5%
-```
 
-**51 of 65 measurable roadmap deliverables are complete.** The native System shell, Live USB, disk installation, detached boot, graphical-installer E2E and physical-hardware qualification are tracked explicitly rather than hidden inside generic bootable-image milestones. The authoritative checklist and progress math live in [`SWIR-OS-ARCHITECTURE.md`](SWIR-OS-ARCHITECTURE.md). A prototype, contract skeleton or CI job alone does not count as a completed roadmap item.
+**52 of 65 measurable roadmap deliverables are complete.** The native System shell, Live USB, disk installation, detached boot, graphical-installer E2E and physical-hardware qualification are tracked explicitly rather than hidden inside generic bootable-image milestones. The authoritative checklist and progress math live in [`SWIR-OS-ARCHITECTURE.md`](SWIR-OS-ARCHITECTURE.md). A prototype, contract skeleton or CI job alone does not count as a completed roadmap item.
 
 ---
 
@@ -92,6 +89,7 @@ Windows kernel drivers are **not** treated as a general solution for Linux hardw
 | 🛟 **Recovery** | A dedicated UEFI recovery entry boots a hardened SWIR recovery target with `SWIR_ROOT` read-only, normal fstab automounting disabled, no guest NIC and no automatic filesystem/package/firmware mutation. |
 | 🔧 **Hardware & drivers** | PCI/USB inventory, Hardware Catalog, Driver Center runtime, Linux in-tree drivers and `linux-firmware` are verified foundations. Supported Driver Center package/fwupd mutation routes add a private parent journal; direct kernel-module mutation remains disabled. |
 | 🌐 **Networking** | NetworkManager integration is exercised through a real isolated live E2E path. |
+| 🌍 **Native browser** | SWIR Browser now runs natively on GTK4/WebKitGTK 6.0 with tabs, bounded owner-only history/bookmarks, downloads, ephemeral private tabs, explicit permission prompts, Default Apps integration and approved alternative-browser handoff through Software Center. |
 | 🔐 **Security** | Privileged operations are designed around explicit brokers, Polkit/session identity binding, trusted repository policy, journals and fail-closed validation. |
 | 🌍 **i18n** | Shared BCP-47 locale architecture, English fallback, RTL/LTR handling and bundled core locale packs are maintained across the project. |
 

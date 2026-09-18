@@ -90,7 +90,7 @@ const legacyMeterPattern = /```text\r?\n[█░▓▒#=\-]{8,}\s+[0-9]+(?:\.[0-9
 const roadmapHasLegacyMeter = legacyMeterPattern.test(block);
 const readmeHasLegacyMeter = legacyMeterPattern.test(readme);
 if (roadmapHasLegacyMeter || readmeHasLegacyMeter) {
-  console.warn('ROADMAP CONTRACT WARN: legacy text progress meter remains; SVG-only cleanup is pending.');
+  fail('legacy text progress meter is forbidden by the SVG-only progress presentation standard.');
 }
 
 for (const relativePath of [
@@ -114,7 +114,7 @@ console.log(JSON.stringify({
   readmeSynchronized: true,
   progressSvgEmbedded: true,
   svgOnlyPresentation,
-  legacyMeterCleanupPending: roadmapHasLegacyMeter || readmeHasLegacyMeter,
+  legacyMeterClean: true,
   styleLock: 'SWIR-ROADMAP-STANDARD:v1+svg-only-amendment',
   valid: true,
 }));
