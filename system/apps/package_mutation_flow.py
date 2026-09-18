@@ -4,15 +4,18 @@
 This module deliberately contains no package-manager or privilege execution. It
 wraps :mod:`package_transaction_client` so native GTK applications can enforce
 an explicit preview -> user confirmation -> authorization -> commit sequence.
-A preview is single-use: after commit is requested it cannot be replayed, even
-when authorization or execution fails. The privileged broker still recomputes
-and validates the plan and its signed peer-authorization envelope.
+Each prepared confirmation intent is single-use: after commit is requested that
+intent cannot be replayed, even when authorization or execution fails. A fresh
+preview of an unchanged plan creates a fresh intent and may be confirmed again.
+The privileged broker still recomputes and validates the plan and its signed
+peer-authorization envelope.
 """
 
 from __future__ import annotations
 
+import secrets
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Final
 
 from package_transaction_client import PackageBrokerError, PackagePreview, PackageTransactionClient
@@ -22,9 +25,10 @@ _ALLOWED_OPERATIONS: Final = frozenset({"install", "update", "remove"})
 
 @dataclass(frozen=True)
 class PackageMutationIntent:
-    """Immutable preview handed to a confirmation surface."""
+    """Immutable preview handed to one confirmation surface."""
 
     preview: PackagePreview
+    _single_use_token: str = field(default_factory=lambda: secrets.token_urlsafe(24), repr=False, compare=False)
 
     @property
     def confirmation_digest(self) -> str:
@@ -32,14 +36,14 @@ class PackageMutationIntent:
 
 
 class PackageMutationFlow:
-    """Bind an explicit UI confirmation to exactly one broker preview."""
+    """Bind an explicit UI confirmation to exactly one broker preview intent."""
 
     def __init__(self, client: PackageTransactionClient) -> None:
         if not hasattr(client, "preview") or not hasattr(client, "authorize") or not hasattr(client, "commit"):
             raise TypeError("PackageMutationFlow requires a PackageTransactionClient-compatible object")
         self._client = client
         self._lock = threading.Lock()
-        self._consumed_digests: set[str] = set()
+        self._consumed_tokens: set[str] = set()
 
     def available(self) -> bool:
         return bool(self._client.available())
@@ -59,12 +63,14 @@ class PackageMutationFlow:
         if confirmed_digest != preview.plan_digest:
             raise PackageBrokerError("CONFIRMATION_MISMATCH", "confirmation does not match the displayed package plan")
 
-        # Consume before requesting Polkit so a double-click, re-entrant callback,
-        # or failed authorization cannot replay the same confirmation.
+        # Consume the intent before requesting Polkit so a double-click,
+        # re-entrant callback or failed authorization cannot replay the same
+        # confirmation. A newly prepared intent remains eligible even when its
+        # plan digest is unchanged.
         with self._lock:
-            if preview.plan_digest in self._consumed_digests:
-                raise PackageBrokerError("CONFIRMATION_ALREADY_USED", "package confirmation has already been consumed")
-            self._consumed_digests.add(preview.plan_digest)
+            if intent._single_use_token in self._consumed_tokens:
+                raise PackageBrokerError("CONFIRMATION_ALREADY_USED", "package confirmation intent has already been consumed")
+            self._consumed_tokens.add(intent._single_use_token)
 
         envelope = self._client.authorize(preview)
         transaction = self._client.commit(preview, envelope)
