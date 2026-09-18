@@ -426,7 +426,7 @@ class SwirSystemMonitor(Gtk.Application):
         self.window: Gtk.ApplicationWindow | None = None
         self.metrics: Gtk.Label | None = None
         self.listbox: Gtk.ListBox | None = None
-        self.process_filter: Gtk.SearchEntry | None = None
+        self.process_filter: Gtk.Entry | None = None
         self.end_process_button: Gtk.Button | None = None
         self.process_status: Gtk.Label | None = None
         self.diag_summary: Gtk.Label | None = None
@@ -492,12 +492,12 @@ class SwirSystemMonitor(Gtk.Application):
         overview.append(self.metrics)
 
         process_toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self.process_filter = Gtk.SearchEntry()
+        self.process_filter = Gtk.Entry()
         self.process_filter.set_placeholder_text("Filter by process name or PID")
         self.process_filter.set_max_length(MAX_FILTER_CHARS)
         self.process_filter.set_hexpand(True)
         self.process_filter.add_css_class("swir-control")
-        self.process_filter.connect("search-changed", self._on_process_filter_changed)
+        self.process_filter.connect("changed", self._on_process_filter_changed)
         process_toolbar.append(self.process_filter)
 
         self.end_process_button = Gtk.Button(label="End Process")
@@ -571,7 +571,7 @@ class SwirSystemMonitor(Gtk.Application):
             self.listbox.remove(child)
             child = next_child
 
-    def _on_process_filter_changed(self, _entry: Gtk.SearchEntry) -> None:
+    def _on_process_filter_changed(self, _entry: Gtk.Entry) -> None:
         self._refresh()
 
     def _filtered_processes(self, processes: list[ProcessRow]) -> list[ProcessRow]:
