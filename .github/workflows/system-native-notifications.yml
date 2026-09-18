@@ -1,0 +1,224 @@
+name: System Native Notification Service
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'system/session/swir-shell.py'
+      - 'system/SWIR-NATIVE-NOTIFICATIONS-0.1.md'
+      - '.github/workflows/system-native-notifications.yml'
+  pull_request:
+    paths:
+      - 'system/session/swir-shell.py'
+      - 'system/SWIR-NATIVE-NOTIFICATIONS-0.1.md'
+      - '.github/workflows/system-native-notifications.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: system-native-notifications-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify notification persistence and safety contract
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3-gi gir1.2-gtk-4.0
+          python3 -m py_compile system/session/swir-shell.py
+          python3 system/session/swir-shell.py --notification-self-test
+          grep -F 'org.freedesktop.Notifications' system/session/swir-shell.py >/dev/null
+          grep -F 'MAX_NOTIFICATION_HISTORY: Final = 200' system/session/swir-shell.py >/dev/null
+          grep -F 'MAX_NOTIFICATION_HISTORY_BYTES: Final = 2 * 1024 * 1024' system/session/swir-shell.py >/dev/null
+          grep -F '"actions", "body", "persistence"' system/session/swir-shell.py >/dev/null
+          grep -F '"imageHintsLoaded": False' system/session/swir-shell.py >/dev/null
+          ! grep -F 'set_markup(' system/session/swir-shell.py
+          ! grep -F 'body-markup' system/session/swir-shell.py
+          ! grep -F 'body-images' system/session/swir-shell.py
+          ! grep -F 'icon-static' system/session/swir-shell.py
+
+  wayland-dbus-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install controlled GTK4, Wayland and D-Bus runtime
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends weston dbus-daemon python3-gi gir1.2-gtk-4.0
+      - name: Map shell, own notification service and exercise Notify
+        run: |
+          set -euo pipefail
+          RUNTIME="${{ runner.temp }}/swir-notification-runtime"
+          STATE="${{ runner.temp }}/swir-notification-state"
+          mkdir -p "$RUNTIME" "$STATE"
+          chmod 0700 "$RUNTIME" "$STATE"
+          export XDG_RUNTIME_DIR="$RUNTIME"
+          export XDG_STATE_HOME="$STATE"
+          export WAYLAND_DISPLAY=wayland-swir-notifications
+          export GDK_BACKEND=wayland
+
+          weston --backend=headless-backend.so --socket="$WAYLAND_DISPLAY" --idle-time=0 --log="$RUNTIME/weston.log" &
+          WESTON_PID=$!
+          cleanup() {
+            kill "$WESTON_PID" 2>/dev/null || true
+            wait "$WESTON_PID" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          for _ in $(seq 1 80); do
+            [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]] && break
+            kill -0 "$WESTON_PID"
+            sleep 0.25
+          done
+          [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]]
+
+          dbus-run-session -- bash -euo pipefail -c '
+            export LIBGL_ALWAYS_SOFTWARE=1
+            export GTK_A11Y=none
+            export SWIR_SHELL_E2E=1
+            export SWIR_SHELL_EVIDENCE_PATH="$XDG_RUNTIME_DIR/shell.json"
+            export SWIR_NOTIFICATION_E2E=1
+            export SWIR_NOTIFICATION_EVIDENCE_PATH="$XDG_RUNTIME_DIR/notification.json"
+
+            python3 system/session/swir-shell.py &
+            SHELL_PID=$!
+            cleanup_shell() {
+              kill "$SHELL_PID" 2>/dev/null || true
+              wait "$SHELL_PID" 2>/dev/null || true
+            }
+            trap cleanup_shell EXIT
+
+            for _ in $(seq 1 100); do
+              [[ -s "$SWIR_SHELL_EVIDENCE_PATH" ]] && break
+              kill -0 "$SHELL_PID"
+              sleep 0.1
+            done
+            [[ -s "$SWIR_SHELL_EVIDENCE_PATH" ]]
+
+            python3 - "$SWIR_NOTIFICATION_EVIDENCE_PATH" "$XDG_STATE_HOME/swir/notifications/history.json" <<'"'"'PY'"'"'
+          import json
+          import os
+          import pathlib
+          import stat
+          import sys
+          import time
+
+          import gi
+          gi.require_version("Gio", "2.0")
+          from gi.repository import Gio, GLib
+
+          evidence_path = pathlib.Path(sys.argv[1])
+          history_path = pathlib.Path(sys.argv[2])
+          bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+
+          def call(dest, path, iface, method, params, reply_type):
+              return bus.call_sync(
+                  dest, path, iface, method, params,
+                  GLib.VariantType.new(reply_type) if reply_type else None,
+                  Gio.DBusCallFlags.NONE, 5000, None
+              )
+
+          for _ in range(80):
+              owned = call(
+                  "org.freedesktop.DBus", "/org/freedesktop/DBus",
+                  "org.freedesktop.DBus", "NameHasOwner",
+                  GLib.Variant("(s)", ("org.freedesktop.Notifications",)), "(b)"
+              ).unpack()[0]
+              if owned:
+                  break
+              time.sleep(0.1)
+          else:
+              raise SystemExit("notification bus name was not acquired")
+
+          caps = call(
+              "org.freedesktop.Notifications", "/org/freedesktop/Notifications",
+              "org.freedesktop.Notifications", "GetCapabilities",
+              None, "(as)"
+          ).unpack()[0]
+          assert set(caps) == {"actions", "body", "persistence"}
+          assert "body-markup" not in caps and "body-images" not in caps
+
+          body = "<b>literal markup</b>\x01 remains plain"
+          reply = call(
+              "org.freedesktop.Notifications", "/org/freedesktop/Notifications",
+              "org.freedesktop.Notifications", "Notify",
+              GLib.Variant(
+                  "(susssasa{sv}i)",
+                  ("SWIR CI", 0, "/tmp/ignored.png", "Verified notification", body,
+                   ["default", "Open"], {}, 5000)
+              ),
+              "(u)"
+          )
+          notification_id = int(reply.unpack()[0])
+          assert notification_id > 0
+
+          for _ in range(80):
+              if evidence_path.is_file() and history_path.is_file():
+                  break
+              time.sleep(0.1)
+          else:
+              raise SystemExit("notification evidence/history did not appear")
+
+          evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+          assert evidence["schema"] == "swir.native-notification-runtime-evidence/0.1"
+          assert evidence["passed"] is True
+          assert evidence["serviceName"] == "org.freedesktop.Notifications"
+          assert evidence["serviceOwned"] is True
+          assert evidence["notifyAccepted"] is True
+          assert evidence["notificationId"] == notification_id
+          assert evidence["plainTextRendering"] is True
+          assert evidence["imageHintsLoaded"] is False
+          assert evidence["actionCount"] == 1
+          assert evidence["historyPersisted"] is True
+          assert evidence["historyBound"] == 200
+          assert evidence["privilegedOperations"] is False
+          assert evidence["shellExecution"] is False
+
+          history = json.loads(history_path.read_text(encoding="utf-8"))
+          assert history["schema"] == "swir.notification-history/0.1"
+          assert len(history["notifications"]) == 1
+          record = history["notifications"][0]
+          assert record["summary"] == "Verified notification"
+          assert record["body"] == "<b>literal markup</b>  remains plain"
+          assert "actions" not in record
+          assert stat.S_IMODE(history_path.stat().st_mode) == 0o600
+
+          call(
+              "org.freedesktop.Notifications", "/org/freedesktop/Notifications",
+              "org.freedesktop.Notifications", "CloseNotification",
+              GLib.Variant("(u)", (notification_id,)), None
+          )
+          PY
+          '
+
+  debian13-target:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    container:
+      image: debian:trixie-slim
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Debian 13 GTK4/Gio target runtime
+        run: |
+          set -euo pipefail
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3 python3-gi gir1.2-gtk-4.0
+          python3 -m py_compile system/session/swir-shell.py
+          python3 system/session/swir-shell.py --notification-self-test
+          python3 - <<'PY'
+          import gi
+          gi.require_version("Gtk", "4.0")
+          gi.require_version("Gio", "2.0")
+          from gi.repository import Gio, Gtk
+          assert Gtk.get_major_version() == 4
+          assert Gio.Application is not None
+          print("Debian 13 SWIR notification target runtime: OK")
+          PY
