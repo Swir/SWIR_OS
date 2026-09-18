@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""SWIR Software Center — native package discovery and installed-app surface.
+"""SWIR Software Center — native package discovery and brokered installs.
 
-The initial System Edition UI is deliberately non-privileged: it reads local
-APT/dpkg metadata, supports bounded package search and exposes no install/remove
-control until the UI can be connected to the existing journaled package
-transaction broker without weakening its Polkit and confirmation boundaries.
+Package discovery remains unprivileged and bounded. Mutations never execute APT,
+pkexec, sudo or arbitrary commands from this GTK process: an install first asks
+the SWIR package broker for an exact preview, displays that plan for explicit
+confirmation, then requests peer-bound Polkit authorization and commits the same
+single-use plan through the journaled transaction service.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import shlex
 import sys
 import threading
 from typing import Final
@@ -25,6 +27,7 @@ LIBDIR = pathlib.Path("/usr/local/lib/swir")
 if LIBDIR.is_dir() and str(LIBDIR) not in sys.path:
     sys.path.insert(0, str(LIBDIR))
 
+from package_mutation_flow import PackageMutationFlow, PackageMutationIntent  # noqa: E402
 from package_status_runtime import (  # noqa: E402
     MAX_PACKAGE_ROWS,
     PackageRow,
@@ -33,9 +36,10 @@ from package_status_runtime import (  # noqa: E402
     search_available,
     tools_status,
 )
+from package_transaction_client import PackageBrokerError, PackageTransactionClient  # noqa: E402
 
 APP_ID: Final = "dev.swir.SoftwareCenter"
-EVIDENCE_SCHEMA: Final = "swir.native-software-center-runtime-evidence/0.1"
+EVIDENCE_SCHEMA: Final = "swir.native-software-center-runtime-evidence/0.2"
 
 CSS = b"""
 window.swir-app { background: #02050A; color: #F4FAFF; }
@@ -47,6 +51,7 @@ window.swir-app { background: #02050A; color: #F4FAFF; }
 .swir-name { color: #EAF9FF; font-weight: 700; }
 .swir-button { background: #07111C; color: #F4FAFF; border: 1px solid #0088FF; border-radius: 10px; padding: 7px 12px; }
 .swir-button:hover { border-color: #62E5FF; }
+.swir-primary { background: #0088FF; color: #F4FAFF; border-radius: 10px; padding: 7px 14px; font-weight: 700; }
 entry { background: #07111C; color: #F4FAFF; border: 1px solid rgba(98,229,255,0.35); border-radius: 10px; padding: 7px 10px; }
 """
 
@@ -62,6 +67,10 @@ class SwirSoftwareCenter(Gtk.Application):
         self.mode = "installed"
         self.visible_rows = 0
         self.last_query_ok = False
+        self.mutation_busy = False
+        self.last_transaction_state = "none"
+        self.package_client = PackageTransactionClient()
+        self.mutation_flow = PackageMutationFlow(self.package_client)
         self.e2e = os.environ.get("SWIR_APP_E2E", "0") == "1"
         self.evidence_path = os.environ.get("SWIR_APP_EVIDENCE_PATH", "")
 
@@ -134,7 +143,10 @@ class SwirSoftwareCenter(Gtk.Application):
         root.append(scroller)
 
         footer = Gtk.Label(
-            label="Discovery only • install/remove remains behind the journaled SWIR package transaction broker",
+            label=(
+                "Installs use SWIR preview → explicit confirmation → Polkit → journaled transaction. "
+                "This app never runs privileged package commands directly."
+            ),
             wrap=True,
         )
         footer.add_css_class("swir-muted")
@@ -160,11 +172,15 @@ class SwirSoftwareCenter(Gtk.Application):
         assert self.listbox is not None and self.status_label is not None
         self._clear_rows()
         self.visible_rows = len(rows)
-        self.status_label.set_text(message)
+        broker_available = self.mutation_flow.available()
+        broker_suffix = "" if broker_available else " • package mutation broker unavailable"
+        self.status_label.set_text(f"{message}{broker_suffix}")
         for package in rows:
             row = Gtk.ListBoxRow()
             row.add_css_class("swir-row")
+            outer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            box.set_hexpand(True)
             name = Gtk.Label(label=package.name)
             name.add_css_class("swir-name")
             name.set_xalign(0)
@@ -178,11 +194,26 @@ class SwirSoftwareCenter(Gtk.Application):
             detail.set_xalign(0)
             detail.set_tooltip_text(detail_text)
             box.append(detail)
-            row.set_child(box)
+            outer.append(box)
+            if self.mode == "search":
+                install = Gtk.Button(label="Install")
+                install.add_css_class("swir-primary")
+                install.set_sensitive(broker_available and not self.mutation_busy)
+                install.set_tooltip_text(
+                    "Preview and confirm a journaled SWIR package transaction"
+                    if broker_available
+                    else "SWIR package transaction broker is not available"
+                )
+                install.connect("clicked", self._install_clicked, package.name)
+                outer.append(install)
+            row.set_child(outer)
             self.listbox.append(row)
 
     def _begin_query(self, worker, *, mode: str, pending: str) -> None:
         assert self.status_label is not None
+        if self.mutation_busy:
+            self.status_label.set_text("A package transaction is already in progress.")
+            return
         self.generation += 1
         generation = self.generation
         self.mode = mode
@@ -231,6 +262,108 @@ class SwirSoftwareCenter(Gtk.Application):
             return
         self._begin_query(lambda: search_available(term), mode="search", pending=f"Searching for “{term}”…")
 
+    def _install_clicked(self, _button: Gtk.Button, package_name: str) -> None:
+        self._prepare_mutation("install", package_name)
+
+    def _prepare_mutation(self, operation: str, package_name: str) -> None:
+        assert self.status_label is not None
+        if self.mutation_busy:
+            self.status_label.set_text("A package transaction is already in progress.")
+            return
+        if not self.mutation_flow.available():
+            self.status_label.set_text("SWIR package transaction broker is unavailable; no changes were made.")
+            return
+        self.mutation_busy = True
+        self.last_transaction_state = "previewing"
+        self.status_label.set_text(f"Preparing trusted {operation} preview for {package_name}…")
+
+        def run() -> None:
+            try:
+                intent = self.mutation_flow.prepare(operation, package_name)
+                GLib.idle_add(self._show_confirmation, intent)
+            except PackageBrokerError as exc:
+                GLib.idle_add(self._mutation_failed, exc.code, str(exc))
+
+        threading.Thread(target=run, name="swir-software-preview", daemon=True).start()
+
+    def _show_confirmation(self, intent: PackageMutationIntent) -> bool:
+        assert self.window is not None and self.status_label is not None
+        preview = intent.preview
+        self.last_transaction_state = "awaiting-confirmation"
+        command = shlex.join(preview.command_preview)
+        if len(command) > 900:
+            command = f"{command[:897]}…"
+        digest = preview.plan_digest
+
+        dialog = Gtk.Dialog(transient_for=self.window, modal=True)
+        dialog.set_title("Confirm package installation")
+        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        confirm = dialog.add_button("Install", Gtk.ResponseType.OK)
+        confirm.add_css_class("suggested-action")
+        area = dialog.get_content_area()
+        area.set_spacing(10)
+        area.set_margin_top(16)
+        area.set_margin_bottom(16)
+        area.set_margin_start(18)
+        area.set_margin_end(18)
+        title = Gtk.Label(label=f"Install {preview.package_name}?", wrap=True)
+        title.add_css_class("swir-name")
+        title.set_xalign(0)
+        area.append(title)
+        detail = Gtk.Label(
+            label=(
+                f"Package manager: {preview.package_manager or 'system provider'}\n"
+                f"Plan digest: {digest}\n\n"
+                f"Broker command preview (display only):\n{command}\n\n"
+                "Continuing requests Polkit authorization and commits exactly this preview. "
+                "If the plan changes, the transaction fails closed and must be previewed again."
+            ),
+            wrap=True,
+            selectable=True,
+        )
+        detail.set_xalign(0)
+        area.append(detail)
+        dialog.connect("response", self._confirmation_response, intent)
+        dialog.present()
+        self.status_label.set_text(f"Waiting for confirmation to install {preview.package_name}.")
+        return False
+
+    def _confirmation_response(self, dialog: Gtk.Dialog, response: int, intent: PackageMutationIntent) -> None:
+        dialog.close()
+        assert self.status_label is not None
+        if response != Gtk.ResponseType.OK:
+            self.mutation_busy = False
+            self.last_transaction_state = "cancelled"
+            self.status_label.set_text("Installation cancelled before authorization; no changes were made.")
+            return
+        self.last_transaction_state = "authorizing"
+        self.status_label.set_text(f"Authorizing and installing {intent.preview.package_name}…")
+
+        def run() -> None:
+            try:
+                transaction = self.mutation_flow.commit(intent, intent.confirmation_digest)
+                GLib.idle_add(self._mutation_committed, transaction)
+            except PackageBrokerError as exc:
+                GLib.idle_add(self._mutation_failed, exc.code, str(exc))
+
+        threading.Thread(target=run, name="swir-software-commit", daemon=True).start()
+
+    def _mutation_committed(self, transaction: dict) -> bool:
+        assert self.status_label is not None
+        self.mutation_busy = False
+        self.last_transaction_state = str(transaction.get("state") or "committed")
+        transaction_id = str(transaction.get("id") or "unknown")
+        self.status_label.set_text(f"Package transaction committed and verified. Transaction: {transaction_id}")
+        self._load_installed()
+        return False
+
+    def _mutation_failed(self, code: str, message: str) -> bool:
+        assert self.status_label is not None
+        self.mutation_busy = False
+        self.last_transaction_state = "failed"
+        self.status_label.set_text(f"Package transaction stopped ({code}): {message}")
+        return False
+
     def _on_mapped(self, _window: Gtk.Window) -> None:
         if not self.e2e or not self.evidence_path:
             return
@@ -239,6 +372,7 @@ class SwirSoftwareCenter(Gtk.Application):
         if not runtime_text or path.parent.resolve() != pathlib.Path(runtime_text).resolve():
             raise RuntimeError("refusing Software Center evidence path outside XDG_RUNTIME_DIR")
         status = tools_status()
+        broker_available = self.mutation_flow.available()
         payload = {
             "schema": EVIDENCE_SCHEMA,
             "passed": status["aptCache"] and status["dpkgQuery"],
@@ -246,8 +380,12 @@ class SwirSoftwareCenter(Gtk.Application):
             "nativeToolkit": "gtk4",
             "displayProtocol": "wayland",
             "windowMapped": True,
-            "privilegedOperations": False,
-            "mutationControlsExposed": False,
+            "privilegedOperationsInUi": False,
+            "mutationFlowWired": True,
+            "mutationControlsExposed": broker_available,
+            "packageBrokerAvailable": broker_available,
+            "explicitPlanConfirmationRequired": True,
+            "directPackageToolMutation": False,
             "packageTransactionBrokerBypassed": False,
             "readOnlyMetadata": True,
             "packageRowsBounded": MAX_PACKAGE_ROWS,

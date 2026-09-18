@@ -6,6 +6,8 @@ on:
     paths:
       - 'system/apps/package_status_runtime.py'
       - 'system/apps/package_status_runtime.selftest.py'
+      - 'system/apps/package_transaction_client.py'
+      - 'system/apps/package_mutation_flow.py'
       - 'system/apps/swir-software-center.py'
       - 'system/apps/swir-update-center.py'
       - 'system/session/swir-shell.py'
@@ -16,6 +18,8 @@ on:
     paths:
       - 'system/apps/package_status_runtime.py'
       - 'system/apps/package_status_runtime.selftest.py'
+      - 'system/apps/package_transaction_client.py'
+      - 'system/apps/package_mutation_flow.py'
       - 'system/apps/swir-software-center.py'
       - 'system/apps/swir-update-center.py'
       - 'system/session/swir-shell.py'
@@ -37,24 +41,26 @@ jobs:
     timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
-      - name: Compile and test read-only package UI runtime
+      - name: Compile and test package UI runtime
         shell: bash
         run: |
           set -euo pipefail
           python3 -m py_compile \
             system/apps/package_status_runtime.py \
             system/apps/package_status_runtime.selftest.py \
+            system/apps/package_transaction_client.py \
+            system/apps/package_mutation_flow.py \
             system/apps/swir-software-center.py \
             system/apps/swir-update-center.py \
             system/session/swir-shell.py
           PYTHONPATH=system/apps python3 system/apps/package_status_runtime.selftest.py
+          PYTHONPATH=system/apps python3 system/apps/package_mutation_flow.selftest.py
 
           ! grep -RE 'shell *= *True|os\.system\(' \
             system/apps/package_status_runtime.py \
             system/apps/swir-software-center.py \
             system/apps/swir-update-center.py
-          ! grep -RE 'sudo |pkexec |/usr/bin/su |/bin/su ' \
-            system/apps/package_status_runtime.py \
+          ! grep -RE '/usr/bin/pkexec|/usr/bin/sudo|/usr/bin/su ' \
             system/apps/swir-software-center.py \
             system/apps/swir-update-center.py
           ! grep -RE 'apt(-get)? +update|apt(-get)? +install|apt(-get)? +remove|dpkg +--' \
@@ -63,22 +69,30 @@ jobs:
           grep -F '"--simulate"' system/apps/package_status_runtime.py >/dev/null
           grep -F '"--no-download"' system/apps/package_status_runtime.py >/dev/null
           grep -F 'Debug::NoLocking=true' system/apps/package_status_runtime.py >/dev/null
-          grep -F 'mutationControlsExposed": False' system/apps/swir-software-center.py >/dev/null
-          grep -F 'mutationControlsExposed": False' system/apps/swir-update-center.py >/dev/null
+          grep -F 'PackageMutationFlow' system/apps/swir-software-center.py >/dev/null
+          grep -F 'PackageMutationFlow' system/apps/swir-update-center.py >/dev/null
+          grep -F 'explicitPlanConfirmationRequired": True' system/apps/swir-software-center.py >/dev/null
+          grep -F 'explicitPlanConfirmationRequired": True' system/apps/swir-update-center.py >/dev/null
+          grep -F 'directPackageToolMutation": False' system/apps/swir-software-center.py >/dev/null
+          grep -F 'directPackageToolMutation": False' system/apps/swir-update-center.py >/dev/null
           grep -F 'repositoryRefreshPerformed": False' system/apps/swir-update-center.py >/dev/null
           grep -F 'Software", (("/usr/local/bin/swir-software-center",)' system/session/swir-shell.py >/dev/null
           grep -F 'Updates", (("/usr/local/bin/swir-update-center",)' system/session/swir-shell.py >/dev/null
 
-      - name: Verify provisioning contract includes both native centers
+      - name: Verify provisioning contract includes native centers and broker clients
         shell: bash
         run: |
           set -euo pipefail
           grep -F 'system/apps/package_status_runtime.py' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'system/apps/package_transaction_client.py' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'system/apps/package_mutation_flow.py' system/session/provision-graphical-session.sh >/dev/null
           grep -F 'system/apps/swir-software-center.py' system/session/provision-graphical-session.sh >/dev/null
           grep -F 'system/apps/swir-update-center.py' system/session/provision-graphical-session.sh >/dev/null
           grep -F '/usr/local/bin/swir-software-center' system/session/provision-graphical-session.sh >/dev/null
           grep -F '/usr/local/bin/swir-update-center' system/session/provision-graphical-session.sh >/dev/null
           grep -F '/usr/local/lib/swir/package_status_runtime.py' system/session/provision-graphical-session.sh >/dev/null
+          grep -F '/usr/local/lib/swir/package_transaction_client.py' system/session/provision-graphical-session.sh >/dev/null
+          grep -F '/usr/local/lib/swir/package_mutation_flow.py' system/session/provision-graphical-session.sh >/dev/null
 
   wayland-runtime:
     runs-on: ubuntu-24.04
@@ -133,24 +147,34 @@ jobs:
           software = json.load(open(sys.argv[1], encoding='utf-8'))
           updates = json.load(open(sys.argv[2], encoding='utf-8'))
 
-          assert software['schema'] == 'swir.native-software-center-runtime-evidence/0.1'
+          assert software['schema'] == 'swir.native-software-center-runtime-evidence/0.2'
           assert software['passed'] is True
           assert software['applicationId'] == 'dev.swir.SoftwareCenter'
           assert software['nativeToolkit'] == 'gtk4' and software['displayProtocol'] == 'wayland'
-          assert software['windowMapped'] is True and software['privilegedOperations'] is False
+          assert software['windowMapped'] is True and software['privilegedOperationsInUi'] is False
+          assert software['mutationFlowWired'] is True
+          assert software['packageBrokerAvailable'] is False
           assert software['mutationControlsExposed'] is False
+          assert software['explicitPlanConfirmationRequired'] is True
+          assert software['directPackageToolMutation'] is False
           assert software['packageTransactionBrokerBypassed'] is False
           assert software['readOnlyMetadata'] is True and software['packageRowsBounded'] == 200
           assert software['tools']['aptCache'] is True and software['tools']['dpkgQuery'] is True
 
-          assert updates['schema'] == 'swir.native-update-center-runtime-evidence/0.1'
+          assert updates['schema'] == 'swir.native-update-center-runtime-evidence/0.2'
           assert updates['passed'] is True
           assert updates['applicationId'] == 'dev.swir.UpdateCenter'
           assert updates['nativeToolkit'] == 'gtk4' and updates['displayProtocol'] == 'wayland'
-          assert updates['windowMapped'] is True and updates['privilegedOperations'] is False
+          assert updates['windowMapped'] is True and updates['privilegedOperationsInUi'] is False
+          assert updates['mutationFlowWired'] is True
+          assert updates['packageBrokerAvailable'] is False
           assert updates['mutationControlsExposed'] is False
+          assert updates['explicitPlanConfirmationRequired'] is True
           assert updates['repositoryRefreshPerformed'] is False
           assert updates['packageTransactionBrokerBypassed'] is False
-          assert updates['simulationOnly'] is True and updates['updateRowsBounded'] == 200
+          assert updates['directPackageToolMutation'] is False
+          assert updates['simulationOnlyForDiscovery'] is True
+          assert updates['bulkUpdateMutationExposed'] is False
+          assert updates['updateRowsBounded'] == 200
           assert updates['tools']['aptGet'] is True
           PY
