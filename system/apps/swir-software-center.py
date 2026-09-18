@@ -6,6 +6,10 @@ pkexec, sudo or arbitrary commands from this GTK process: an install first asks
 the SWIR package broker for an exact preview, displays that plan for explicit
 confirmation, then requests peer-bound Polkit authorization and commits the same
 single-use plan through the journaled transaction service.
+
+A trusted caller may pass ``--install <package>`` to preselect one package. That
+request never auto-commits: it enters the exact same preview -> explicit user
+confirmation -> Polkit -> journaled transaction flow as an Install button.
 """
 
 from __future__ import annotations
@@ -13,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import shlex
 import sys
 import threading
@@ -40,6 +45,7 @@ from package_transaction_client import PackageBrokerError, PackageTransactionCli
 
 APP_ID: Final = "dev.swir.SoftwareCenter"
 EVIDENCE_SCHEMA: Final = "swir.native-software-center-runtime-evidence/0.2"
+PACKAGE_NAME_RE: Final = re.compile(r"^[a-z0-9][a-z0-9+.-]{0,127}$")
 
 CSS = b"""
 window.swir-app { background: #02050A; color: #F4FAFF; }
@@ -56,9 +62,28 @@ entry { background: #07111C; color: #F4FAFF; border: 1px solid rgba(98,229,255,0
 """
 
 
+def parse_install_request(argv: list[str]) -> tuple[str | None, list[str]]:
+    """Remove SWIR's fixed install request from GTK argv without executing it."""
+    args = list(argv)
+    if "--install" not in args[1:]:
+        return None, args
+    index = args.index("--install", 1)
+    if index + 1 >= len(args):
+        raise ValueError("--install requires a package name")
+    package = args[index + 1]
+    if not PACKAGE_NAME_RE.fullmatch(package):
+        raise ValueError("invalid package name")
+    clean = args[:index] + args[index + 2 :]
+    if len(clean) != 1:
+        raise ValueError("unexpected arguments after --install request")
+    return package, clean
+
+
 class SwirSoftwareCenter(Gtk.Application):
-    def __init__(self) -> None:
+    def __init__(self, requested_install: str | None = None) -> None:
         super().__init__(application_id=APP_ID)
+        self.requested_install = requested_install
+        self.request_dispatched = False
         self.window: Gtk.ApplicationWindow | None = None
         self.listbox: Gtk.ListBox | None = None
         self.status_label: Gtk.Label | None = None
@@ -87,16 +112,13 @@ class SwirSoftwareCenter(Gtk.Application):
         if self.window is not None:
             self.window.present()
             return
-
         window = Gtk.ApplicationWindow(application=self)
         window.set_title("SWIR Software Center")
         window.set_default_size(1040, 720)
         window.add_css_class("swir-app")
         self.window = window
-
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         window.set_child(root)
-
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         header.add_css_class("swir-header")
         brand = Gtk.Label(label="◆  SWIR Software Center")
@@ -111,7 +133,6 @@ class SwirSoftwareCenter(Gtk.Application):
         installed.connect("clicked", self._installed_clicked)
         header.append(installed)
         root.append(header)
-
         search_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         search_row.set_margin_start(12)
         search_row.set_margin_end(12)
@@ -126,14 +147,12 @@ class SwirSoftwareCenter(Gtk.Application):
         search.connect("clicked", self._search_clicked)
         search_row.append(search)
         root.append(search_row)
-
         self.status_label = Gtk.Label(label="Loading installed packages…", wrap=True)
         self.status_label.set_xalign(0)
         self.status_label.set_margin_start(12)
         self.status_label.set_margin_end(12)
         self.status_label.add_css_class("swir-status")
         root.append(self.status_label)
-
         scroller = Gtk.ScrolledWindow()
         scroller.set_hexpand(True)
         scroller.set_vexpand(True)
@@ -141,7 +160,6 @@ class SwirSoftwareCenter(Gtk.Application):
         self.listbox.set_selection_mode(Gtk.SelectionMode.NONE)
         scroller.set_child(self.listbox)
         root.append(scroller)
-
         footer = Gtk.Label(
             label=(
                 "Installs use SWIR preview → explicit confirmation → Polkit → journaled transaction. "
@@ -155,10 +173,21 @@ class SwirSoftwareCenter(Gtk.Application):
         footer.set_margin_end(12)
         footer.set_margin_bottom(8)
         root.append(footer)
-
         window.connect("map", self._on_mapped)
         window.present()
-        self._load_installed()
+        if self.requested_install:
+            self.search_entry.set_text(self.requested_install)
+            self.status_label.set_text(f"Trusted install request received for {self.requested_install}; preparing preview…")
+            GLib.idle_add(self._dispatch_requested_install)
+        else:
+            self._load_installed()
+
+    def _dispatch_requested_install(self) -> bool:
+        if self.request_dispatched or not self.requested_install:
+            return False
+        self.request_dispatched = True
+        self._prepare_mutation("install", self.requested_install)
+        return False
 
     def _clear_rows(self) -> None:
         assert self.listbox is not None
@@ -201,8 +230,7 @@ class SwirSoftwareCenter(Gtk.Application):
                 install.set_sensitive(broker_available and not self.mutation_busy)
                 install.set_tooltip_text(
                     "Preview and confirm a journaled SWIR package transaction"
-                    if broker_available
-                    else "SWIR package transaction broker is not available"
+                    if broker_available else "SWIR package transaction broker is not available"
                 )
                 install.connect("clicked", self._install_clicked, package.name)
                 outer.append(install)
@@ -218,14 +246,12 @@ class SwirSoftwareCenter(Gtk.Application):
         generation = self.generation
         self.mode = mode
         self.status_label.set_text(pending)
-
         def run() -> None:
             try:
                 rows, ok, error = worker()
             except (OSError, ValueError) as exc:
                 rows, ok, error = [], False, str(exc)
             GLib.idle_add(self._finish_query, generation, rows, ok, error, mode)
-
         threading.Thread(target=run, name=f"swir-software-{mode}", daemon=True).start()
 
     def _finish_query(self, generation: int, rows: list[PackageRow], ok: bool, error: str, mode: str) -> bool:
@@ -254,9 +280,8 @@ class SwirSoftwareCenter(Gtk.Application):
 
     def _start_search(self) -> None:
         assert self.search_entry is not None and self.status_label is not None
-        raw = self.search_entry.get_text()
         try:
-            term = normalize_search_term(raw)
+            term = normalize_search_term(self.search_entry.get_text())
         except ValueError as exc:
             self.status_label.set_text(str(exc))
             return
@@ -270,20 +295,21 @@ class SwirSoftwareCenter(Gtk.Application):
         if self.mutation_busy:
             self.status_label.set_text("A package transaction is already in progress.")
             return
+        if not PACKAGE_NAME_RE.fullmatch(package_name):
+            self.status_label.set_text("Invalid package request; no changes were made.")
+            return
         if not self.mutation_flow.available():
             self.status_label.set_text("SWIR package transaction broker is unavailable; no changes were made.")
             return
         self.mutation_busy = True
         self.last_transaction_state = "previewing"
         self.status_label.set_text(f"Preparing trusted {operation} preview for {package_name}…")
-
         def run() -> None:
             try:
                 intent = self.mutation_flow.prepare(operation, package_name)
                 GLib.idle_add(self._show_confirmation, intent)
             except PackageBrokerError as exc:
                 GLib.idle_add(self._mutation_failed, exc.code, str(exc))
-
         threading.Thread(target=run, name="swir-software-preview", daemon=True).start()
 
     def _show_confirmation(self, intent: PackageMutationIntent) -> bool:
@@ -293,8 +319,6 @@ class SwirSoftwareCenter(Gtk.Application):
         command = shlex.join(preview.command_preview)
         if len(command) > 900:
             command = f"{command[:897]}…"
-        digest = preview.plan_digest
-
         dialog = Gtk.Dialog(transient_for=self.window, modal=True)
         dialog.set_title("Confirm package installation")
         dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
@@ -313,7 +337,7 @@ class SwirSoftwareCenter(Gtk.Application):
         detail = Gtk.Label(
             label=(
                 f"Package manager: {preview.package_manager or 'system provider'}\n"
-                f"Plan digest: {digest}\n\n"
+                f"Plan digest: {preview.plan_digest}\n\n"
                 f"Broker command preview (display only):\n{command}\n\n"
                 "Continuing requests Polkit authorization and commits exactly this preview. "
                 "If the plan changes, the transaction fails closed and must be previewed again."
@@ -338,14 +362,12 @@ class SwirSoftwareCenter(Gtk.Application):
             return
         self.last_transaction_state = "authorizing"
         self.status_label.set_text(f"Authorizing and installing {intent.preview.package_name}…")
-
         def run() -> None:
             try:
                 transaction = self.mutation_flow.commit(intent, intent.confirmation_digest)
                 GLib.idle_add(self._mutation_committed, transaction)
             except PackageBrokerError as exc:
                 GLib.idle_add(self._mutation_failed, exc.code, str(exc))
-
         threading.Thread(target=run, name="swir-software-commit", daemon=True).start()
 
     def _mutation_committed(self, transaction: dict) -> bool:
@@ -389,6 +411,8 @@ class SwirSoftwareCenter(Gtk.Application):
             "packageTransactionBrokerBypassed": False,
             "readOnlyMetadata": True,
             "packageRowsBounded": MAX_PACKAGE_ROWS,
+            "externalInstallRequestSupported": True,
+            "externalInstallAutoCommit": False,
             "tools": status,
         }
         path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
@@ -400,5 +424,26 @@ class SwirSoftwareCenter(Gtk.Application):
         return False
 
 
+def run_self_test() -> int:
+    package, argv = parse_install_request(["swir-software-center", "--install", "firefox-esr"])
+    assert package == "firefox-esr" and argv == ["swir-software-center"]
+    for invalid in ("../bad", "Bad", "x y", ""):
+        try:
+            parse_install_request(["swir-software-center", "--install", invalid])
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"invalid package accepted: {invalid!r}")
+    print(json.dumps({"schema": "swir.software-center-request-selftest/0.1", "valid": True}))
+    return 0
+
+
 if __name__ == "__main__":
-    raise SystemExit(SwirSoftwareCenter().run(sys.argv))
+    if "--self-test" in sys.argv[1:]:
+        raise SystemExit(run_self_test())
+    try:
+        requested, gtk_argv = parse_install_request(sys.argv)
+    except ValueError as exc:
+        print(f"SWIR Software Center: {exc}", file=sys.stderr)
+        raise SystemExit(64)
+    raise SystemExit(SwirSoftwareCenter(requested_install=requested).run(gtk_argv))
