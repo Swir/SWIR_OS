@@ -86,7 +86,6 @@ jobs:
 
           dbus-run-session -- bash -euo pipefail -c '
             export LIBGL_ALWAYS_SOFTWARE=1
-            export GSK_RENDERER=cairo
             export GTK_A11Y=none
             export SWIR_SHELL_E2E=1
             export SWIR_SHELL_EVIDENCE_PATH="$XDG_RUNTIME_DIR/shell.json"
@@ -118,7 +117,6 @@ jobs:
 
             python3 - "$SWIR_NOTIFICATION_EVIDENCE_PATH" "$XDG_STATE_HOME/swir/notifications/history.json" <<'"'"'PY'"'"'
           import json
-          import os
           import pathlib
           import stat
           import sys
