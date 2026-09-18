@@ -357,7 +357,7 @@ class SwirCalculator(Gtk.Application):
             return
         display = self.window.get_display()
         clipboard = display.get_clipboard()
-        clipboard.set(self.entry.get_text())
+        clipboard.set_text(self.entry.get_text())
         self._set_status("Copied result")
 
     def _refresh_history(self) -> None:
