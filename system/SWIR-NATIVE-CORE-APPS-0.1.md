@@ -152,6 +152,24 @@ Current verified behavior:
 
 Process termination, service control, cgroup inspection and privileged diagnostics remain future brokered capabilities and are intentionally not implied by this read-only monitor.
 
+## SWIR Player
+
+`system/apps/swir-player.py` is an unprivileged GTK4/GStreamer media player for local audio and video.
+
+Current verified design and runtime behavior:
+
+- starts as `dev.swir.Player` on Wayland and uses GStreamer's `playbin` pipeline;
+- renders video through the distro-managed GTK4 GStreamer sink when available and keeps audio/video codec updates on the signed System Edition package path;
+- accepts canonical readable local regular media files only; remote URI text and symlink-traversing media paths are rejected;
+- persists a bounded owner-only media library plus playlists below `${XDG_DATA_HOME:-~/.local/share}/swir/player/library.json` with atomic replacement, directory mode `0700` and file mode `0600`;
+- provides play/pause/stop, previous/next, seek and volume controls plus a Favorites playlist;
+- exports `org.mpris.MediaPlayer2.swir` on the user session bus so desktop media keys can control playback through MPRIS2;
+- publishes a `Gio.Notification` when the current track changes;
+- has no self-updater, no direct package mutation and no `sudo`/`pkexec`/root shortcut;
+- maps a real GTK4 window under Weston in CI and prerolls a generated local WAV through GStreamer with disposable test sinks while separately verifying the Debian 13 `gtk4paintablesink` runtime is installed.
+
+The library and playlist bounds are deliberately finite: 1,000 library tracks, 100 playlists and 500 entries per playlist. This milestone closes the dedicated native Player integration item only; the broader daily-use native application suite remains open.
+
 ## Shared runtime policy
 
 `system/apps/core_runtime.py` keeps common non-UI behavior testable independently from GTK. It provides deterministic read-only directory snapshots plus a validated, bounded and atomic user-settings store. `core_runtime.selftest.py` covers normal and hostile/symlink cases.
@@ -162,10 +180,10 @@ Process termination, service control, cgroup inspection and privileged diagnosti
 
 ## Runtime verification
 
-`.github/workflows/system-native-core-apps-contract.yml` verifies the established native suite. `.github/workflows/system-native-software-update-centers.yml` and `.github/workflows/system-package-ui-mutation-contract.yml` verify package discovery plus the brokered Software/Update mutation boundary. `.github/workflows/system-native-hardware-center.yml` verifies Hardware Center parsing/safety invariants and maps the real GTK4 window on headless Weston while loading the trusted Driver Center report.
+`.github/workflows/system-native-core-apps-contract.yml` verifies the established native suite. `.github/workflows/system-native-player.yml` verifies SWIR Player policy plus the exact Debian 13 GTK4/GStreamer runtime, local-media preroll, library/playlists, MPRIS2 and notification integration. `.github/workflows/system-native-software-update-centers.yml` and `.github/workflows/system-package-ui-mutation-contract.yml` verify package discovery plus the brokered Software/Update mutation boundary. `.github/workflows/system-native-hardware-center.yml` verifies Hardware Center parsing/safety invariants and maps the real GTK4 window on headless Weston while loading the trusted Driver Center report.
 
 The Wayland gates require real windows and bounded runtime evidence. The graphical System Edition provisioning path installs the applications and their exact trusted runtime dependencies into the image only after source/package checks succeed. Hardware Center provisioning stages the Driver Center report modules, Hardware Catalog and trusted-source policy as root-owned read-only runtime data; it does not stage a direct privileged hardware-mutation shortcut into the GTK application.
 
 ## Roadmap accounting
 
-This milestone does **not** mark `essential native Linux application suite for dependable daily use` complete. The product baseline still requires the full coherent suite, including a native Browser, media/image/document/archive applications, calculator/screenshot/clock basics, deeper diagnostics and backup/recovery integration. Progress changes only when the authoritative `SWIR-OS-ARCHITECTURE.md` checklist is legitimately satisfied.
+This milestone does **not** mark `essential native Linux application suite for dependable daily use` complete. The product baseline still requires the full coherent suite, including image/document/archive applications, calculator/screenshot/clock basics, deeper diagnostics and backup/recovery integration. Progress changes only when the authoritative `SWIR-OS-ARCHITECTURE.md` checklist is legitimately satisfied.

@@ -71,6 +71,7 @@ window.swir-shell {
 LAUNCHERS: Final = (
     ("Files", (("/usr/local/bin/swir-files",), ("/usr/bin/nautilus",), ("/usr/bin/thunar",), ("/usr/bin/pcmanfm",))),
     ("Browser", (("/usr/local/bin/swir-browser",),)),
+    ("Player", (("/usr/local/bin/swir-player",),)),
     ("Terminal", (("/usr/local/bin/swir-terminal",),)),
     ("Notes", (("/usr/local/bin/swir-notes",),)),
     ("Settings", (("/usr/local/bin/swir-settings",), ("/usr/bin/gnome-control-center",))),
