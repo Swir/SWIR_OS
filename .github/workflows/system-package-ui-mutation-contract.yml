@@ -44,7 +44,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Syntax and focused self-tests
+      - name: Compile Python mutation surfaces
         shell: bash
         run: |
           set -euo pipefail
@@ -55,12 +55,37 @@ jobs:
             system/apps/package_mutation_flow.selftest.py \
             system/apps/swir-software-center.py \
             system/apps/swir-update-center.py
+
+      - name: Run package transaction client self-test
+        shell: bash
+        run: |
+          set -euo pipefail
           PYTHONPATH=system/apps python3 system/apps/package_transaction_client.selftest.py
+
+      - name: Run package mutation confirmation self-test
+        shell: bash
+        run: |
+          set -euo pipefail
           PYTHONPATH=system/apps python3 system/apps/package_mutation_flow.selftest.py
+
+      - name: Check Node provisioning syntax
+        shell: bash
+        run: |
+          set -euo pipefail
           node --check system/image/system-package-ui-runtime-provisioning.mjs
           node --check system/image/system-package-ui-runtime-provisioning.selftest.mjs
           node --check system/image/stage-package-ui-runtime.mjs
+
+      - name: Run package UI runtime provisioning self-test
+        shell: bash
+        run: |
+          set -euo pipefail
           node system/image/system-package-ui-runtime-provisioning.selftest.mjs
+
+      - name: Check graphical provisioning shell syntax
+        shell: bash
+        run: |
+          set -euo pipefail
           bash -n system/session/provision-graphical-session.sh
 
       - name: Verify explicit confirmation and no direct privilege path
@@ -86,8 +111,10 @@ jobs:
                   elif isinstance(node, ast.ImportFrom) and node.module:
                       imported.add(node.module.split('.')[0])
                   elif isinstance(node, ast.Call):
-                      if isinstance(node.func, ast.Name): calls.append(node.func.id)
-                      elif isinstance(node.func, ast.Attribute): calls.append(node.func.attr)
+                      if isinstance(node.func, ast.Name):
+                          calls.append(node.func.id)
+                      elif isinstance(node.func, ast.Attribute):
+                          calls.append(node.func.attr)
               assert 'subprocess' not in imported, f'{path}: subprocess import forbidden in GTK mutation surface'
               assert 'PackageMutationFlow' in text, f'{path}: brokered mutation flow missing'
               assert '_show_confirmation' in text and 'CONFIRMATION' in Path('system/apps/package_mutation_flow.py').read_text(), f'{path}: explicit confirmation binding missing'
