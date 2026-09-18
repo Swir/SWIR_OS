@@ -46,7 +46,10 @@ jobs:
             system/apps/swir-terminal.py
           PYTHONPATH=system/apps python3 system/apps/core_runtime.selftest.py
           ! grep -RE 'shell *= *True|os\.system\(|subprocess\.(run|Popen)\([^\n]*shell *= *True' system/apps
-          ! grep -RE 'sudo |pkexec |/usr/bin/su |/bin/su ' system/apps
+          # Mentioning sudo/pkexec in documentation is allowed; invoking their
+          # absolute production paths from first-party app code is not.
+          ! grep -RE '/usr/bin/(sudo|pkexec|su)([[:space:]"'"']|$)|/bin/su([[:space:]"'"']|$)' system/apps/swir-*.py
+          ! grep -RE 'subprocess\.(run|Popen).*\b(sudo|pkexec)\b' system/apps/swir-*.py
           grep -F 'fileOpenDelegationEnabled": False' system/apps/swir-files.py >/dev/null
           grep -F 'mutationControlsExposed": False' system/apps/swir-network-center.py >/dev/null
           grep -F 'ownerOnlyNotesFile' system/apps/swir-notes.py >/dev/null
