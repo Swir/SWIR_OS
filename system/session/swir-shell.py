@@ -74,6 +74,7 @@ LAUNCHERS: Final = (
     ("Notes", (("/usr/local/bin/swir-notes",),)),
     ("Settings", (("/usr/local/bin/swir-settings",), ("/usr/bin/gnome-control-center",))),
     ("Network", (("/usr/local/bin/swir-network-center",),)),
+    ("Hardware", (("/usr/local/bin/swir-hardware-center",),)),
     ("Software", (("/usr/local/bin/swir-software-center",),)),
     ("Updates", (("/usr/local/bin/swir-update-center",),)),
     ("System Monitor", (("/usr/local/bin/swir-system-monitor",),)),
