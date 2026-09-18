@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=SWIR Player
+Comment=Play local audio and video with the native SWIR OS media player
+Exec=/usr/local/bin/swir-player %F
+TryExec=/usr/local/bin/swir-player
+Icon=multimedia-player
+Terminal=false
+Categories=AudioVideo;Player;
+MimeType=audio/mpeg;audio/ogg;audio/flac;audio/x-wav;audio/wav;audio/mp4;audio/x-m4a;video/mp4;video/webm;video/x-matroska;video/ogg;
+StartupNotify=true
+StartupWMClass=dev.swir.Player
