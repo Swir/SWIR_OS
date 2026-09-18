@@ -79,21 +79,21 @@ export function getVendorRepositoryEvidenceProfile(profileId) {
 async function fetchBounded(url, maxBytes, fetchImpl) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20_000);
-  let response;
   try {
-    response = await fetchImpl(url, { redirect: 'manual', signal: controller.signal, headers: { 'user-agent': 'SWIR-OS-vendor-repository-evidence/0.1' } });
+    const response = await fetchImpl(url, { redirect: 'manual', signal: controller.signal, headers: { 'user-agent': 'SWIR-OS-vendor-repository-evidence/0.1' } });
+    assert(response && response.status === 200, 'FETCH_STATUS_INVALID', `pinned vendor resource returned HTTP ${response?.status ?? 'unknown'}`);
+    assert(!response.headers?.get?.('location'), 'FETCH_REDIRECT_FORBIDDEN', 'vendor evidence fetch must not follow redirects');
+    const declared = Number(response.headers?.get?.('content-length') || 0);
+    if (Number.isFinite(declared) && declared > 0) assert(declared <= maxBytes, 'FETCH_TOO_LARGE', 'pinned vendor resource exceeds its verified size bound');
+    const bytes = Buffer.from(await response.arrayBuffer());
+    assert(bytes.length > 0 && bytes.length <= maxBytes, 'FETCH_TOO_LARGE', 'pinned vendor resource is empty or exceeds its verified size bound');
+    return bytes;
   } catch (error) {
+    if (error?.name === 'VendorRepositoryEvidenceError') throw error;
     fail('FETCH_FAILED', `failed to fetch pinned vendor resource: ${error?.message || 'network error'}`);
   } finally {
     clearTimeout(timer);
   }
-  assert(response && response.status === 200, 'FETCH_STATUS_INVALID', `pinned vendor resource returned HTTP ${response?.status ?? 'unknown'}`);
-  assert(!response.headers?.get?.('location'), 'FETCH_REDIRECT_FORBIDDEN', 'vendor evidence fetch must not follow redirects');
-  const declared = Number(response.headers?.get?.('content-length') || 0);
-  if (Number.isFinite(declared) && declared > 0) assert(declared <= maxBytes, 'FETCH_TOO_LARGE', 'pinned vendor resource exceeds its verified size bound');
-  const bytes = Buffer.from(await response.arrayBuffer());
-  assert(bytes.length > 0 && bytes.length <= maxBytes, 'FETCH_TOO_LARGE', 'pinned vendor resource is empty or exceeds its verified size bound');
-  return bytes;
 }
 
 export function parseGpgPrimaryFingerprint(colonText) {
@@ -152,7 +152,7 @@ export function verifyVendorRepositoryCrypto({ profile, keyBytes, inReleaseBytes
     fs.writeFileSync(keyFile, keyBytes, { mode: 0o600 });
     fs.writeFileSync(inReleaseFile, inReleaseBytes, { mode: 0o600 });
 
-    const show = toolRunner('gpg', ['--batch', '--with-colons', '--import-options', 'show-only', '--import', keyFile], { cwd: root });
+    const show = toolRunner('gpg', ['--batch', '--with-colons', '--show-keys', keyFile], { cwd: root });
     const fingerprint = parseGpgPrimaryFingerprint(show.stdout);
     assert(fingerprint && HEX40.test(fingerprint), 'KEY_FINGERPRINT_MISSING', 'vendor key file must contain one parseable primary fingerprint');
     assert(fingerprint.endsWith(profile.expectedKeyId), 'KEY_ID_MISMATCH', 'vendor key fingerprint does not match the profile key id');
@@ -207,8 +207,18 @@ export async function collectVendorRepositoryEvidence(profileId, options = {}) {
     vendor: profile.vendor,
     hardwareVendor: profile.hardwareVendor,
     distribution: profile.distribution,
-    source: Object.freeze({ origin: profile.origin, basePath: profile.basePath, keyUrl, inReleaseUrl, packagesUrl }),
-    key: Object.freeze({ fingerprint: cryptoEvidence.fingerprint, expectedKeyId: profile.expectedKeyId, sha256: sha256(keyBytes) }),
+    source: Object.freeze({
+      origin: profile.origin,
+      basePath: profile.basePath,
+      keyUrl,
+      inReleaseUrl,
+      packagesUrl
+    }),
+    key: Object.freeze({
+      fingerprint: cryptoEvidence.fingerprint,
+      expectedKeyId: profile.expectedKeyId,
+      sha256: sha256(keyBytes)
+    }),
     inRelease: Object.freeze({
       validSignatureFingerprint: cryptoEvidence.validSignatureFingerprint,
       validSignaturePrimaryFingerprint: cryptoEvidence.validSignaturePrimaryFingerprint,
@@ -237,7 +247,9 @@ export const VendorRepositoryEvidencePolicy = Object.freeze({
 
 async function main() {
   const [, , command, profileId] = process.argv;
-  if (command !== '--probe' || !profileId) fail('CLI_USAGE', 'usage: vendor-repository-trust-evidence.mjs --probe <profile-id>');
+  if (command !== '--probe' || !profileId) {
+    fail('CLI_USAGE', 'usage: vendor-repository-trust-evidence.mjs --probe <profile-id>');
+  }
   const evidence = await collectVendorRepositoryEvidence(profileId);
   process.stdout.write(`${JSON.stringify(evidence, null, 2)}\n`);
 }
