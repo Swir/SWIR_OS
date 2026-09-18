@@ -30,7 +30,7 @@ const ARTIFACTS = Object.freeze([
   ['transaction-service', 'system/packages/package-transaction-service.mjs', '/usr/lib/swir/package-broker/packages/package-transaction-service.mjs', ['failed-needs-recovery', 'journal']],
   ['privileged-executor', 'system/packages/privileged-package-executor.mjs', '/usr/lib/swir/package-broker/packages/privileged-package-executor.mjs', ["'apt-get': '/usr/bin/apt-get'", 'DEBIAN_FRONTEND']],
   ['package-state', 'system/packages/distribution-package-state.mjs', '/usr/lib/swir/package-broker/packages/distribution-package-state.mjs', ['DistributionPackageSnapshotProvider', 'NativePackageHealthVerifier']],
-  ['dependency-resolver', 'system/packages/apt-dependency-resolver.mjs', '/usr/lib/swir/package-broker/packages/apt-dependency-resolver.mjs', ['AptDependencyResolver', '--simulate']],
+  ['dependency-resolver', 'system/packages/apt-dependency-resolver.mjs', '/usr/lib/swir/package-broker/packages/apt-dependency-resolver.mjs', ['AptDependencyResolver', 'APT_SIMULATION_TIMEOUT']],
   ['package-stack', 'system/packages/system-package-stack.mjs', '/usr/lib/swir/package-broker/packages/system-package-stack.mjs', ['planWithDependencies', 'dependency-resolution']],
   ['peer-security-boundary', 'system/security/peer-package-security-boundary.mjs', '/usr/lib/swir/package-broker/security/peer-package-security-boundary.mjs', ['PeerAuthorizationGrantVerifier', 'callerSuppliedUnixIdentity: false']],
   ['repository-trust', 'system/security/distribution-repository-trust.mjs', '/usr/lib/swir/package-broker/security/distribution-repository-trust.mjs', ['DistributionRepositoryTrustVerifier', 'loadRepositoryTrustPolicy']],
