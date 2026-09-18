@@ -1,0 +1,122 @@
+name: Player Branch Integrator
+
+on:
+  push:
+    branches: [system/native-player-integration]
+    paths:
+      - '.github/workflows/player-branch-integrator.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: system/native-player-integration
+          fetch-depth: 0
+      - name: Apply exact Player integration edits
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              if text.count(old) != 1:
+                  raise SystemExit(f'{path}: expected exactly one integration anchor, found {text.count(old)}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          replace_once(
+              'system/session/swir-shell.py',
+              '    ("Browser", (("/usr/local/bin/swir-browser",),)),\n    ("Terminal",',
+              '    ("Browser", (("/usr/local/bin/swir-browser",),)),\n    ("Player", (("/usr/local/bin/swir-player",),)),\n    ("Terminal",',
+          )
+
+          provision = 'system/session/provision-graphical-session.sh'
+          replace_once(
+              provision,
+              '  system/apps/swir-browser.desktop \\\n  system/apps/swir-files.py \\\n',
+              '  system/apps/swir-browser.desktop \\\n  system/apps/swir-player.py \\\n  system/apps/swir-player.desktop \\\n  system/apps/swir-files.py \\\n',
+          )
+          replace_once(
+              provision,
+              '# repositories. WebKitGTK is distro-managed so browser security updates stay in\n# the SWIR package/update transaction path instead of an ad-hoc self-updater.\nRUNTIME_PACKAGES=(\n  gir1.2-vte-3.91\n  libvte-2.91-gtk4-0\n  nodejs\n  gir1.2-webkit-6.0\n  desktop-file-utils\n)',
+              '# repositories. WebKitGTK and GStreamer are distro-managed so browser/media\n# security and codec updates stay in the SWIR package/update transaction path\n# instead of ad-hoc application self-updaters.\nRUNTIME_PACKAGES=(\n  gir1.2-vte-3.91\n  libvte-2.91-gtk4-0\n  nodejs\n  gir1.2-webkit-6.0\n  gir1.2-gstreamer-1.0\n  gstreamer1.0-plugins-base\n  gstreamer1.0-plugins-good\n  gstreamer1.0-libav\n  gstreamer1.0-gtk4\n  desktop-file-utils\n)',
+          )
+          replace_once(
+              provision,
+              'for pkg in greetd weston plymouth plymouth-themes wayland-utils dbus-user-session python3 python3-gi gir1.2-gtk-4.0 gir1.2-vte-3.91 libvte-2.91-gtk4-0 gir1.2-webkit-6.0 network-manager nodejs desktop-file-utils; do',
+              'for pkg in greetd weston plymouth plymouth-themes wayland-utils dbus-user-session python3 python3-gi gir1.2-gtk-4.0 gir1.2-vte-3.91 libvte-2.91-gtk4-0 gir1.2-webkit-6.0 gir1.2-gstreamer-1.0 gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-libav gstreamer1.0-gtk4 network-manager nodejs desktop-file-utils; do',
+          )
+          replace_once(
+              provision,
+              'install -m 0644 "$SOURCE_ROOT/system/apps/swir-browser.desktop" "$(safe_target /usr/share/applications/swir-browser.desktop)"\ninstall -m 0755 "$SOURCE_ROOT/system/apps/swir-files.py"',
+              'install -m 0644 "$SOURCE_ROOT/system/apps/swir-browser.desktop" "$(safe_target /usr/share/applications/swir-browser.desktop)"\ninstall -m 0755 "$SOURCE_ROOT/system/apps/swir-player.py" "$(safe_target /usr/local/bin/swir-player)"\ninstall -m 0644 "$SOURCE_ROOT/system/apps/swir-player.desktop" "$(safe_target /usr/share/applications/swir-player.desktop)"\ninstall -m 0755 "$SOURCE_ROOT/system/apps/swir-files.py"',
+          )
+          replace_once(
+              provision,
+              '  /usr/local/bin/swir-browser \\\n  /usr/local/bin/swir-files \\\n',
+              '  /usr/local/bin/swir-browser \\\n  /usr/local/bin/swir-player \\\n  /usr/local/bin/swir-files \\\n',
+          )
+          replace_once(
+              provision,
+              'verify_trusted_regular_file /usr/share/applications/swir-browser.desktop no\nverify_trusted_regular_file /usr/local/bin/swir-files yes',
+              'verify_trusted_regular_file /usr/share/applications/swir-browser.desktop no\nverify_trusted_regular_file /usr/local/bin/swir-player yes\nverify_trusted_regular_file /usr/share/applications/swir-player.desktop no\nverify_trusted_regular_file /usr/local/bin/swir-files yes',
+          )
+          replace_once(
+              provision,
+              'native-apps=browser,files,hardware,network,notes,settings,software,system-monitor,terminal,updates',
+              'native-apps=browser,player,files,hardware,network,notes,settings,software,system-monitor,terminal,updates',
+          )
+
+          doc = 'system/SWIR-NATIVE-CORE-APPS-0.1.md'
+          player_section = '''## SWIR Player
+
+`system/apps/swir-player.py` is an unprivileged GTK4/GStreamer media player for local audio and video.
+
+Current verified design and runtime behavior:
+
+- starts as `dev.swir.Player` on Wayland and uses GStreamer's `playbin` pipeline;
+- renders video through the distro-managed GTK4 GStreamer sink when available and keeps audio/video codec updates on the signed System Edition package path;
+- accepts canonical readable local regular media files only; remote URI text and symlink-traversing media paths are rejected;
+- persists a bounded owner-only media library plus playlists below `${XDG_DATA_HOME:-~/.local/share}/swir/player/library.json` with atomic replacement, directory mode `0700` and file mode `0600`;
+- provides play/pause/stop, previous/next, seek and volume controls plus a Favorites playlist;
+- exports `org.mpris.MediaPlayer2.swir` on the user session bus so desktop media keys can control playback through MPRIS2;
+- publishes a `Gio.Notification` when the current track changes;
+- has no self-updater, no direct package mutation and no `sudo`/`pkexec`/root shortcut;
+- maps a real GTK4 window under Weston in CI and prerolls a generated local WAV through GStreamer with disposable test sinks while separately verifying the Debian 13 `gtk4paintablesink` runtime is installed.
+
+The library and playlist bounds are deliberately finite: 1,000 library tracks, 100 playlists and 500 entries per playlist. This milestone closes the dedicated native Player integration item only; the broader daily-use native application suite remains open.
+
+'''
+          replace_once(doc, '## Shared runtime policy\n', player_section + '## Shared runtime policy\n')
+          replace_once(
+              doc,
+              '`.github/workflows/system-native-core-apps-contract.yml` verifies the established native suite.',
+              '`.github/workflows/system-native-core-apps-contract.yml` verifies the established native suite. `.github/workflows/system-native-player.yml` verifies SWIR Player policy plus the exact Debian 13 GTK4/GStreamer runtime, local-media preroll, library/playlists, MPRIS2 and notification integration.',
+          )
+          replace_once(
+              doc,
+              'including a native Browser, media/image/document/archive applications, calculator/screenshot/clock basics, deeper diagnostics and backup/recovery integration.',
+              'including image/document/archive applications, calculator/screenshot/clock basics, deeper diagnostics and backup/recovery integration.',
+          )
+          PY
+          python3 -m py_compile system/apps/swir-player.py system/session/swir-shell.py
+          bash -n system/session/provision-graphical-session.sh
+          git diff --check
+      - name: Commit integration edits to development branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add system/session/swir-shell.py system/session/provision-graphical-session.sh system/SWIR-NATIVE-CORE-APPS-0.1.md
+          git diff --cached --quiet && exit 0
+          git commit -m 'system: integrate SWIR Player into System Edition image'
+          git push origin HEAD:system/native-player-integration
