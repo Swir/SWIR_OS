@@ -1,0 +1,79 @@
+name: System Native Daily Suite
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'SWIR-PRODUCT-BASELINE-1.0.md'
+      - 'system/apps/**'
+      - 'system/recovery/**'
+      - 'system/session/swir-shell.py'
+      - 'system/session/provision-graphical-session.sh'
+      - 'system/SWIR-NATIVE-DAILY-SUITE-0.1.md'
+      - '.github/workflows/system-native-daily-suite.yml'
+  pull_request:
+    paths:
+      - 'SWIR-PRODUCT-BASELINE-1.0.md'
+      - 'system/apps/**'
+      - 'system/recovery/**'
+      - 'system/session/swir-shell.py'
+      - 'system/session/provision-graphical-session.sh'
+      - 'system/SWIR-NATIVE-DAILY-SUITE-0.1.md'
+      - '.github/workflows/system-native-daily-suite.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: system-native-daily-suite-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify baseline-to-native-suite integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile system/apps/verify-native-daily-suite.py
+          python3 system/apps/verify-native-daily-suite.py | tee "${RUNNER_TEMP}/native-daily-suite.json"
+          python3 - "${RUNNER_TEMP}/native-daily-suite.json" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1], encoding='utf-8'))
+          assert data['schema'] == 'swir.native-daily-suite-verification/1.0'
+          assert data['passed'] is True
+          assert data['capabilityCount'] == 19
+          assert data['baselineCapabilityCount'] == 19
+          assert data['nativeSourceOnly'] is True
+          assert data['graphicalImageStagingVerified'] is True
+          assert data['nativeShellReachabilityVerified'] is True
+          assert data['roadmapCompletionClaimed'] is False
+          PY
+          bash -n system/session/provision-graphical-session.sh
+
+      - name: Exercise safe Archive Manager extraction policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3-gi gir1.2-gtk-4.0
+          PYTHONPATH="$GITHUB_WORKSPACE/system/apps" python3 system/apps/swir-files.py --archive-self-test
+
+      - name: Exercise Recovery Mode provisioning policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          node system/recovery/recovery-mode-provisioning.selftest.mjs
+
+      - name: Ensure the gate cannot silently become a roadmap completion shortcut
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'roadmapCompletionClaimed": False' system/apps/verify-native-daily-suite.py >/dev/null
+          grep -F 'does **not** automatically complete' system/SWIR-NATIVE-DAILY-SUITE-0.1.md >/dev/null
+          ! grep -RE '(^|[^A-Za-z])(sudo|pkexec|su)([[:space:](]|$)' system/apps/verify-native-daily-suite.py
