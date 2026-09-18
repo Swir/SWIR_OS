@@ -40,7 +40,6 @@ jobs:
           grep -F 'shell=False' system/apps/swir-system-monitor.py >/dev/null
           grep -F 'diagnosticsReadOnly": True' system/apps/swir-system-monitor.py >/dev/null
           grep -F 'evidenceIncludesLogContent": False' system/apps/swir-system-monitor.py >/dev/null
-          ! grep -RE '/usr/bin/(sudo|pkexec|su)([[:space:]"'"']|$)|/bin/su([[:space:]"'"']|$)' system/apps/swir-system-monitor.py
           ! grep -RE 'subprocess\.(run|Popen).*\b(sudo|pkexec)\b' system/apps/swir-system-monitor.py
           python3 - <<'PY'
           import ast
@@ -54,6 +53,9 @@ jobs:
           keywords = {kw.arg: kw.value for kw in runs[0].keywords if kw.arg}
           assert isinstance(keywords.get('shell'), ast.Constant) and keywords['shell'].value is False
           assert isinstance(keywords.get('timeout'), ast.Name) and keywords['timeout'].id == 'COMMAND_TIMEOUT_SECONDS'
+          strings = {node.value for node in ast.walk(tree) if isinstance(node, ast.Constant) and isinstance(node.value, str)}
+          forbidden = {'/usr/bin/sudo', '/usr/bin/pkexec', '/usr/bin/su', '/bin/su'}
+          assert strings.isdisjoint(forbidden), strings & forbidden
           assert 'ALLOWED_DIAGNOSTIC_COMMANDS' in source
           assert 'FAILED_UNITS_COMMAND' in source and 'JOURNAL_WARNINGS_COMMAND' in source
           PY
