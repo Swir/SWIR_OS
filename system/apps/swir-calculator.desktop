@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=SWIR Calculator
+Comment=Safe native calculator for SWIR OS System Edition
+Exec=/usr/local/bin/swir-calculator
+TryExec=/usr/local/bin/swir-calculator
+Icon=accessories-calculator
+Terminal=false
+Categories=Utility;Calculator;
+StartupNotify=true
