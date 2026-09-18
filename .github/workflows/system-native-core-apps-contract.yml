@@ -50,14 +50,14 @@ jobs:
           # absolute production paths from first-party app code is not.
           ! grep -RE "/usr/bin/(sudo|pkexec|su)([[:space:]\"']|$)|/bin/su([[:space:]\"']|$)" system/apps/swir-*.py
           ! grep -RE 'subprocess\.(run|Popen).*\b(sudo|pkexec)\b' system/apps/swir-*.py
-          grep -F 'fileOpenDelegationEnabled\": False' system/apps/swir-files.py >/dev/null
-          grep -F 'mutationControlsExposed\": False' system/apps/swir-network-center.py >/dev/null
+          grep -F 'fileOpenDelegationEnabled": False' system/apps/swir-files.py >/dev/null
+          grep -F 'mutationControlsExposed": False' system/apps/swir-network-center.py >/dev/null
           grep -F 'ownerOnlyNotesFile' system/apps/swir-notes.py >/dev/null
           grep -F 'ownerOnlySettingsFile' system/apps/swir-settings.py >/dev/null
           grep -F 'processRowsBounded' system/apps/swir-system-monitor.py >/dev/null
-          grep -F 'shellCommandInterpolation\": False' system/apps/swir-terminal.py >/dev/null
-          grep -F 'Terminal\", ((\"/usr/local/bin/swir-terminal\",)' system/session/swir-shell.py >/dev/null
-          grep -F 'Network\", ((\"/usr/local/bin/swir-network-center\",)' system/session/swir-shell.py >/dev/null
+          grep -F 'shellCommandInterpolation": False' system/apps/swir-terminal.py >/dev/null
+          grep -F 'Terminal", (("/usr/local/bin/swir-terminal",)' system/session/swir-shell.py >/dev/null
+          grep -F 'Network", (("/usr/local/bin/swir-network-center",)' system/session/swir-shell.py >/dev/null
 
   wayland-runtime:
     runs-on: ubuntu-24.04
