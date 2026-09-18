@@ -13,6 +13,50 @@ function countExact(haystack, needle) {
   return haystack.split(needle).length - 1;
 }
 
+function sectionBetweenHeadings(document, heading) {
+  const start = document.indexOf(heading);
+  if (start < 0) return '';
+  const rest = document.slice(start + heading.length);
+  const nextHeading = rest.search(/^##\s+/m);
+  return nextHeading < 0 ? document.slice(start) : document.slice(start, start + heading.length + nextHeading);
+}
+
+function containsLegacyTextMeter(document) {
+  return document.split(/\r?\n/).some(line => {
+    const trimmed = line.trim();
+    if (!trimmed) return false;
+
+    // Unicode/block meters, including mixed full/empty segments and optional labels.
+    if (/[█▓▒░](?:\s*[█▓▒░]){3,}/u.test(trimmed)) return true;
+
+    // Bracket-style meters such as [########--] 80% or [====....] 50%.
+    if (/\[(?:[#=.\-]\s*){8,}\]\s*\d+(?:[.,]\d+)?%/u.test(trimmed)) return true;
+
+    // Bare text meters are only considered meters when an explicit percentage is present,
+    // so Markdown horizontal rules and normal punctuation are not rejected.
+    if (/^(?:(?:progress|roadmap|done|status)\s*[:=-]?\s*)?(?:[#=.\-]\s*){8,}\s*\d+(?:[.,]\d+)?%$/iu.test(trimmed)) return true;
+
+    return false;
+  });
+}
+
+function verifyLegacyDetector() {
+  const forbiddenFixtures = [
+    '████████░░ 80.0%',
+    '█ █ █ █ ░ ░ 66%',
+    '[########--] 80%',
+    'progress: ========-- 80%',
+  ];
+  for (const fixture of forbiddenFixtures) {
+    if (!containsLegacyTextMeter(fixture)) fail(`legacy-meter detector missed fixture: ${fixture}`);
+  }
+  for (const fixture of ['---', '----------', '| Progress | 81.5% |', 'assets/readme/progress-card.svg']) {
+    if (containsLegacyTextMeter(fixture)) fail(`legacy-meter detector false-positive fixture: ${fixture}`);
+  }
+}
+
+verifyLegacyDetector();
+
 const standardMarker = '<!-- SWIR-ROADMAP-STANDARD:v1 -->';
 const startMarker = '<!-- ROADMAP-PROGRESS:START -->';
 const endMarker = '<!-- ROADMAP-PROGRESS:END -->';
@@ -41,6 +85,19 @@ for (const required of [
   '| ✅ Completed | ⏳ Remaining | 📦 Total | 🎯 Progress |',
 ]) {
   if (!block.includes(required)) fail(`required dashboard element missing: ${required}`);
+}
+
+if (countExact(block, 'assets/readme/progress-mini.svg') !== 1) {
+  fail('canonical roadmap dashboard must embed exactly one progress-mini.svg.');
+}
+if (block.includes('assets/readme/progress-card.svg')) {
+  fail('canonical roadmap dashboard must use progress-mini.svg, not duplicate the README card.');
+}
+if (block.includes('assets/readme/progress-template.svg')) {
+  fail('progress-template.svg is TEMPLATE-only and must never be embedded as project data.');
+}
+if (containsLegacyTextMeter(block)) {
+  fail('legacy text progress meter is forbidden in the canonical roadmap dashboard.');
 }
 
 const checklist = text.slice(roadmapStart, developmentStart);
@@ -73,10 +130,16 @@ for (const required of [
 
 const svgOnlyPresentation = standard.includes('Presentation amendment — 2026-09-18');
 if (!svgOnlyPresentation) fail('canonical roadmap standard is missing the SVG-only presentation amendment.');
+if (containsLegacyTextMeter(standard)) {
+  fail('canonical roadmap standard contains an active legacy text progress meter.');
+}
 
 const readmePath = path.resolve(repositoryRoot, 'README.md');
 if (!fs.existsSync(readmePath)) fail('README.md is missing; visible project progress cannot be synchronized.');
 const readme = fs.readFileSync(readmePath, 'utf8');
+if (countExact(readme, '<!-- SWIR-README-STANDARD:v2 -->') !== 1) {
+  fail('README must keep exactly one SWIR-README-STANDARD:v2 marker; do not downgrade to v1.');
+}
 for (const [needle, message] of [
   [`ROADMAP-${percent}%25-`, 'README ROADMAP badge'],
   [`DONE-${completed}%2F${total}-`, 'README DONE badge'],
@@ -86,11 +149,19 @@ for (const [needle, message] of [
   if (!readme.includes(needle)) fail(`${message} is stale; synchronize README.md with the authoritative roadmap.`);
 }
 
-const legacyMeterPattern = /```text\r?\n[█░▓▒#=\-]{8,}\s+[0-9]+(?:\.[0-9]+)?%\r?\n```/;
-const roadmapHasLegacyMeter = legacyMeterPattern.test(block);
-const readmeHasLegacyMeter = legacyMeterPattern.test(readme);
-if (roadmapHasLegacyMeter || readmeHasLegacyMeter) {
-  fail('legacy text progress meter is forbidden by the SVG-only progress presentation standard.');
+const readmeProgress = sectionBetweenHeadings(readme, '## 📊 Project status');
+if (!readmeProgress) fail('README project status section is missing.');
+if (countExact(readmeProgress, 'assets/readme/progress-card.svg') !== 1) {
+  fail('README project status section must embed exactly one progress-card.svg.');
+}
+if (readmeProgress.includes('assets/readme/progress-mini.svg')) {
+  fail('README project status section must use progress-card.svg, not duplicate the roadmap mini.');
+}
+if (readmeProgress.includes('assets/readme/progress-template.svg')) {
+  fail('progress-template.svg is TEMPLATE-only and must never be embedded as project data.');
+}
+if (containsLegacyTextMeter(readmeProgress)) {
+  fail('legacy text progress meter is forbidden in the maintained README project status section.');
 }
 
 for (const relativePath of [
@@ -104,8 +175,13 @@ for (const relativePath of [
   }
 }
 
+const template = fs.readFileSync(path.resolve(repositoryRoot, 'assets/readme/progress-template.svg'), 'utf8');
+if (!template.includes('TEMPLATE') || !template.includes('NOT PROJECT DATA')) {
+  fail('progress-template.svg must be explicitly labelled TEMPLATE / NOT PROJECT DATA.');
+}
+
 console.log(JSON.stringify({
-  schema: 'swir.roadmap-contract/1.3',
+  schema: 'swir.roadmap-contract/1.4',
   roadmap: path.basename(roadmapPath),
   completed,
   remaining,
@@ -115,6 +191,7 @@ console.log(JSON.stringify({
   progressSvgEmbedded: true,
   svgOnlyPresentation,
   legacyMeterClean: true,
+  templateProjectData: false,
   styleLock: 'SWIR-ROADMAP-STANDARD:v1+svg-only-amendment',
   valid: true,
 }));
