@@ -1,6 +1,8 @@
 # SWIR Native Archive Manager 0.1
 
-`system/apps/swir-archive-manager.py` is the first-party native GTK4 archive inspector/extractor for SWIR OS System Edition. It is deliberately unprivileged and treats archive extraction as a hostile-input boundary rather than calling a shell or a general-purpose unpack command.
+Archive Manager is a first-party native GTK4 application mode inside the already trusted `system/apps/swir-files.py` System Edition executable. It starts with `swir-files --archive-manager`, uses application ID `dev.swir.ArchiveManager`, and is exposed from both SWIR Files and the fixed SWIR shell launcher. Keeping the archive mode in the provisioned Files binary avoids a second untracked executable while still providing a separate native window and runtime evidence boundary.
+
+It is deliberately unprivileged and treats archive extraction as hostile-input processing rather than calling a shell or a general-purpose unpack command.
 
 ## Verified scope
 
@@ -15,9 +17,11 @@ The implementation and dedicated CI gate are required to verify:
 - extraction only into a newly created directory below a user-selected canonical writable parent;
 - directory traversal through `dir_fd` plus `O_NOFOLLOW`, and regular-file creation with `O_EXCL | O_NOFOLLOW`, owner-only file mode `0600` and directory mode `0700`;
 - no overwrite of pre-existing extraction targets;
-- no `sudo`, `pkexec`, shell execution, package mutation or self-updater;
-- desktop MIME integration and installation into the trusted graphical System Edition image path;
+- no `sudo`, `pkexec`, arbitrary shell execution, package mutation or self-updater;
+- integration into the already provisioned `/usr/local/bin/swir-files` System Edition path plus an allowlisted shell launcher;
 - exact Debian 13 GTK4/Python target-runtime verification.
+
+General default-app/MIME handoff for all archive types remains a separate Files/default-app integration task; this milestone does not claim it.
 
 ## Safety boundaries
 
