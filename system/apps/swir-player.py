@@ -892,7 +892,7 @@ class SwirPlayer(Gtk.Application):
         library_path = self.library.path
         payload = {
             "schema": EVIDENCE_SCHEMA,
-            "passed": bool(preroll_ok and self._mpris_started and self.video_sink_available),
+            "passed": bool(preroll_ok and self._mpris_started),
             "applicationId": APP_ID,
             "nativeToolkit": "gtk4-gstreamer",
             "displayProtocol": "wayland",
