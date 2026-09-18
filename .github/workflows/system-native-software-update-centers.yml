@@ -1,0 +1,156 @@
+name: System Native Software Update Centers
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'system/apps/package_status_runtime.py'
+      - 'system/apps/package_status_runtime.selftest.py'
+      - 'system/apps/swir-software-center.py'
+      - 'system/apps/swir-update-center.py'
+      - 'system/session/swir-shell.py'
+      - 'system/session/provision-graphical-session.sh'
+      - 'system/SWIR-NATIVE-CORE-APPS-0.1.md'
+      - '.github/workflows/system-native-software-update-centers.yml'
+  pull_request:
+    paths:
+      - 'system/apps/package_status_runtime.py'
+      - 'system/apps/package_status_runtime.selftest.py'
+      - 'system/apps/swir-software-center.py'
+      - 'system/apps/swir-update-center.py'
+      - 'system/session/swir-shell.py'
+      - 'system/session/provision-graphical-session.sh'
+      - 'system/SWIR-NATIVE-CORE-APPS-0.1.md'
+      - '.github/workflows/system-native-software-update-centers.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: system-native-software-update-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  policy-and-parser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and test read-only package UI runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            system/apps/package_status_runtime.py \
+            system/apps/package_status_runtime.selftest.py \
+            system/apps/swir-software-center.py \
+            system/apps/swir-update-center.py \
+            system/session/swir-shell.py
+          PYTHONPATH=system/apps python3 system/apps/package_status_runtime.selftest.py
+
+          ! grep -RE 'shell *= *True|os\.system\(' \
+            system/apps/package_status_runtime.py \
+            system/apps/swir-software-center.py \
+            system/apps/swir-update-center.py
+          ! grep -RE 'sudo |pkexec |/usr/bin/su |/bin/su ' \
+            system/apps/package_status_runtime.py \
+            system/apps/swir-software-center.py \
+            system/apps/swir-update-center.py
+          ! grep -RE 'apt(-get)? +update|apt(-get)? +install|apt(-get)? +remove|dpkg +--' \
+            system/apps/swir-software-center.py \
+            system/apps/swir-update-center.py
+          grep -F '"--simulate"' system/apps/package_status_runtime.py >/dev/null
+          grep -F '"--no-download"' system/apps/package_status_runtime.py >/dev/null
+          grep -F 'Debug::NoLocking=true' system/apps/package_status_runtime.py >/dev/null
+          grep -F 'mutationControlsExposed": False' system/apps/swir-software-center.py >/dev/null
+          grep -F 'mutationControlsExposed": False' system/apps/swir-update-center.py >/dev/null
+          grep -F 'repositoryRefreshPerformed": False' system/apps/swir-update-center.py >/dev/null
+          grep -F 'Software", (("/usr/local/bin/swir-software-center",)' system/session/swir-shell.py >/dev/null
+          grep -F 'Updates", (("/usr/local/bin/swir-update-center",)' system/session/swir-shell.py >/dev/null
+
+      - name: Verify provisioning contract includes both native centers
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'system/apps/package_status_runtime.py' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'system/apps/swir-software-center.py' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'system/apps/swir-update-center.py' system/session/provision-graphical-session.sh >/dev/null
+          grep -F '/usr/local/bin/swir-software-center' system/session/provision-graphical-session.sh >/dev/null
+          grep -F '/usr/local/bin/swir-update-center' system/session/provision-graphical-session.sh >/dev/null
+          grep -F '/usr/local/lib/swir/package_status_runtime.py' system/session/provision-graphical-session.sh >/dev/null
+
+  wayland-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install controlled GTK4 and Wayland runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends weston python3-gi gir1.2-gtk-4.0
+      - name: Map Software and Update Centers on headless Wayland
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUNTIME="${{ runner.temp }}/swir-package-ui-runtime"
+          mkdir -p "$RUNTIME"
+          chmod 0700 "$RUNTIME"
+          export XDG_RUNTIME_DIR="$RUNTIME"
+          export WAYLAND_DISPLAY=wayland-swir-package-ui
+          export GDK_BACKEND=wayland
+          export PYTHONPATH="$GITHUB_WORKSPACE/system/apps"
+
+          weston --backend=headless-backend.so --socket="$WAYLAND_DISPLAY" --idle-time=0 --log="$RUNTIME/weston.log" &
+          WESTON_PID=$!
+          cleanup() { kill "$WESTON_PID" 2>/dev/null || true; wait "$WESTON_PID" 2>/dev/null || true; }
+          trap cleanup EXIT
+
+          for _ in $(seq 1 80); do
+            [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]] && break
+            kill -0 "$WESTON_PID"
+            sleep 0.25
+          done
+          [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]]
+
+          run_app() {
+            local label="$1"
+            local evidence="$2"
+            local script="$3"
+            echo "Running ${label} runtime evidence"
+            timeout --signal=TERM --kill-after=5s 25s \
+              env SWIR_APP_E2E=1 SWIR_APP_EVIDENCE_PATH="$evidence" \
+              python3 "$script"
+          }
+
+          run_app "SWIR Software Center" "$RUNTIME/software.json" system/apps/swir-software-center.py
+          run_app "SWIR Update Center" "$RUNTIME/updates.json" system/apps/swir-update-center.py
+
+          python3 - "$RUNTIME/software.json" "$RUNTIME/updates.json" <<'PY'
+          import json, sys
+          software = json.load(open(sys.argv[1], encoding='utf-8'))
+          updates = json.load(open(sys.argv[2], encoding='utf-8'))
+
+          assert software['schema'] == 'swir.native-software-center-runtime-evidence/0.1'
+          assert software['passed'] is True
+          assert software['applicationId'] == 'dev.swir.SoftwareCenter'
+          assert software['nativeToolkit'] == 'gtk4' and software['displayProtocol'] == 'wayland'
+          assert software['windowMapped'] is True and software['privilegedOperations'] is False
+          assert software['mutationControlsExposed'] is False
+          assert software['packageTransactionBrokerBypassed'] is False
+          assert software['readOnlyMetadata'] is True and software['packageRowsBounded'] == 200
+          assert software['tools']['aptCache'] is True and software['tools']['dpkgQuery'] is True
+
+          assert updates['schema'] == 'swir.native-update-center-runtime-evidence/0.1'
+          assert updates['passed'] is True
+          assert updates['applicationId'] == 'dev.swir.UpdateCenter'
+          assert updates['nativeToolkit'] == 'gtk4' and updates['displayProtocol'] == 'wayland'
+          assert updates['windowMapped'] is True and updates['privilegedOperations'] is False
+          assert updates['mutationControlsExposed'] is False
+          assert updates['repositoryRefreshPerformed'] is False
+          assert updates['packageTransactionBrokerBypassed'] is False
+          assert updates['simulationOnly'] is True and updates['updateRowsBounded'] == 200
+          assert updates['tools']['aptGet'] is True
+          PY
