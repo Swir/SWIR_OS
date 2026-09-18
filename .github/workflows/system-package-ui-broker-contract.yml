@@ -7,6 +7,7 @@ on:
       - 'system/ipc/swir-package-transaction-broker.mjs'
       - 'system/ipc/swir-package-transaction-broker.selftest.mjs'
       - 'system/ipc/swir-package-transaction.service'
+      - 'system/ipc/swir-peer-authorization.socket'
       - 'system/apps/package_transaction_client.py'
       - 'system/apps/package_transaction_client.selftest.py'
       - 'system/SWIR-PACKAGE-UI-BROKER-0.1.md'
@@ -16,6 +17,7 @@ on:
       - 'system/ipc/swir-package-transaction-broker.mjs'
       - 'system/ipc/swir-package-transaction-broker.selftest.mjs'
       - 'system/ipc/swir-package-transaction.service'
+      - 'system/ipc/swir-peer-authorization.socket'
       - 'system/apps/package_transaction_client.py'
       - 'system/apps/package_transaction_client.selftest.py'
       - 'system/SWIR-PACKAGE-UI-BROKER-0.1.md'
@@ -63,7 +65,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo systemd-analyze verify system/ipc/swir-package-transaction.service
+          sudo systemd-analyze verify \
+            system/ipc/swir-peer-authorization.socket \
+            system/ipc/swir-package-transaction.service
           grep -F 'User=root' system/ipc/swir-package-transaction.service >/dev/null
           grep -F 'Requires=swir-peer-authorization.socket' system/ipc/swir-package-transaction.service >/dev/null
           grep -F 'PrivateTmp=yes' system/ipc/swir-package-transaction.service >/dev/null
