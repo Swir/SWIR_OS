@@ -149,19 +149,19 @@ for (const [needle, message] of [
   if (!readme.includes(needle)) fail(`${message} is stale; synchronize README.md with the authoritative roadmap.`);
 }
 
-const readmeProgress = sectionBetweenHeadings(readme, '## 📊 Project progress');
-if (!readmeProgress) fail('README project progress section is missing.');
+const readmeProgress = sectionBetweenHeadings(readme, '## 📊 Project status');
+if (!readmeProgress) fail('README project status section is missing.');
 if (countExact(readmeProgress, 'assets/readme/progress-card.svg') !== 1) {
-  fail('README project progress section must embed exactly one progress-card.svg.');
+  fail('README project status section must embed exactly one progress-card.svg.');
 }
 if (readmeProgress.includes('assets/readme/progress-mini.svg')) {
-  fail('README project progress section must use progress-card.svg, not duplicate the roadmap mini.');
+  fail('README project status section must use progress-card.svg, not duplicate the roadmap mini.');
 }
 if (readmeProgress.includes('assets/readme/progress-template.svg')) {
   fail('progress-template.svg is TEMPLATE-only and must never be embedded as project data.');
 }
 if (containsLegacyTextMeter(readmeProgress)) {
-  fail('legacy text progress meter is forbidden in the maintained README progress section.');
+  fail('legacy text progress meter is forbidden in the maintained README project status section.');
 }
 
 for (const relativePath of [
