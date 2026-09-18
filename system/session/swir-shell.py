@@ -73,6 +73,7 @@ LAUNCHERS: Final = (
     ("Browser", (("/usr/local/bin/swir-browser",),)),
     ("Player", (("/usr/local/bin/swir-player",),)),
     ("Photo Studio", (("/usr/local/bin/swir-photo-studio",),)),
+    ("PDF Viewer", (("/usr/local/bin/swir-pdf-viewer",),)),
     ("Archive Manager", (("/usr/local/bin/swir-files", "--archive-manager"),)),
     ("Terminal", (("/usr/local/bin/swir-terminal",),)),
     ("Notes", (("/usr/local/bin/swir-notes",),)),
