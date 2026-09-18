@@ -76,6 +76,7 @@ LAUNCHERS: Final = (
     ("PDF Viewer", (("/usr/local/bin/swir-pdf-viewer",),)),
     ("Archive Manager", (("/usr/local/bin/swir-files", "--archive-manager"),)),
     ("Calculator", (("/usr/local/bin/swir-calculator",),)),
+    ("Clock", (("/usr/local/bin/swir-clock",),)),
     ("Terminal", (("/usr/local/bin/swir-terminal",),)),
     ("Notes", (("/usr/local/bin/swir-notes",),)),
     ("Settings", (("/usr/local/bin/swir-settings",), ("/usr/bin/gnome-control-center",))),
