@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=SWIR PDF Viewer
+Comment=View local PDF documents with native SWIR PDF Viewer
+Exec=/usr/local/bin/swir-pdf-viewer %F
+TryExec=/usr/local/bin/swir-pdf-viewer
+Icon=application-pdf
+Terminal=false
+Categories=Office;Viewer;
+MimeType=application/pdf;
+StartupNotify=true
+StartupWMClass=dev.swir.PdfViewer
