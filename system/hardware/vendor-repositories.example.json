@@ -1,0 +1,7 @@
+{
+  "schema": "swir.vendor-official-repository-policy/0.1",
+  "failClosed": true,
+  "defaultEnabled": false,
+  "allowDirectBinaryDownloads": false,
+  "entries": []
+}

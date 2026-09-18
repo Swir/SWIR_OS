@@ -1,0 +1,66 @@
+name: System Vendor Official Repositories
+
+on:
+  push:
+    paths:
+      - 'system/hardware/vendor-official-repository-service.mjs'
+      - 'system/hardware/vendor-official-repository-service.selftest.mjs'
+      - 'system/hardware/vendor-repositories.example.json'
+      - 'system/SWIR-VENDOR-OFFICIAL-REPOSITORIES-0.1.md'
+      - '.github/workflows/system-vendor-official-repositories.yml'
+  pull_request:
+    paths:
+      - 'system/hardware/vendor-official-repository-service.mjs'
+      - 'system/hardware/vendor-official-repository-service.selftest.mjs'
+      - 'system/hardware/vendor-repositories.example.json'
+      - 'system/SWIR-VENDOR-OFFICIAL-REPOSITORIES-0.1.md'
+      - '.github/workflows/system-vendor-official-repositories.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  policy:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run policy self-test
+        run: node system/hardware/vendor-official-repository-service.selftest.mjs
+      - name: Verify production root-owned policy boundary
+        run: |
+          set -euo pipefail
+          POLICY="${RUNNER_TEMP}/vendor-repositories.json"
+          cat > "${POLICY}" <<'JSON'
+          {
+            "schema": "swir.vendor-official-repository-policy/0.1",
+            "failClosed": true,
+            "defaultEnabled": false,
+            "allowDirectBinaryDownloads": false,
+            "entries": []
+          }
+          JSON
+          sudo chown root:root "${POLICY}"
+          sudo chmod 0644 "${POLICY}"
+          node system/hardware/vendor-official-repository-service.mjs --verify "${POLICY}"
+          sudo chmod 0666 "${POLICY}"
+          if node system/hardware/vendor-official-repository-service.mjs --verify "${POLICY}"; then
+            echo 'Writable vendor policy was incorrectly accepted' >&2
+            exit 1
+          fi
+          sudo chmod 0644 "${POLICY}"
+          LINK="${RUNNER_TEMP}/vendor-policy-link.json"
+          ln -s "${POLICY}" "${LINK}"
+          if node system/hardware/vendor-official-repository-service.mjs --verify "${LINK}"; then
+            echo 'Symlink vendor policy was incorrectly accepted' >&2
+            exit 1
+          fi
+      - name: Assert no mutation or direct-download shortcut
+        run: |
+          set -euo pipefail
+          grep -F "mutationRequiresExistingJournaledPackageBroker: true" system/hardware/vendor-official-repository-service.mjs >/dev/null
+          grep -F "productionNetworkFetchImplemented: false" system/hardware/vendor-official-repository-service.mjs >/dev/null
+          ! grep -RE "child_process|exec\(|spawn\(|sudo|pkexec|curl|wget|fetch\(" system/hardware/vendor-official-repository-service.mjs
