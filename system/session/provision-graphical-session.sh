@@ -127,6 +127,7 @@ RUNTIME_PACKAGES=(
   gir1.2-gstreamer-1.0
   gir1.2-gdkpixbuf-2.0
   gir1.2-poppler-0.18
+  python3-gi-cairo
   gstreamer1.0-plugins-base
   gstreamer1.0-plugins-good
   gstreamer1.0-libav
@@ -141,7 +142,7 @@ if [[ $RUNTIME_MISSING -eq 1 ]]; then
   chroot "$ROOTFS" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${RUNTIME_PACKAGES[@]}"
 fi
 
-for pkg in greetd weston plymouth plymouth-themes wayland-utils dbus-user-session python3 python3-gi gir1.2-gtk-4.0 gir1.2-vte-3.91 libvte-2.91-gtk4-0 gir1.2-webkit-6.0 gir1.2-gstreamer-1.0 gir1.2-gdkpixbuf-2.0 gir1.2-poppler-0.18 gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-libav gstreamer1.0-gtk4 network-manager nodejs desktop-file-utils; do
+for pkg in greetd weston plymouth plymouth-themes wayland-utils dbus-user-session python3 python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-vte-3.91 libvte-2.91-gtk4-0 gir1.2-webkit-6.0 gir1.2-gstreamer-1.0 gir1.2-gdkpixbuf-2.0 gir1.2-poppler-0.18 gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-libav gstreamer1.0-gtk4 network-manager nodejs desktop-file-utils; do
   chroot "$ROOTFS" dpkg-query -W -f='${db:Status-Abbrev}' "$pkg" 2>/dev/null | grep -qx 'ii ' || {
     echo "required graphical/runtime package is not installed: $pkg" >&2
     exit 69
