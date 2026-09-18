@@ -66,7 +66,7 @@ jobs:
           export WAYLAND_DISPLAY=wayland-swir-notifications
           export GDK_BACKEND=wayland
 
-          weston --backend=headless-backend.so --renderer=pixman --socket="$WAYLAND_DISPLAY" --idle-time=0 --log="$RUNTIME/weston.log" &
+          weston --backend=headless-backend.so --renderer=pixman --width=1280 --height=900 --socket="$WAYLAND_DISPLAY" --idle-time=0 --log="$RUNTIME/weston.log" &
           WESTON_PID=$!
           cleanup() {
             kill "$WESTON_PID" 2>/dev/null || true
@@ -83,11 +83,11 @@ jobs:
             sleep 0.25
           done
           [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]]
+          grep -F "1280x900" "$RUNTIME/weston.log" >/dev/null || true
 
           dbus-run-session -- bash -euo pipefail -c '
             export LIBGL_ALWAYS_SOFTWARE=1
             export GTK_A11Y=none
-            export WAYLAND_DEBUG=client
             export SWIR_SHELL_E2E=1
             export SWIR_SHELL_EVIDENCE_PATH="$XDG_RUNTIME_DIR/shell.json"
             export SWIR_NOTIFICATION_E2E=1
@@ -103,8 +103,8 @@ jobs:
                 cat "$XDG_RUNTIME_DIR/shell.out"
               fi
               if [[ -s "$XDG_RUNTIME_DIR/shell.err" ]]; then
-                echo '"'"'--- shell.err tail ---'"'"'
-                tail -n 250 "$XDG_RUNTIME_DIR/shell.err"
+                echo '"'"'--- shell.err ---'"'"'
+                cat "$XDG_RUNTIME_DIR/shell.err"
               fi
             }
             trap cleanup_shell EXIT
