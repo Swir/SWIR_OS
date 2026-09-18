@@ -84,36 +84,57 @@ Current verified behavior:
 
 Connection mutation remains future work behind explicit NetworkManager/Polkit policy and must not be confused with this read-only observability milestone.
 
+## SWIR Hardware & Driver Center
+
+`system/apps/swir-hardware-center.py` is an unprivileged GTK4 hardware-diagnostics surface backed by the existing trusted Hardware Service, Hardware Catalog and Driver Center resolver.
+
+Current verified behavior:
+
+- starts as `dev.swir.HardwareCenter` on Wayland;
+- obtains a bounded read-only `swir.driver-center-report/0.1` through the fixed `/usr/bin/node` runtime and the root-owned staged `driver-center-report.mjs` entry point;
+- shows Linux distribution/kernel facts, PCI/USB inventory, driver binding state, catalog matches and bounded recommended review operations;
+- exposes fwupd/LVFS availability as diagnostic capability state without pretending that firmware support exists for every device;
+- rejects reports that are not explicitly read-only, enable automatic mutation, contain Driver Center policy violations or exceed parser safety bounds;
+- performs report collection away from the GTK main loop so hardware enumeration does not freeze the window;
+- exposes no install/apply/module-load/firmware-flash control and performs no direct privileged operation;
+- preserves the Linux-first source policy: kernel in-tree drivers, `linux-firmware`, signed distribution repositories, fwupd/LVFS where supported and allowlisted official vendor repositories only;
+- never turns unknown hardware into an arbitrary binary download and never treats Windows kernel drivers as a generic Linux hardware path.
+
+The existing journaled Driver Center mutation coordinator remains a separate privileged backend boundary. This UI milestone intentionally provides real native diagnostics first; brokered package/firmware apply UX must be connected only after exact-operation confirmation, authorization, journal and recovery semantics remain intact.
+
 ## SWIR Software Center
 
-`system/apps/swir-software-center.py` is an unprivileged GTK4 package-discovery and installed-package surface backed by `package_status_runtime.py`.
+`system/apps/swir-software-center.py` is an unprivileged GTK4 package-discovery and brokered-install surface backed by `package_status_runtime.py`, `package_mutation_flow.py` and the authenticated package transaction broker.
 
 Current verified behavior:
 
 - starts as `dev.swir.SoftwareCenter` on Wayland;
 - shows a bounded snapshot of packages installed through dpkg;
 - performs bounded literal searches against the local APT cache;
-- invokes only allowlisted absolute package-tool paths, never a shell command;
-- runs metadata queries away from the GTK main loop so slow package metadata does not freeze the window;
-- exposes no install, remove, repository-edit or privilege-escalation control;
-- explicitly leaves mutation to the existing journaled SWIR package transaction service and Polkit boundary.
+- keeps metadata queries away from the GTK main loop;
+- offers Install only when the SWIR package broker is available;
+- requests an exact dependency-aware broker preview, displays the plan/digest and requires explicit user confirmation before authorization;
+- uses a single-use confirmation intent so replay/double-click commit attempts fail closed;
+- delegates peer/session-bound Polkit authorization and journaled mutation to the root-owned broker instead of invoking APT, `pkexec`, `sudo` or a shell from GTK;
+- fails closed if the broker recomputes a different plan.
 
-This is the native Software Center foundation, not a completed app store. Package details, categories, screenshots, transaction confirmation/progress, Flatpak/AppImage UX and transaction-history presentation remain future work. Adding mutation here requires a brokered request contract; directly invoking privileged APT from the GTK process is not acceptable.
+This is still not a completed app store. Package details, categories, screenshots, remove/update UX, Flatpak/AppImage UX and transaction-history presentation remain future work.
 
 ## SWIR Update Center
 
-`system/apps/swir-update-center.py` is an unprivileged GTK4 update-planning surface backed by the same read-only package runtime.
+`system/apps/swir-update-center.py` is an unprivileged GTK4 update-planning surface backed by the same read-only package runtime and authenticated transaction path.
 
 Current verified behavior:
 
 - starts as `dev.swir.UpdateCenter` on Wayland;
-- asks the fixed `/usr/bin/apt-get` executable for a `--simulate --no-download` dist-upgrade using `Debug::NoLocking=true`;
+- asks the fixed `/usr/bin/apt-get` executable for a `--simulate --no-download` dist-upgrade using `Debug::NoLocking=true` for discovery only;
 - parses and displays a bounded list of locally known candidate upgrades;
-- performs no repository refresh and initiates no network access;
-- performs no package mutation and exposes no Apply button;
-- makes the separation between read-only planning and SWIR's privileged journaled transaction path explicit in the UI.
+- performs no repository refresh from the GTK process;
+- can submit only broker-supported package mutations through the same preview → explicit confirmation → peer-bound Polkit → journaled commit boundary;
+- does not execute privileged APT, `pkexec`, `sudo` or arbitrary shell commands from the UI;
+- keeps bulk/dist-upgrade mutation disabled until that path has its own separately verified broker contract.
 
-This is not yet a complete updater. Secure repository refresh, authenticated transaction submission, progress/reboot coordination, recovery and rollback UX remain owned by the existing package/recovery architecture and must be connected without weakening those controls.
+Secure repository refresh, complete bulk update UX, progress/reboot coordination and recovery/rollback presentation remain future work even though the underlying package/recovery architecture already owns journaled mutation and reconciliation semantics.
 
 ## SWIR System Monitor
 
@@ -137,12 +158,14 @@ Process termination, service control, cgroup inspection and privileged diagnosti
 
 `system/apps/package_status_runtime.py` is a separate, deliberately read-only package metadata boundary. It allowlists `/usr/bin/apt-cache`, `/usr/bin/apt-get` and `/usr/bin/dpkg-query`, caps execution time and captured output, escapes Software Center search terms before passing them to `apt-cache`, bounds visible rows, and permits only APT simulation for update planning. `package_status_runtime.selftest.py` verifies input bounds and deterministic parsing without modifying the host package database.
 
+`system/apps/hardware_center_runtime.py` is a bounded adapter to the existing JavaScript Driver Center report. Production uses only `/usr/bin/node` plus the staged root-owned `/usr/local/lib/swir/hardware/driver-center-report.mjs`; the Python GTK process validates the report schema and fail-closed policy before displaying it. A test-only report path override is accepted only while `SWIR_APP_E2E=1` and must resolve to an absolute non-symlink regular file.
+
 ## Runtime verification
 
-`.github/workflows/system-native-core-apps-contract.yml` verifies the established native suite. `.github/workflows/system-native-software-update-centers.yml` adds dedicated policy/parser checks plus real GTK4 startup of Software Center and Update Center on a headless Weston Wayland compositor.
+`.github/workflows/system-native-core-apps-contract.yml` verifies the established native suite. `.github/workflows/system-native-software-update-centers.yml` and `.github/workflows/system-package-ui-mutation-contract.yml` verify package discovery plus the brokered Software/Update mutation boundary. `.github/workflows/system-native-hardware-center.yml` verifies Hardware Center parsing/safety invariants and maps the real GTK4 window on headless Weston while loading the trusted Driver Center report.
 
-The Wayland gates require real windows and bounded runtime evidence. The package UI gate additionally verifies that mutation controls and repository refresh are absent, package rows are bounded, required read-only package tools are present and the shell/provisioning paths include both applications. The graphical System Edition provisioning path installs the apps and shared package-status runtime into the image only after trusted-source/package checks succeed.
+The Wayland gates require real windows and bounded runtime evidence. The graphical System Edition provisioning path installs the applications and their exact trusted runtime dependencies into the image only after source/package checks succeed. Hardware Center provisioning stages the Driver Center report modules, Hardware Catalog and trusted-source policy as root-owned read-only runtime data; it does not stage a direct privileged hardware-mutation shortcut into the GTK application.
 
 ## Roadmap accounting
 
-This milestone does **not** mark `essential native Linux application suite for dependable daily use` complete. The product baseline still requires the full coherent suite, including a mutation-capable but brokered Software/Store and Update Center experience, Hardware/Driver Center UI, native Browser, media/image/document/archive applications, diagnostics and backup/recovery integration. Progress changes only when the authoritative `SWIR-OS-ARCHITECTURE.md` checklist is legitimately satisfied.
+This milestone does **not** mark `essential native Linux application suite for dependable daily use` complete. The product baseline still requires the full coherent suite, including a native Browser, media/image/document/archive applications, calculator/screenshot/clock basics, deeper diagnostics and backup/recovery integration. Progress changes only when the authoritative `SWIR-OS-ARCHITECTURE.md` checklist is legitimately satisfied.
