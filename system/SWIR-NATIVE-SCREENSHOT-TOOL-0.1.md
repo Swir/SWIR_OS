@@ -16,14 +16,21 @@
 
 ## Runtime verification
 
-`.github/workflows/system-native-screenshot-tool.yml` provides three gates:
+`.github/workflows/system-native-screenshot-tool.yml` provides four gates:
 
-1. static policy/self-test and desktop-entry validation;
-2. a real GTK4 window mapped on headless Weston while a controlled session-D-Bus fake implements the standard Screenshot portal request/response protocol and returns a disposable local PNG;
-3. Debian 13 (trixie) target-runtime verification.
+1. static policy/self-test, desktop-entry validation and shell/provisioning syntax checks;
+2. a shipping contract that requires the fixed SWIR shell launcher, trusted image staging, compile/ownership checks and absence of the fake CI portal from production provisioning;
+3. a real GTK4 window mapped on headless Weston while a controlled session-D-Bus fake implements the standard Screenshot portal request/response protocol and returns a disposable local PNG;
+4. Debian 13 (trixie) target-runtime verification.
 
 The fake portal exists only in `system/tests/fake-screenshot-portal.py` for CI and is never installed into a System Edition image.
 
-## Integration state
+## Shipping integration
 
-This milestone verifies the first-party screenshot application and its portal/security contract. Shipping integration into the canonical graphical image and SWIR shell launcher remains a separate required step; until that wiring is verified, this source milestone does **not** close the roadmap's full `essential native Linux application suite for dependable daily use` item and does not change the overall roadmap percentage.
+The canonical graphical System Edition provisioning path stages `swir-screenshot.py` as root-owned `/usr/local/bin/swir-screenshot`, installs its desktop entry below `/usr/share/applications`, compiles it with the target Python runtime and verifies both staged files before the image is accepted. The native SWIR shell exposes a fixed `Screenshot` launcher with no user-controlled shell interpolation.
+
+The graphical UEFI E2E lane additionally requires the staged executable and desktop entry inside the disposable image and verifies that the mapped shell runtime evidence contains the `Screenshot` launcher. This proves packaging/launcher integration in the tested UEFI VM lane; it does not claim physical-hardware qualification or that every desktop portal backend is supported.
+
+## Roadmap accounting
+
+Shipping Screenshot Tool improves the native daily-use suite but does **not** by itself complete the broad `essential native Linux application suite for dependable daily use` deliverable. Progress changes only when the authoritative `SWIR-OS-ARCHITECTURE.md` checklist criteria are actually satisfied.
