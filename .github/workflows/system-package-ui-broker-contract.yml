@@ -75,6 +75,11 @@ jobs:
           sudo install -m 0755 /bin/true /usr/libexec/swir/swir-peer-authorization-broker
           sudo install -m 0644 system/ipc/swir-package-transaction-broker.mjs \
             /usr/lib/swir/package-broker/ipc/swir-package-transaction-broker.mjs
+          NODE_BIN="$(command -v node)"
+          test -x "$NODE_BIN"
+          if [ "$NODE_BIN" != /usr/bin/node ]; then
+            sudo ln -sf "$NODE_BIN" /usr/bin/node
+          fi
           UNIT_PATH="$GITHUB_WORKSPACE/system/ipc:/usr/lib/systemd/system:/lib/systemd/system"
           sudo env SYSTEMD_UNIT_PATH="$UNIT_PATH" systemd-analyze verify \
             system/ipc/swir-peer-authorization.socket \
