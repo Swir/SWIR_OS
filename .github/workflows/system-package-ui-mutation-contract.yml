@@ -94,7 +94,8 @@ jobs:
               assert 'os.system' not in text and 'Popen' not in calls, f'{path}: direct process execution forbidden'
               assert '/usr/bin/apt-get' not in text and '/usr/bin/pkexec' not in text, f'{path}: direct privileged package tool path forbidden'
           flow = Path('system/apps/package_mutation_flow.py').read_text(encoding='utf-8')
-          assert '_consumed_digests' in flow and 'CONFIRMATION_ALREADY_USED' in flow
+          assert '_consumed_tokens' in flow and 'CONFIRMATION_ALREADY_USED' in flow
+          assert '_single_use_token' in flow
           assert 'self._client.authorize(preview)' in flow and 'self._client.commit(preview, envelope)' in flow
           print('Package UI direct-privilege boundary check: OK')
           PY
