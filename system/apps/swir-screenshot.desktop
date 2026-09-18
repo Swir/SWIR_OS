@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=SWIR Screenshot Tool
+Comment=Capture a screen, window, or region through the desktop portal
+Exec=/usr/local/bin/swir-screenshot
+Icon=applets-screenshooter
+Terminal=false
+Categories=Utility;Graphics;
+Keywords=screenshot;screen;capture;portal;wayland;
+StartupNotify=true
