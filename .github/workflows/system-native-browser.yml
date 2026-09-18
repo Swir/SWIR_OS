@@ -119,13 +119,37 @@ jobs:
           # provides this explicitly-dangerous switch for test processes. It is set
           # only for this disposable CI process; System Edition production leaves the
           # WebKit sandbox enabled. DMABUF is likewise disabled only for headless CI.
+          # The tiny harness delays the test-only evidence callback until GTK's idle
+          # queue, after do_activate() has created both persistent and private tabs.
           timeout --signal=TERM --kill-after=5s 35s \
             dbus-run-session -- \
             env WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 \
                 WEBKIT_DISABLE_DMABUF_RENDERER=1 \
                 LIBGL_ALWAYS_SOFTWARE=1 \
+                GTK_A11Y=none \
                 SWIR_APP_E2E=1 SWIR_APP_EVIDENCE_PATH="$RUNTIME/browser.json" \
-            python3 system/apps/swir-browser.py
+            python3 - <<'PY'
+          import importlib.util
+          import pathlib
+          import sys
+
+          path = pathlib.Path('system/apps/swir-browser.py')
+          spec = importlib.util.spec_from_file_location('swir_browser_e2e', path)
+          assert spec is not None and spec.loader is not None
+          module = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = module
+          spec.loader.exec_module(module)
+          original = module.SwirBrowser._on_mapped
+
+          def delayed(self, window):
+              def write_evidence():
+                  original(self, window)
+                  return False
+              module.GLib.idle_add(write_evidence)
+
+          module.SwirBrowser._on_mapped = delayed
+          raise SystemExit(module.SwirBrowser().run(['swir-browser-e2e']))
+          PY
 
           python3 - "$RUNTIME/browser.json" <<'PY'
           import json, sys
