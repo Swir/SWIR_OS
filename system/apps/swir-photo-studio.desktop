@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=SWIR Photo Studio
+Comment=View and edit local images with native SWIR Photo Studio
+Exec=/usr/local/bin/swir-photo-studio %F
+TryExec=/usr/local/bin/swir-photo-studio
+Icon=image-x-generic
+Terminal=false
+Categories=Graphics;2DGraphics;RasterGraphics;Viewer;
+MimeType=image/png;image/jpeg;image/webp;image/gif;image/bmp;image/tiff;
+StartupNotify=true
+StartupWMClass=dev.swir.PhotoStudio

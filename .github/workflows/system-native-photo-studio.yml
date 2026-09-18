@@ -1,0 +1,160 @@
+name: System Native Photo Studio
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'system/apps/swir-photo-studio.py'
+      - 'system/apps/swir-photo-studio.desktop'
+      - 'system/session/swir-shell.py'
+      - 'system/session/provision-graphical-session.sh'
+      - 'system/SWIR-NATIVE-CORE-APPS-0.1.md'
+      - '.github/workflows/system-native-photo-studio.yml'
+  pull_request:
+    paths:
+      - 'system/apps/swir-photo-studio.py'
+      - 'system/apps/swir-photo-studio.desktop'
+      - 'system/session/swir-shell.py'
+      - 'system/session/provision-graphical-session.sh'
+      - 'system/SWIR-NATIVE-CORE-APPS-0.1.md'
+      - '.github/workflows/system-native-photo-studio.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: system-native-photo-studio-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install static contract dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends desktop-file-utils python3-gi gir1.2-gtk-4.0 gir1.2-gdkpixbuf-2.0
+      - name: Compile and verify Photo Studio integration policy
+        run: |
+          set -euo pipefail
+          python3 -m py_compile system/apps/swir-photo-studio.py system/session/swir-shell.py
+          python3 system/apps/swir-photo-studio.py --self-test
+          desktop-file-validate system/apps/swir-photo-studio.desktop
+          bash -n system/session/provision-graphical-session.sh
+          grep -F 'Photo Studio", (("/usr/local/bin/swir-photo-studio",)' system/session/swir-shell.py >/dev/null
+          grep -F 'system/apps/swir-photo-studio.py' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'system/apps/swir-photo-studio.desktop' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'gir1.2-gdkpixbuf-2.0' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'MAX_HISTORY: Final = 24' system/apps/swir-photo-studio.py >/dev/null
+          grep -F 'MAX_PIXELS: Final = 40_000_000' system/apps/swir-photo-studio.py >/dev/null
+          grep -F 'remoteUriInputAccepted' system/apps/swir-photo-studio.py >/dev/null
+          ! grep -RE 'shell *= *True|os\.system\(' system/apps/swir-photo-studio.py
+          ! grep -RE "/usr/bin/(sudo|pkexec|su)([[:space:]\"']|$)|/bin/su([[:space:]\"']|$)" system/apps/swir-photo-studio.py
+
+  wayland-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install controlled GTK4, GdkPixbuf and Wayland runtime
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            weston dbus-daemon desktop-file-utils libglib2.0-bin \
+            python3-gi gir1.2-gtk-4.0 gir1.2-gdkpixbuf-2.0
+          sudo install -m 0755 system/apps/swir-photo-studio.py /usr/local/bin/swir-photo-studio
+          sudo install -m 0644 system/apps/swir-photo-studio.desktop /usr/share/applications/swir-photo-studio.desktop
+          sudo update-desktop-database /usr/share/applications
+          python3 system/apps/swir-photo-studio.py --self-test
+      - name: Map Photo Studio on Wayland and verify edit/export path
+        run: |
+          set -euo pipefail
+          RUNTIME="${{ runner.temp }}/swir-photo-runtime"
+          EXPORT_DIR="$RUNTIME/export"
+          mkdir -p "$RUNTIME" "$EXPORT_DIR"
+          chmod 0700 "$RUNTIME" "$EXPORT_DIR"
+          export XDG_RUNTIME_DIR="$RUNTIME"
+          export WAYLAND_DISPLAY=wayland-swir-photo
+          export GDK_BACKEND=wayland
+
+          python3 - "$RUNTIME/source.png" <<'PY'
+          import gi, sys
+          gi.require_version('GdkPixbuf', '2.0')
+          from gi.repository import GdkPixbuf
+          pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, True, 8, 80, 50)
+          pixbuf.fill(0x2488FFFF)
+          pixbuf.savev(sys.argv[1], 'png', [], [])
+          PY
+
+          weston --backend=headless-backend.so --socket="$WAYLAND_DISPLAY" --idle-time=0 --log="$RUNTIME/weston.log" &
+          WESTON_PID=$!
+          cleanup() { kill "$WESTON_PID" 2>/dev/null || true; wait "$WESTON_PID" 2>/dev/null || true; }
+          trap cleanup EXIT
+          for _ in $(seq 1 80); do
+            [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]] && break
+            kill -0 "$WESTON_PID"
+            sleep 0.25
+          done
+          [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]]
+
+          timeout --signal=TERM --kill-after=5s 30s \
+            dbus-run-session -- \
+            env LIBGL_ALWAYS_SOFTWARE=1 GTK_A11Y=none \
+                SWIR_APP_E2E=1 \
+                SWIR_APP_EVIDENCE_PATH="$RUNTIME/photo.json" \
+                SWIR_PHOTO_E2E_IMAGE="$RUNTIME/source.png" \
+                SWIR_PHOTO_E2E_EXPORT_DIR="$EXPORT_DIR" \
+            python3 system/apps/swir-photo-studio.py
+
+          python3 - "$RUNTIME/photo.json" "$RUNTIME/source.png" "$EXPORT_DIR" <<'PY'
+          import json, pathlib, stat, sys
+          evidence = json.load(open(sys.argv[1], encoding='utf-8'))
+          source = pathlib.Path(sys.argv[2])
+          export_dir = pathlib.Path(sys.argv[3])
+          assert evidence['schema'] == 'swir.native-photo-studio-runtime-evidence/0.1'
+          assert evidence['passed'] is True
+          assert evidence['applicationId'] == 'dev.swir.PhotoStudio'
+          assert evidence['nativeToolkit'] == 'gtk4-gdkpixbuf'
+          assert evidence['displayProtocol'] == 'wayland' and evidence['windowMapped'] is True
+          assert evidence['sourceReadOnly'] is True and source.is_file()
+          assert evidence['localFilesOnly'] is True and evidence['remoteUriInputAccepted'] is False
+          assert evidence['historyBound'] == 24 and evidence['undoRedoVerified'] is True
+          assert evidence['rotateVerified'] is True and evidence['flipVerified'] is True and evidence['resizeVerified'] is True
+          assert evidence['pngExport'] is True and evidence['jpegExport'] is True and evidence['atomicExport'] is True
+          assert evidence['privilegedOperations'] is False and evidence['selfUpdater'] is False
+          for name in ('edited.png', 'edited.jpg'):
+              path = export_dir / name
+              assert path.is_file() and path.stat().st_size > 0
+              assert stat.S_IMODE(path.stat().st_mode) == 0o600
+          PY
+          gio mime image/png | grep -F 'swir-photo-studio.desktop' >/dev/null
+
+  debian13-target-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    container:
+      image: debian:trixie-slim
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify exact System Edition GTK4/GdkPixbuf target runtime
+        run: |
+          set -euo pipefail
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            desktop-file-utils python3 python3-gi gir1.2-gtk-4.0 gir1.2-gdkpixbuf-2.0
+          python3 system/apps/swir-photo-studio.py --self-test
+          desktop-file-validate system/apps/swir-photo-studio.desktop
+          python3 - <<'PY'
+          import gi
+          gi.require_version('Gtk', '4.0')
+          gi.require_version('GdkPixbuf', '2.0')
+          from gi.repository import GdkPixbuf, Gtk
+          pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, True, 8, 16, 16)
+          assert pixbuf.get_width() == 16 and Gtk.get_major_version() == 4
+          print('Debian 13 Photo Studio target runtime: OK')
+          PY
