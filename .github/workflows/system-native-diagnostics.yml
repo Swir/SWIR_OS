@@ -1,0 +1,128 @@
+name: System Native Diagnostics
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'system/apps/swir-system-monitor.py'
+      - 'system/SWIR-NATIVE-DIAGNOSTICS-0.1.md'
+      - '.github/workflows/system-native-diagnostics.yml'
+  pull_request:
+    paths:
+      - 'system/apps/swir-system-monitor.py'
+      - 'system/SWIR-NATIVE-DIAGNOSTICS-0.1.md'
+      - '.github/workflows/system-native-diagnostics.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: system-native-diagnostics-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify bounded read-only diagnostics policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile system/apps/swir-system-monitor.py
+          grep -F 'SYSTEMCTL_PATH: Final = "/usr/bin/systemctl"' system/apps/swir-system-monitor.py >/dev/null
+          grep -F 'JOURNALCTL_PATH: Final = "/usr/bin/journalctl"' system/apps/swir-system-monitor.py >/dev/null
+          grep -F 'COMMAND_TIMEOUT_SECONDS: Final = 3' system/apps/swir-system-monitor.py >/dev/null
+          grep -F 'MAX_COMMAND_OUTPUT_CHARS: Final = 64 * 1024' system/apps/swir-system-monitor.py >/dev/null
+          grep -F 'JOURNAL_LINE_LIMIT: Final = 50' system/apps/swir-system-monitor.py >/dev/null
+          grep -F 'shell=False' system/apps/swir-system-monitor.py >/dev/null
+          grep -F 'diagnosticsReadOnly": True' system/apps/swir-system-monitor.py >/dev/null
+          grep -F 'evidenceIncludesLogContent": False' system/apps/swir-system-monitor.py >/dev/null
+          ! grep -RE 'subprocess\.(run|Popen).*\b(sudo|pkexec)\b' system/apps/swir-system-monitor.py
+          python3 - <<'PY'
+          import ast
+          from pathlib import Path
+
+          path = Path('system/apps/swir-system-monitor.py')
+          source = path.read_text(encoding='utf-8')
+          tree = ast.parse(source)
+          runs = [node for node in ast.walk(tree) if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name) and node.func.value.id == 'subprocess' and node.func.attr == 'run']
+          assert len(runs) == 1, f'expected exactly one subprocess.run helper, found {len(runs)}'
+          keywords = {kw.arg: kw.value for kw in runs[0].keywords if kw.arg}
+          assert isinstance(keywords.get('shell'), ast.Constant) and keywords['shell'].value is False
+          assert isinstance(keywords.get('timeout'), ast.Name) and keywords['timeout'].id == 'COMMAND_TIMEOUT_SECONDS'
+          strings = {node.value for node in ast.walk(tree) if isinstance(node, ast.Constant) and isinstance(node.value, str)}
+          forbidden = {'/usr/bin/sudo', '/usr/bin/pkexec', '/usr/bin/su', '/bin/su'}
+          assert strings.isdisjoint(forbidden), strings & forbidden
+          assert 'ALLOWED_DIAGNOSTIC_COMMANDS' in source
+          assert 'FAILED_UNITS_COMMAND' in source and 'JOURNAL_WARNINGS_COMMAND' in source
+          PY
+
+  wayland-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install controlled GTK4 and Wayland runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends weston python3-gi gir1.2-gtk-4.0 systemd
+      - name: Map SWIR System Monitor diagnostics on headless Wayland
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUNTIME="${{ runner.temp }}/swir-runtime"
+          mkdir -p "$RUNTIME"
+          chmod 0700 "$RUNTIME"
+          export XDG_RUNTIME_DIR="$RUNTIME"
+          export WAYLAND_DISPLAY=wayland-swir-diagnostics
+          export GDK_BACKEND=wayland
+
+          weston --backend=headless-backend.so --socket="$WAYLAND_DISPLAY" --idle-time=0 --log="$RUNTIME/weston.log" &
+          WESTON_PID=$!
+          cleanup() { kill "$WESTON_PID" 2>/dev/null || true; wait "$WESTON_PID" 2>/dev/null || true; }
+          trap cleanup EXIT
+
+          for _ in $(seq 1 80); do
+            [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]] && break
+            kill -0 "$WESTON_PID"
+            sleep 0.25
+          done
+          [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]]
+
+          EVIDENCE="$RUNTIME/system-monitor-diagnostics.json"
+          timeout --signal=TERM --kill-after=5s 25s \
+            env SWIR_APP_E2E=1 SWIR_APP_EVIDENCE_PATH="$EVIDENCE" \
+            python3 system/apps/swir-system-monitor.py
+
+          python3 - "$EVIDENCE" <<'PY'
+          import json, sys
+          evidence = json.load(open(sys.argv[1], encoding='utf-8'))
+          assert evidence['schema'] == 'swir.native-system-monitor-runtime-evidence/0.1'
+          assert evidence['passed'] is True
+          assert evidence['applicationId'] == 'dev.swir.SystemMonitor'
+          assert evidence['nativeToolkit'] == 'gtk4'
+          assert evidence['displayProtocol'] == 'wayland'
+          assert evidence['windowMapped'] is True
+          assert evidence['privilegedOperations'] is False
+          assert 0 < evidence['visibleProcessCount'] <= evidence['processRowsBounded'] == 200
+          assert evidence['memTotalKiB'] > 0
+          assert evidence['diagnosticsReadOnly'] is True
+          assert evidence['diagnosticsShell'] is False
+          assert evidence['systemctlAbsolutePath'] == '/usr/bin/systemctl'
+          assert evidence['journalctlAbsolutePath'] == '/usr/bin/journalctl'
+          assert evidence['diagnosticsCommandTimeoutSeconds'] == 3
+          assert evidence['diagnosticsOutputMaxChars'] == 64 * 1024
+          assert evidence['journalLineLimit'] == 50
+          assert evidence['failedUnitsStatus'] in {'ok', 'error', 'unavailable', 'timeout'}
+          assert evidence['journalStatus'] in {'ok', 'error', 'unavailable', 'timeout'}
+          assert 0 <= evidence['failedUnitsCount'] <= 200
+          assert 0 <= evidence['journalVisibleLineCount'] <= 50
+          assert evidence['evidenceIncludesLogContent'] is False
+          for forbidden in ('failedUnitsOutput', 'journalOutput', 'journalLines', 'kernelVersion', 'osRelease'):
+              assert forbidden not in evidence
+          PY

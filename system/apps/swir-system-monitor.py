@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""SWIR System Monitor — first-party native GTK4 process/resource viewer."""
+"""SWIR System Monitor — first-party native GTK4 process/resource and diagnostics viewer."""
 
 from __future__ import annotations
 
 import json
 import os
 import pathlib
+import subprocess
 import sys
+import threading
 from dataclasses import dataclass
 from typing import Final
 
@@ -18,6 +20,24 @@ from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 APP_ID: Final = "dev.swir.SystemMonitor"
 EVIDENCE_SCHEMA: Final = "swir.native-system-monitor-runtime-evidence/0.1"
 MAX_PROCESS_ROWS: Final = 200
+COMMAND_TIMEOUT_SECONDS: Final = 3
+MAX_COMMAND_OUTPUT_CHARS: Final = 64 * 1024
+JOURNAL_LINE_LIMIT: Final = 50
+SYSTEMCTL_PATH: Final = "/usr/bin/systemctl"
+JOURNALCTL_PATH: Final = "/usr/bin/journalctl"
+FAILED_UNITS_COMMAND: Final = (SYSTEMCTL_PATH, "--failed", "--no-legend", "--plain")
+JOURNAL_WARNINGS_COMMAND: Final = (
+    JOURNALCTL_PATH,
+    "-b",
+    "-p",
+    "warning",
+    "--no-pager",
+    "-n",
+    str(JOURNAL_LINE_LIMIT),
+    "-o",
+    "short-monotonic",
+)
+ALLOWED_DIAGNOSTIC_COMMANDS: Final = frozenset({FAILED_UNITS_COMMAND, JOURNAL_WARNINGS_COMMAND})
 
 CSS = b"""
 window.swir-app { background: #02050A; color: #F4FAFF; }
@@ -26,6 +46,7 @@ window.swir-app { background: #02050A; color: #F4FAFF; }
 .swir-muted { color: #8DA8B8; }
 .swir-metric { background: #07111C; border: 1px solid rgba(98,229,255,0.28); border-radius: 12px; padding: 10px 14px; }
 .swir-row { padding: 7px 10px; border-bottom: 1px solid rgba(98,229,255,0.08); }
+.swir-diag { background: #07111C; border: 1px solid rgba(98,229,255,0.18); border-radius: 12px; padding: 12px; }
 """
 
 
@@ -34,6 +55,23 @@ class ProcessRow:
     pid: int
     name: str
     rss_kib: int
+
+
+@dataclass(frozen=True)
+class CommandResult:
+    status: str
+    returncode: int | None
+    stdout: str
+    stderr: str
+
+
+@dataclass(frozen=True)
+class DiagnosticsSnapshot:
+    os_name: str
+    kernel_version: str
+    uptime_seconds: float
+    failed: CommandResult
+    journal: CommandResult
 
 
 def read_meminfo() -> dict[str, int]:
@@ -79,16 +117,108 @@ def format_mib(kib: int) -> str:
     return f"{kib / 1024.0:.1f} MiB"
 
 
+def read_os_release() -> str:
+    values: dict[str, str] = {}
+    try:
+        with open("/etc/os-release", encoding="utf-8") as handle:
+            for raw_line in handle:
+                line = raw_line.strip()
+                if not line or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                values[key] = value.strip().strip('"')
+    except (OSError, UnicodeError):
+        return "Unknown Linux"
+    return values.get("PRETTY_NAME") or values.get("NAME") or "Unknown Linux"
+
+
+def read_kernel_version() -> str:
+    try:
+        value = pathlib.Path("/proc/version").read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError):
+        return "Unavailable"
+    return value[:512] or "Unavailable"
+
+
+def _diagnostic_env() -> dict[str, str]:
+    env = {
+        "PATH": "/usr/bin:/bin",
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+    }
+    for key in ("DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR"):
+        value = os.environ.get(key)
+        if value:
+            env[key] = value
+    return env
+
+
+def run_read_only_command(argv: tuple[str, ...]) -> CommandResult:
+    if argv not in ALLOWED_DIAGNOSTIC_COMMANDS:
+        raise ValueError("diagnostic command is not allow-listed")
+    if not pathlib.Path(argv[0]).is_file():
+        return CommandResult("unavailable", None, "", "")
+    try:
+        completed = subprocess.run(
+            argv,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=COMMAND_TIMEOUT_SECONDS,
+            check=False,
+            shell=False,
+            env=_diagnostic_env(),
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout or ""
+        stderr = exc.stderr or ""
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode("utf-8", errors="replace")
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode("utf-8", errors="replace")
+        return CommandResult(
+            "timeout",
+            None,
+            stdout[:MAX_COMMAND_OUTPUT_CHARS],
+            stderr[:MAX_COMMAND_OUTPUT_CHARS],
+        )
+    except OSError:
+        return CommandResult("unavailable", None, "", "")
+    return CommandResult(
+        "ok" if completed.returncode == 0 else "error",
+        completed.returncode,
+        completed.stdout[:MAX_COMMAND_OUTPUT_CHARS],
+        completed.stderr[:MAX_COMMAND_OUTPUT_CHARS],
+    )
+
+
+def _nonempty_lines(text: str, limit: int) -> list[str]:
+    return [line for line in text.splitlines() if line.strip()][:limit]
+
+
 class SwirSystemMonitor(Gtk.Application):
     def __init__(self) -> None:
         super().__init__(application_id=APP_ID)
         self.window: Gtk.ApplicationWindow | None = None
         self.metrics: Gtk.Label | None = None
         self.listbox: Gtk.ListBox | None = None
+        self.diag_summary: Gtk.Label | None = None
+        self.diag_text: Gtk.TextView | None = None
+        self.diag_refresh: Gtk.Button | None = None
         self.e2e = os.environ.get("SWIR_APP_E2E", "0") == "1"
         self.evidence_path = os.environ.get("SWIR_APP_EVIDENCE_PATH", "")
         self.last_process_count = 0
         self.last_mem_total_kib = 0
+        self.failed_units_status = "not-run"
+        self.journal_status = "not-run"
+        self.failed_units_count = 0
+        self.journal_visible_line_count = 0
+        self.diagnostics_running = False
+        self.diagnostics_ready = False
+        self.evidence_written = False
 
     def do_startup(self) -> None:
         Gtk.Application.do_startup(self)
@@ -121,11 +251,21 @@ class SwirSystemMonitor(Gtk.Application):
         header.append(brand)
         root.append(header)
 
+        notebook = Gtk.Notebook()
+        notebook.set_hexpand(True)
+        notebook.set_vexpand(True)
+        root.append(notebook)
+
+        overview = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        overview.set_margin_top(8)
+        overview.set_margin_bottom(8)
+        overview.set_margin_start(8)
+        overview.set_margin_end(8)
         self.metrics = Gtk.Label()
         self.metrics.add_css_class("swir-metric")
         self.metrics.set_xalign(0)
         self.metrics.set_selectable(True)
-        root.append(self.metrics)
+        overview.append(self.metrics)
 
         scroller = Gtk.ScrolledWindow()
         scroller.set_hexpand(True)
@@ -133,9 +273,42 @@ class SwirSystemMonitor(Gtk.Application):
         self.listbox = Gtk.ListBox()
         self.listbox.set_selection_mode(Gtk.SelectionMode.NONE)
         scroller.set_child(self.listbox)
-        root.append(scroller)
+        overview.append(scroller)
+        notebook.append_page(overview, Gtk.Label(label="Processes"))
+
+        diagnostics = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        diagnostics.set_margin_top(8)
+        diagnostics.set_margin_bottom(8)
+        diagnostics.set_margin_start(8)
+        diagnostics.set_margin_end(8)
+
+        diag_toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.diag_summary = Gtk.Label(label="Diagnostics have not been refreshed yet.")
+        self.diag_summary.add_css_class("swir-metric")
+        self.diag_summary.set_xalign(0)
+        self.diag_summary.set_hexpand(True)
+        self.diag_summary.set_selectable(True)
+        diag_toolbar.append(self.diag_summary)
+        self.diag_refresh = Gtk.Button(label="Refresh diagnostics")
+        self.diag_refresh.connect("clicked", self._on_refresh_diagnostics)
+        diag_toolbar.append(self.diag_refresh)
+        diagnostics.append(diag_toolbar)
+
+        diag_scroller = Gtk.ScrolledWindow()
+        diag_scroller.set_hexpand(True)
+        diag_scroller.set_vexpand(True)
+        self.diag_text = Gtk.TextView()
+        self.diag_text.add_css_class("swir-diag")
+        self.diag_text.set_editable(False)
+        self.diag_text.set_cursor_visible(False)
+        self.diag_text.set_monospace(True)
+        self.diag_text.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        diag_scroller.set_child(self.diag_text)
+        diagnostics.append(diag_scroller)
+        notebook.append_page(diagnostics, Gtk.Label(label="Diagnostics"))
 
         self._refresh()
+        self._refresh_diagnostics()
         GLib.timeout_add_seconds(2, self._refresh)
         window.connect("map", self._on_mapped)
         window.present()
@@ -192,9 +365,90 @@ class SwirSystemMonitor(Gtk.Application):
             self.listbox.append(row)
         return True
 
+    def _on_refresh_diagnostics(self, _button: Gtk.Button) -> None:
+        self._refresh_diagnostics()
+
+    def _refresh_diagnostics(self) -> None:
+        assert self.diag_summary is not None and self.diag_refresh is not None
+        if self.diagnostics_running:
+            return
+        self.diagnostics_running = True
+        self.diagnostics_ready = False
+        self.diag_refresh.set_sensitive(False)
+        self.diag_summary.set_text("Refreshing bounded read-only diagnostics…")
+        threading.Thread(target=self._collect_diagnostics, name="swir-diagnostics", daemon=True).start()
+
+    def _collect_diagnostics(self) -> None:
+        try:
+            uptime = read_uptime_seconds()
+        except (OSError, ValueError):
+            uptime = 0.0
+        snapshot = DiagnosticsSnapshot(
+            os_name=read_os_release(),
+            kernel_version=read_kernel_version(),
+            uptime_seconds=uptime,
+            failed=run_read_only_command(FAILED_UNITS_COMMAND),
+            journal=run_read_only_command(JOURNAL_WARNINGS_COMMAND),
+        )
+        GLib.idle_add(self._apply_diagnostics, snapshot)
+
+    def _apply_diagnostics(self, snapshot: DiagnosticsSnapshot) -> bool:
+        assert self.diag_summary is not None and self.diag_text is not None and self.diag_refresh is not None
+        failed_lines = (
+            _nonempty_lines(snapshot.failed.stdout, MAX_PROCESS_ROWS)
+            if snapshot.failed.status == "ok"
+            else []
+        )
+        journal_lines = (
+            _nonempty_lines(snapshot.journal.stdout, JOURNAL_LINE_LIMIT)
+            if snapshot.journal.status == "ok"
+            else []
+        )
+        self.failed_units_status = snapshot.failed.status
+        self.journal_status = snapshot.journal.status
+        self.failed_units_count = len(failed_lines)
+        self.journal_visible_line_count = len(journal_lines)
+        self.diagnostics_running = False
+        self.diagnostics_ready = True
+        self.diag_refresh.set_sensitive(True)
+
+        self.diag_summary.set_text(
+            f"Read-only diagnostics  •  failed units: {snapshot.failed.status} ({len(failed_lines)})  •  "
+            f"boot journal: {snapshot.journal.status} ({len(journal_lines)} visible lines)"
+        )
+        failed_body = (
+            "\n".join(failed_lines)
+            if failed_lines
+            else f"[{snapshot.failed.status}] No readable failed-unit rows."
+        )
+        journal_body = (
+            "\n".join(journal_lines)
+            if journal_lines
+            else f"[{snapshot.journal.status}] No readable warning/error rows."
+        )
+        body = (
+            "SWIR OS Diagnostics — read only\n"
+            f"OS: {snapshot.os_name}\n"
+            f"Kernel: {snapshot.kernel_version}\n"
+            f"Uptime: {snapshot.uptime_seconds / 3600.0:.1f} h\n\n"
+            f"Failed systemd units ({snapshot.failed.status}):\n{failed_body}\n\n"
+            f"Recent boot warnings/errors — last {JOURNAL_LINE_LIMIT} lines max ({snapshot.journal.status}):\n"
+            f"{journal_body}\n\n"
+            "Safety: fixed absolute command paths, no shell, no elevation, bounded timeout/output."
+        )
+        self.diag_text.get_buffer().set_text(body[:MAX_COMMAND_OUTPUT_CHARS])
+        return False
+
     def _on_mapped(self, _window: Gtk.Window) -> None:
         if not self.e2e or not self.evidence_path:
             return
+        GLib.timeout_add(100, self._write_e2e_when_ready)
+
+    def _write_e2e_when_ready(self) -> bool:
+        if self.evidence_written:
+            return False
+        if not self.diagnostics_ready:
+            return True
         path = pathlib.Path(self.evidence_path)
         runtime_text = os.environ.get("XDG_RUNTIME_DIR", "")
         if not runtime_text or path.parent.resolve() != pathlib.Path(runtime_text).resolve():
@@ -210,10 +464,25 @@ class SwirSystemMonitor(Gtk.Application):
             "processRowsBounded": MAX_PROCESS_ROWS,
             "visibleProcessCount": self.last_process_count,
             "memTotalKiB": self.last_mem_total_kib,
+            "diagnosticsReadOnly": True,
+            "diagnosticsShell": False,
+            "diagnosticsAsync": True,
+            "systemctlAbsolutePath": SYSTEMCTL_PATH,
+            "journalctlAbsolutePath": JOURNALCTL_PATH,
+            "diagnosticsCommandTimeoutSeconds": COMMAND_TIMEOUT_SECONDS,
+            "diagnosticsOutputMaxChars": MAX_COMMAND_OUTPUT_CHARS,
+            "journalLineLimit": JOURNAL_LINE_LIMIT,
+            "failedUnitsStatus": self.failed_units_status,
+            "journalStatus": self.journal_status,
+            "failedUnitsCount": self.failed_units_count,
+            "journalVisibleLineCount": self.journal_visible_line_count,
+            "evidenceIncludesLogContent": False,
         }
         path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
         path.chmod(0o600)
+        self.evidence_written = True
         GLib.timeout_add(250, self._finish_e2e)
+        return False
 
     def _finish_e2e(self) -> bool:
         self.quit()
