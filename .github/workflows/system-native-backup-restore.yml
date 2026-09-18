@@ -1,0 +1,150 @@
+name: System Native Backup Restore
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'system/apps/backup_runtime.py'
+      - 'system/apps/backup_runtime.selftest.py'
+      - 'system/apps/swir-backup.py'
+      - 'system/apps/swir-backup.desktop'
+      - 'system/session/swir-shell.py'
+      - 'system/session/provision-graphical-session.sh'
+      - 'system/SWIR-NATIVE-BACKUP-RESTORE-0.1.md'
+      - '.github/workflows/system-native-backup-restore.yml'
+  pull_request:
+    paths:
+      - 'system/apps/backup_runtime.py'
+      - 'system/apps/backup_runtime.selftest.py'
+      - 'system/apps/swir-backup.py'
+      - 'system/apps/swir-backup.desktop'
+      - 'system/session/swir-shell.py'
+      - 'system/session/provision-graphical-session.sh'
+      - 'system/SWIR-NATIVE-BACKUP-RESTORE-0.1.md'
+      - '.github/workflows/system-native-backup-restore.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: system-native-backup-restore-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install static GTK4 dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends desktop-file-utils python3-gi gir1.2-gtk-4.0
+      - name: Compile and verify backup safety contract
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            system/apps/backup_runtime.py \
+            system/apps/backup_runtime.selftest.py \
+            system/apps/swir-backup.py \
+            system/session/swir-shell.py
+          PYTHONPATH=system/apps python3 system/apps/backup_runtime.selftest.py
+          PYTHONPATH=system/apps python3 system/apps/swir-backup.py --self-test
+          desktop-file-validate system/apps/swir-backup.desktop
+          bash -n system/session/provision-graphical-session.sh
+          grep -F 'Backup & Restore", (("/usr/local/bin/swir-backup",)' system/session/swir-shell.py >/dev/null
+          grep -F 'system/apps/backup_runtime.py' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'system/apps/swir-backup.py' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'system/apps/swir-backup.desktop' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'MAX_FILES: Final = 10_000' system/apps/backup_runtime.py >/dev/null
+          grep -F 'MAX_TOTAL_BYTES: Final = 2 * 1024 * 1024 * 1024' system/apps/backup_runtime.py >/dev/null
+          grep -F 'explicitRestoreConfirmation": True' system/apps/swir-backup.py >/dev/null
+          ! grep -RE 'shell *= *True|os\.system\(|subprocess\.' system/apps/backup_runtime.py system/apps/swir-backup.py
+          ! grep -RE "/usr/bin/(sudo|pkexec|su)([[:space:]\"']|$)|/bin/su([[:space:]\"']|$)" system/apps/backup_runtime.py system/apps/swir-backup.py
+
+  wayland-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install controlled GTK4 and Wayland runtime
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends weston dbus-daemon desktop-file-utils python3-gi gir1.2-gtk-4.0
+          sudo install -d -m 0755 /usr/local/lib/swir
+          sudo install -m 0644 system/apps/backup_runtime.py /usr/local/lib/swir/backup_runtime.py
+          sudo install -m 0755 system/apps/swir-backup.py /usr/local/bin/swir-backup
+          sudo install -m 0644 system/apps/swir-backup.desktop /usr/share/applications/swir-backup.desktop
+          sudo update-desktop-database /usr/share/applications
+          PYTHONPATH=system/apps python3 system/apps/backup_runtime.selftest.py
+      - name: Map Backup on Wayland and execute disposable create-restore cycle
+        run: |
+          set -euo pipefail
+          RUNTIME="${{ runner.temp }}/swir-backup-runtime"
+          mkdir -p "$RUNTIME"
+          chmod 0700 "$RUNTIME"
+          export XDG_RUNTIME_DIR="$RUNTIME"
+          export WAYLAND_DISPLAY=wayland-swir-backup
+          export GDK_BACKEND=wayland
+
+          weston --backend=headless-backend.so --socket="$WAYLAND_DISPLAY" --idle-time=0 --log="$RUNTIME/weston.log" &
+          WESTON_PID=$!
+          cleanup() { kill "$WESTON_PID" 2>/dev/null || true; wait "$WESTON_PID" 2>/dev/null || true; }
+          trap cleanup EXIT
+          for _ in $(seq 1 80); do
+            [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]] && break
+            kill -0 "$WESTON_PID"
+            sleep 0.25
+          done
+          [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]]
+
+          timeout --signal=TERM --kill-after=5s 30s dbus-run-session -- \
+            env LIBGL_ALWAYS_SOFTWARE=1 GTK_A11Y=none SWIR_APP_E2E=1 \
+                SWIR_APP_EVIDENCE_PATH="$RUNTIME/backup.json" \
+            /usr/local/bin/swir-backup
+
+          python3 - "$RUNTIME/backup.json" <<'PY'
+          import json, sys
+          evidence = json.load(open(sys.argv[1], encoding='utf-8'))
+          assert evidence['schema'] == 'swir.native-backup-runtime-evidence/0.1'
+          assert evidence['passed'] is True
+          assert evidence['applicationId'] == 'dev.swir.Backup'
+          assert evidence['nativeToolkit'] == 'gtk4'
+          assert evidence['displayProtocol'] == 'wayland' and evidence['windowMapped'] is True
+          assert evidence['backupSchema'] == 'swir.user-backup/0.1'
+          assert evidence['scope'] == 'swir-user-state'
+          assert evidence['backupCreated'] is True and evidence['backupEntries'] == 2
+          assert evidence['restoreVerified'] is True and evidence['previousStatePreserved'] is True
+          assert evidence['explicitRestoreConfirmation'] is True
+          assert evidence['privilegedOperations'] is False
+          assert evidence['systemPackageMutation'] is False and evidence['diskImaging'] is False
+          assert evidence['maxFiles'] == 10000
+          assert evidence['maxSingleFileBytes'] == 128 * 1024 * 1024
+          assert evidence['maxTotalBytes'] == 2 * 1024 * 1024 * 1024
+          PY
+
+  debian13-target-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    container:
+      image: debian:trixie-slim
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify exact System Edition GTK4 target runtime
+        run: |
+          set -euo pipefail
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends desktop-file-utils python3 python3-gi gir1.2-gtk-4.0
+          PYTHONPATH=system/apps python3 system/apps/backup_runtime.selftest.py
+          PYTHONPATH=system/apps python3 system/apps/swir-backup.py --self-test
+          desktop-file-validate system/apps/swir-backup.desktop
+          python3 - <<'PY'
+          import gi
+          gi.require_version('Gtk', '4.0')
+          from gi.repository import Gtk
+          assert Gtk.get_major_version() == 4
+          print('Debian 13 Backup & Restore target runtime: OK')
+          PY
