@@ -1,0 +1,25 @@
+[Unit]
+Description=SWIR authenticated package transaction broker
+Documentation=https://github.com/Swir/SWIR_OS/blob/main/system/SWIR-PACKAGE-UI-BROKER-0.1.md
+Requires=swir-peer-authorization.socket
+After=swir-peer-authorization.socket polkit.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/bin/node /usr/lib/swir/package-broker/ipc/swir-package-transaction-broker.mjs
+Restart=on-failure
+RestartSec=2s
+TimeoutStartSec=30s
+TimeoutStopSec=30s
+PrivateTmp=yes
+ProtectHome=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+LockPersonality=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
