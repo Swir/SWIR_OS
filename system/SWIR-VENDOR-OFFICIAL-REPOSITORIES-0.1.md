@@ -47,24 +47,48 @@ Signed repository metadata is also freshness-gated. `InRelease` must contain a p
 
 This evidence is **not an independent trust anchor** merely because the key and metadata originate from the same official host. The complete fingerprint is now pinned in the reviewed qualification profile, but repository enablement still requires a separately reviewed root-owned SWIR policy entry with the same full fingerprint and exact repository/package scope, followed by the journaled package/Driver Center broker path. The probe never writes `/etc/apt`, imports a system keyring, runs `apt`/`dpkg`, installs a package or claims physical-hardware support.
 
+## Transaction binding
+
+`system/hardware/vendor-repository-transaction-binding.mjs` closes the integrity gap between qualification evidence and the existing package/Driver Center transaction architecture without introducing a second privileged executor. It accepts only a trusted root-owned-policy review plus fresh qualification evidence and fails closed unless all of the following match exactly:
+
+- repository ID, hardware vendor and Debian platform tuple;
+- normalized HTTPS repository origin/path;
+- the same pinned 40-hex primary signing-key fingerprint and `VALIDSIG` primary fingerprint;
+- unexpired signed-metadata evidence with SHA-256 identities for the key, `InRelease` and `Packages.gz`;
+- every requested package is simultaneously inside the root-owned policy allowlist and the qualified package evidence.
+
+The binder emits `swir.vendor-repository-transaction-binding/0.1`, a read-only preview with a deterministic SHA-256 `bindingDigest`. That digest covers repository scope, platform/hardware identity, keyring path/fingerprint, fetched evidence digests, metadata validity window and the sorted requested package set. Changing any bound field therefore changes the digest.
+
+For each requested package the binder emits a System package-provider manifest input for `swir.package.system`. The manifest preserves the underlying vendor source identity as `upstreamSourceClass=vendor-official-repository` while using the existing distribution package transaction route, and it carries the exact `vendorRepositoryBindingDigest`. This deliberately reuses the existing `swir.system-package-plan/0.1` → `swir.system-package-transaction/0.1` → Driver Center journal architecture rather than adding a package-manager shortcut.
+
+The transaction binding itself **does not enable a repository and does not authorize a mutation**. It always reports `mutationAuthorized=false`, `repositoryEnablementAuthorized=false`, `requiresExplicitConfirmation=true`, `directAptMutationAllowed=false`, `directPkexecAllowed=false` and `repositoryActivationImplementedHere=false`. Repository activation still needs a separately implemented broker operation that is root-policy bound, journaled before mutation, authorized through the existing privilege boundary and recoverable after interruption.
+
+The intended complete path is therefore:
+
+`pinned qualification → root-owned policy review → deterministic trust/package binding → explicit user confirmation → existing journaled package/Driver Center broker → post-mutation verification/recovery`
+
+No stage may convert qualification evidence into authorization by itself.
+
 ## Verification
 
 `vendor-official-repository-service.selftest.mjs` exercises exact platform/vendor matching and fail-closed rejection of HTTP URLs, foreign hosts, direct downloads, automatic enablement, arbitrary package policy, key downloads, unsafe keyring paths, wildcard packages and duplicate IDs.
 
 `vendor-repository-trust-evidence.selftest.mjs` verifies profile pinning, exact full-fingerprint matching, primary-vs-subkey fingerprint parsing, `VALIDSIG` binding, required package parsing, redirect rejection, key-fingerprint mismatch rejection and missing-package rejection without touching a real package manager. It also exercises missing/invalid/stale/future `Date`, invalid or expired `Valid-Until`, and the bounded freshness fallback used when upstream omits `Valid-Until`.
 
+`vendor-repository-transaction-binding.selftest.mjs` verifies deterministic binding, digest changes when repository scope changes, package-provider manifest linkage, and fail-closed rejection of fingerprint, repository URL, platform, policy package, evidence package, expiry, preauthorization and signature-binding mismatches. It performs no privileged operation.
+
 The dedicated GitHub Actions workflow additionally:
 
 - creates a real root-owned policy fixture and proves writable/symlink policy files are rejected;
-- runs syntax and unit/self-test gates for both policy and evidence layers;
+- runs syntax and unit/self-test gates for policy, evidence and transaction-binding layers;
 - performs the pinned NVIDIA Debian 13 public-metadata qualification against the exact official origin;
 - requires the exact reviewed 40-hex signing-key fingerprint and `InRelease` signature binding;
 - requires fresh signed metadata under the 14-day maximum-age and 24-hour future-skew policy;
 - verifies `cuda-keyring` and `nvidia-open` are present in the live package index;
-- statically rejects package/source mutation shortcuts from the qualification probe.
+- statically rejects package/source mutation shortcuts from both qualification and binding layers.
 
 A transient, stale or changed upstream repository fails this qualification gate closed and requires review; CI does not silently change hostnames, paths, packages, freshness limits or key identity.
 
 ## Roadmap accounting
 
-This is meaningful implementation and trust-qualification progress but does **not** complete the roadmap checkbox by itself. The item remains open until a real exceptional proprietary component is represented by reviewed root-owned project policy with the complete signing-key fingerprint, the repository activation and package scope are bound to the journaled package/Driver Center mutation path, and the resulting transaction/recovery behavior is verified without bypassing distribution trust or safety gates.
+This is meaningful implementation and transaction-integrity progress but does **not** complete the roadmap checkbox by itself. The item remains open until a real exceptional proprietary component is represented by reviewed root-owned project policy with the complete signing-key fingerprint, repository activation is implemented through the existing privileged/journaled broker, the exact binding digest reaches that mutation journal, and disposable-VM activation/interruption/recovery behavior is verified without bypassing distribution trust or safety gates.
