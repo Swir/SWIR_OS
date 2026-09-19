@@ -1,0 +1,152 @@
+name: System Native Default Apps
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'system/apps/swir-settings.py'
+      - 'system/apps/swir-browser.desktop'
+      - 'system/apps/swir-player.desktop'
+      - 'system/apps/swir-photo-studio.desktop'
+      - 'system/apps/swir-pdf-viewer.desktop'
+      - 'system/apps/native-daily-suite.json'
+      - 'system/SWIR-NATIVE-DEFAULT-APPS-0.1.md'
+      - '.github/workflows/system-native-default-apps.yml'
+  pull_request:
+    paths:
+      - 'system/apps/swir-settings.py'
+      - 'system/apps/swir-browser.desktop'
+      - 'system/apps/swir-player.desktop'
+      - 'system/apps/swir-photo-studio.desktop'
+      - 'system/apps/swir-pdf-viewer.desktop'
+      - 'system/apps/native-daily-suite.json'
+      - 'system/SWIR-NATIVE-DEFAULT-APPS-0.1.md'
+      - '.github/workflows/system-native-default-apps.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: system-native-default-apps-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Default Apps policy and desktop metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile system/apps/swir-settings.py
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends desktop-file-utils
+          for desktop in \
+            system/apps/swir-browser.desktop \
+            system/apps/swir-player.desktop \
+            system/apps/swir-photo-studio.desktop \
+            system/apps/swir-pdf-viewer.desktop; do
+            desktop-file-validate "$desktop"
+          done
+          grep -F '"browser", "Web browser"' system/apps/swir-settings.py >/dev/null
+          grep -F '"media", "Media player"' system/apps/swir-settings.py >/dev/null
+          grep -F '"image", "Image viewer / editor"' system/apps/swir-settings.py >/dev/null
+          grep -F '"pdf", "PDF viewer"' system/apps/swir-settings.py >/dev/null
+          grep -F 'defaultAppsMutationOnExplicitActionOnly' system/apps/swir-settings.py >/dev/null
+          ! grep -RE '/usr/bin/(sudo|pkexec|su)([[:space:]\"'"']|$)|/bin/su([[:space:]\"'"']|$)' system/apps/swir-settings.py
+          ! grep -RE 'subprocess\.|os\.system\(' system/apps/swir-settings.py
+
+  wayland-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install controlled GTK4 and Wayland runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            weston python3-gi gir1.2-gtk-4.0 desktop-file-utils
+      - name: Exercise first-party per-user Default Apps mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUNTIME="${{ runner.temp }}/swir-runtime"
+          CONFIG="${{ runner.temp }}/swir-config"
+          DATA="${{ runner.temp }}/swir-data"
+          mkdir -p "$RUNTIME" "$CONFIG" "$DATA/applications"
+          chmod 0700 "$RUNTIME" "$CONFIG" "$DATA"
+          install -m 0644 \
+            system/apps/swir-browser.desktop \
+            system/apps/swir-player.desktop \
+            system/apps/swir-photo-studio.desktop \
+            system/apps/swir-pdf-viewer.desktop \
+            "$DATA/applications/"
+          update-desktop-database "$DATA/applications"
+
+          export XDG_RUNTIME_DIR="$RUNTIME"
+          export XDG_CONFIG_HOME="$CONFIG"
+          export XDG_DATA_HOME="$DATA"
+          export WAYLAND_DISPLAY=wayland-swir-defaults
+          export GDK_BACKEND=wayland
+          export PYTHONPATH="$GITHUB_WORKSPACE/system/apps"
+
+          weston --backend=headless-backend.so --socket="$WAYLAND_DISPLAY" --idle-time=0 --log="$RUNTIME/weston.log" &
+          WESTON_PID=$!
+          cleanup() { kill "$WESTON_PID" 2>/dev/null || true; wait "$WESTON_PID" 2>/dev/null || true; }
+          trap cleanup EXIT
+          for _ in $(seq 1 80); do
+            [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]] && break
+            kill -0 "$WESTON_PID"
+            sleep 0.25
+          done
+          [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]]
+
+          timeout --signal=TERM --kill-after=5s 30s \
+            env SWIR_APP_E2E=1 \
+                SWIR_DEFAULT_APPS_E2E=1 \
+                SWIR_APP_EVIDENCE_PATH="$RUNTIME/default-apps.json" \
+                python3 system/apps/swir-settings.py
+
+          python3 - "$RUNTIME/default-apps.json" "$CONFIG/mimeapps.list" <<'PY'
+          import json, pathlib, sys
+          evidence = json.load(open(sys.argv[1], encoding='utf-8'))
+          mimeapps = pathlib.Path(sys.argv[2])
+          assert evidence['schema'] == 'swir.native-settings-runtime-evidence/0.2'
+          assert evidence['passed'] is True
+          assert evidence['applicationId'] == 'dev.swir.Settings'
+          assert evidence['nativeToolkit'] == 'gtk4'
+          assert evidence['displayProtocol'] == 'wayland'
+          assert evidence['windowMapped'] is True
+          assert evidence['privilegedOperations'] is False
+          assert evidence['defaultAppsPanel'] is True
+          assert evidence['defaultAppCategoryCount'] == 4
+          assert evidence['defaultAppCategories'] == ['browser', 'media', 'image', 'pdf']
+          assert evidence['defaultAppsMutationOnExplicitActionOnly'] is True
+          assert evidence['defaultAppsMutationVerified'] is True
+          assert evidence['defaultAppsVerifiedDesktopIds'] == {
+              'browser': 'swir-browser.desktop',
+              'media': 'swir-player.desktop',
+              'image': 'swir-photo-studio.desktop',
+              'pdf': 'swir-pdf-viewer.desktop',
+          }
+          assert all(count >= 1 for count in evidence['defaultAppCandidateCounts'].values())
+          expected_types = {
+              'browser': ['x-scheme-handler/http', 'x-scheme-handler/https', 'text/html'],
+              'media': ['audio/mpeg', 'video/mp4'],
+              'image': ['image/png', 'image/jpeg'],
+              'pdf': ['application/pdf'],
+          }
+          assert evidence['defaultAppHandlerTypes'] == expected_types
+          text = mimeapps.read_text(encoding='utf-8')
+          for desktop_id in evidence['defaultAppsVerifiedDesktopIds'].values():
+              assert desktop_id in text
+          PY
+
+          [[ "$(stat -c '%a' "$CONFIG/swir/settings.json")" = 600 ]]
+          [[ "$(stat -c '%a' "$RUNTIME/default-apps.json")" = 600 ]]
+          [[ -f "$CONFIG/mimeapps.list" ]]
