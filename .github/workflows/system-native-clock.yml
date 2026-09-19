@@ -7,6 +7,7 @@ on:
       - 'system/apps/swir-clock.py'
       - 'system/apps/swir-clock.desktop'
       - 'system/session/swir-shell.py'
+      - 'system/session/swir-session-launcher.sh'
       - 'system/session/provision-graphical-session.sh'
       - 'system/SWIR-NATIVE-CLOCK-0.1.md'
       - '.github/workflows/system-native-clock.yml'
@@ -15,6 +16,7 @@ on:
       - 'system/apps/swir-clock.py'
       - 'system/apps/swir-clock.desktop'
       - 'system/session/swir-shell.py'
+      - 'system/session/swir-session-launcher.sh'
       - 'system/session/provision-graphical-session.sh'
       - 'system/SWIR-NATIVE-CLOCK-0.1.md'
       - '.github/workflows/system-native-clock.yml'
@@ -44,16 +46,21 @@ jobs:
           python3 -m py_compile system/apps/swir-clock.py system/session/swir-shell.py
           python3 system/apps/swir-clock.py --self-test
           desktop-file-validate system/apps/swir-clock.desktop
+          bash -n system/session/swir-session-launcher.sh
           bash -n system/session/provision-graphical-session.sh
           grep -F 'Clock", (("/usr/local/bin/swir-clock",)' system/session/swir-shell.py >/dev/null
           grep -F 'system/apps/swir-clock.py' system/session/provision-graphical-session.sh >/dev/null
           grep -F 'system/apps/swir-clock.desktop' system/session/provision-graphical-session.sh >/dev/null
+          grep -F '/usr/local/bin/swir-clock --alarm-service &' system/session/swir-session-launcher.sh >/dev/null
           grep -F 'ALARM_STORE_SCHEMA: Final = "swir.clock.alarms/1"' system/apps/swir-clock.py >/dev/null
           grep -F 'MAX_ALARMS: Final = 32' system/apps/swir-clock.py >/dev/null
           grep -F 'MAX_LABEL_CHARS: Final = 80' system/apps/swir-clock.py >/dev/null
           grep -F 'MAX_ALARM_STATE_BYTES: Final = 64 * 1024' system/apps/swir-clock.py >/dev/null
+          grep -F 'SERVICE_POLL_SECONDS: Final = 10' system/apps/swir-clock.py >/dev/null
+          grep -F 'fcntl.flock' system/apps/swir-clock.py >/dev/null
           grep -F 'O_NOFOLLOW' system/apps/swir-clock.py >/dev/null
           grep -F 'os.replace(tmp_name, path)' system/apps/swir-clock.py >/dev/null
+          grep -F '_claim_due_alarms' system/apps/swir-clock.py >/dev/null
           ! grep -RE 'shell *= *True|os\.system\(|subprocess\.' system/apps/swir-clock.py
           ! grep -RE "/usr/bin/(sudo|pkexec|su)([[:space:]\"']|$)|/bin/su([[:space:]\"']|$)" system/apps/swir-clock.py
 
@@ -71,7 +78,7 @@ jobs:
           sudo install -m 0644 system/apps/swir-clock.desktop /usr/share/applications/swir-clock.desktop
           sudo update-desktop-database /usr/share/applications
           python3 system/apps/swir-clock.py --self-test
-      - name: Map Clock on Wayland and verify persisted alarm storage
+      - name: Map Clock and background alarm service on Wayland
         run: |
           set -euo pipefail
           RUNTIME="${{ runner.temp }}/swir-clock-runtime"
@@ -100,7 +107,7 @@ jobs:
           python3 - "$RUNTIME/clock.json" <<'PY'
           import json, sys
           evidence = json.load(open(sys.argv[1], encoding='utf-8'))
-          assert evidence['schema'] == 'swir.native-clock-runtime-evidence/0.2'
+          assert evidence['schema'] == 'swir.native-clock-runtime-evidence/0.3'
           assert evidence['passed'] is True
           assert evidence['applicationId'] == 'dev.swir.Clock'
           assert evidence['nativeToolkit'] == 'gtk4'
@@ -110,9 +117,55 @@ jobs:
           assert evidence['alarmPersistenceRoundTrip'] is True
           assert evidence['alarmStoreSchema'] == 'swir.clock.alarms/1'
           assert evidence['alarmStoreMaxBytes'] == 65536
-          assert evidence['alarmBackgroundServiceClaimed'] is False
+          assert evidence['alarmBackgroundServiceClaimed'] is True
+          assert evidence['alarmBackgroundServiceScope'] == 'active-user-session'
+          assert evidence['alarmSleepWakeClaimed'] is False and evidence['alarmPreLoginClaimed'] is False
           assert evidence['networkAccess'] is False and evidence['privilegedOperations'] is False
           assert evidence['selfUpdater'] is False
+          PY
+
+          STORE="$RUNTIME/alarms.json"
+          python3 - "$STORE" <<'PY'
+          import datetime as dt, json, os, sys
+          now = dt.datetime.now().astimezone()
+          payload = {
+              'schema': 'swir.clock.alarms/1',
+              'alarms': [{
+                  'enabled': True,
+                  'hour': now.hour,
+                  'minute': now.minute,
+                  'label': 'Background E2E',
+                  'lastFiredDate': '',
+              }],
+          }
+          with open(sys.argv[1], 'w', encoding='utf-8') as handle:
+              json.dump(payload, handle, sort_keys=True, separators=(',', ':'))
+              handle.write('\n')
+          os.chmod(sys.argv[1], 0o600)
+          PY
+
+          timeout --signal=TERM --kill-after=5s 25s dbus-run-session -- \
+            env LIBGL_ALWAYS_SOFTWARE=1 GTK_A11Y=none \
+                SWIR_CLOCK_ALARM_STORE="$STORE" \
+                SWIR_CLOCK_SERVICE_E2E=1 \
+                SWIR_CLOCK_SERVICE_EVIDENCE_PATH="$RUNTIME/service.json" \
+            python3 system/apps/swir-clock.py --alarm-service
+
+          python3 - "$RUNTIME/service.json" "$STORE" <<'PY'
+          import datetime as dt, json, sys
+          evidence = json.load(open(sys.argv[1], encoding='utf-8'))
+          state = json.load(open(sys.argv[2], encoding='utf-8'))
+          assert evidence['schema'] == 'swir.clock-alarm-service-evidence/0.1'
+          assert evidence['passed'] is True
+          assert evidence['applicationId'] == 'dev.swir.ClockAlarmService'
+          assert evidence['nativeToolkit'] == 'gtk4'
+          assert evidence['displayProtocol'] == 'wayland' and evidence['alarmWindowMapped'] is True
+          assert evidence['activeSessionOnly'] is True and evidence['firesWithClockWindowClosed'] is True
+          assert evidence['atomicDueClaim'] is True and evidence['pollSeconds'] == 10
+          assert evidence['sleepWakeClaimed'] is False and evidence['preLoginClaimed'] is False
+          assert evidence['networkAccess'] is False and evidence['privilegedOperations'] is False
+          assert evidence['selfUpdater'] is False
+          assert state['alarms'][0]['lastFiredDate'] == dt.datetime.now().astimezone().date().isoformat()
           PY
 
   debian13-target-runtime:

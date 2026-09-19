@@ -20,6 +20,7 @@ SHELL_EVIDENCE="$XDG_RUNTIME_DIR/swir-shell-evidence.json"
 [ "$(stat -c '%u' "$XDG_RUNTIME_DIR")" = "$UID_NOW" ] || { echo "runtime directory owner mismatch" >&2; exit 71; }
 [ -x /usr/bin/weston ] || { echo "weston is not installed" >&2; exit 72; }
 [ -x /usr/local/bin/swir-shell ] || { echo "SWIR native shell is not installed" >&2; exit 72; }
+[ -x /usr/local/bin/swir-clock ] || { echo "SWIR Clock is not installed" >&2; exit 72; }
 
 rm -f "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" "$SHELL_EVIDENCE"
 /usr/bin/weston \
@@ -32,8 +33,10 @@ rm -f "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" "$SHELL_EVIDENCE"
   --log="$WESTON_LOG" &
 WESTON_PID=$!
 SHELL_PID=""
+ALARM_SERVICE_PID=""
 cleanup() {
   if [ -n "$SHELL_PID" ]; then kill "$SHELL_PID" 2>/dev/null || true; wait "$SHELL_PID" 2>/dev/null || true; fi
+  if [ -n "$ALARM_SERVICE_PID" ]; then kill "$ALARM_SERVICE_PID" 2>/dev/null || true; wait "$ALARM_SERVICE_PID" 2>/dev/null || true; fi
   kill "$WESTON_PID" 2>/dev/null || true
   wait "$WESTON_PID" 2>/dev/null || true
 }
@@ -48,6 +51,14 @@ while [ "$i" -lt 80 ]; do
   sleep 0.25
 done
 [ "$ready" = "1" ] || { echo "weston Wayland socket did not become ready" >&2; exit 73; }
+
+# Same-user, unprivileged alarm scheduling lives for exactly this authenticated
+# graphical session. It shares the Clock's atomic due-claim path, so an open
+# Clock window and the background scheduler cannot intentionally double-fire.
+/usr/local/bin/swir-clock --alarm-service &
+ALARM_SERVICE_PID=$!
+sleep 0.2
+kill -0 "$ALARM_SERVICE_PID" 2>/dev/null || { echo "SWIR Clock alarm service failed to stay running" >&2; exit 73; }
 
 if [ "${SWIR_SESSION_E2E:-0}" = "1" ]; then
   SWIR_SHELL_E2E=1 SWIR_SHELL_EVIDENCE_PATH="$SHELL_EVIDENCE" /usr/local/bin/swir-shell &
@@ -66,6 +77,7 @@ while [ "$i" -lt 80 ]; do
   sleep 0.25
 done
 [ "$shell_ready" = "1" ] || { echo "SWIR native shell did not map a Wayland window" >&2; exit 74; }
+kill -0 "$ALARM_SERVICE_PID" 2>/dev/null || { echo "SWIR Clock alarm service exited during session startup" >&2; exit 74; }
 
 if [ "${SWIR_SESSION_E2E:-0}" = "1" ]; then
   WAYLAND_INFO="$XDG_RUNTIME_DIR/swir-wayland-info.txt"
@@ -109,6 +121,7 @@ PY
   export SWIR_EVIDENCE_SOCKET="$WAYLAND_DISPLAY"
   export SWIR_EVIDENCE_WESTON_PID="$WESTON_PID"
   export SWIR_EVIDENCE_SHELL_PID="$SHELL_PID"
+  export SWIR_EVIDENCE_ALARM_SERVICE_PID="$ALARM_SERVICE_PID"
   export SWIR_EVIDENCE_SHELL_PATH="$SHELL_EVIDENCE"
   export SWIR_EVIDENCE_SESSION_SHOW="$SESSION_SHOW"
   /usr/bin/python3 - <<'PY'
@@ -120,7 +133,7 @@ for line in os.environ['SWIR_EVIDENCE_SESSION_SHOW'].splitlines():
         props[k] = v
 shell = json.loads(pathlib.Path(os.environ['SWIR_EVIDENCE_SHELL_PATH']).read_text(encoding='utf-8'))
 out = {
-    'schema': 'swir.graphical-session-runtime-evidence/0.1',
+    'schema': 'swir.graphical-session-runtime-evidence/0.2',
     'passed': True,
     'user': os.environ['SWIR_EVIDENCE_USER'],
     'uid': int(os.environ['SWIR_EVIDENCE_UID']),
@@ -153,6 +166,11 @@ out = {
         'launcherProbePassed': shell['launcherProbePassed'],
         'privilegedOperationsInShell': shell['privilegedOperationsInShell'],
         'pid': int(os.environ['SWIR_EVIDENCE_SHELL_PID']),
+    },
+    'clockAlarmService': {
+        'activeSessionOnly': True,
+        'pid': int(os.environ['SWIR_EVIDENCE_ALARM_SERVICE_PID']),
+        'privileged': False,
     },
     'desktopShellClaim': True,
 }
