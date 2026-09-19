@@ -2,8 +2,9 @@
 """Fail-closed integration verifier for the System Edition native daily-use suite.
 
 This verifies that every Product Baseline 1.0 essential-utility capability is
-represented by trusted native source, staged into the graphical image and
-reachable from the native shell. It deliberately does not declare the umbrella
+represented by trusted native source, staged into the graphical image,
+reachable from the native shell, and explicitly bound to an in-repository
+runtime-evidence workflow. It deliberately does not declare the umbrella
 roadmap deliverable complete: per-application product-depth requirements remain
 separate gates.
 """
@@ -46,6 +47,13 @@ REQUIRED_MARKERS: Final = {
 
 FORBIDDEN_APP_SOURCE_SUFFIXES: Final = {".html", ".htm", ".js", ".mjs", ".css"}
 ALLOWED_COMPANION_SUFFIXES: Final = {".py", ".mjs", ".service", ".target", ".json"}
+RUNTIME_EVIDENCE_MARKERS: Final = (
+    "SWIR_APP_E2E",
+    "SWIR_APP_EVIDENCE_PATH",
+    "wayland-runtime",
+    "--archive-self-test",
+    "selftest",
+)
 
 
 def fail(message: str) -> None:
@@ -116,7 +124,31 @@ def verify_baseline_reference() -> None:
             fail(f"Photo Studio Product Baseline depth changed or disappeared: {marker}")
 
 
-def verify_source(capability: dict) -> None:
+def verify_evidence_workflow(capability: dict) -> str:
+    ident = capability["id"]
+    source = capability["source"]
+    workflow = capability.get("evidenceWorkflow")
+    if not isinstance(workflow, str):
+        fail(f"{ident}: runtime evidence workflow is missing")
+    pure = pathlib.PurePosixPath(workflow)
+    if pure.parent != pathlib.PurePosixPath(".github/workflows") or pure.suffix not in {".yml", ".yaml"}:
+        fail(f"{ident}: runtime evidence workflow must live under .github/workflows: {workflow!r}")
+
+    workflow_text = trusted_repo_file(workflow).read_text(encoding="utf-8")
+    if source not in workflow_text:
+        fail(f"{ident}: runtime evidence workflow does not reference its native source: {workflow}")
+    if "pull_request:" not in workflow_text:
+        fail(f"{ident}: runtime evidence workflow is not a pull-request gate: {workflow}")
+    if "runs-on:" not in workflow_text:
+        fail(f"{ident}: runtime evidence workflow has no executable job: {workflow}")
+    if "permissions:" not in workflow_text or "contents: read" not in workflow_text:
+        fail(f"{ident}: runtime evidence workflow lost its read-only contents permission: {workflow}")
+    if not any(marker in workflow_text for marker in RUNTIME_EVIDENCE_MARKERS):
+        fail(f"{ident}: runtime evidence workflow lacks a recognized runtime/self-test marker: {workflow}")
+    return workflow
+
+
+def verify_source(capability: dict) -> str:
     ident = capability["id"]
     source = capability.get("source")
     stage = capability.get("stage")
@@ -150,6 +182,8 @@ def verify_source(capability: dict) -> None:
         if pathlib.PurePosixPath(companion).suffix.lower() not in ALLOWED_COMPANION_SUFFIXES:
             fail(f"{ident}: unexpected recovery/system companion type: {companion}")
         trusted_repo_file(companion)
+
+    return verify_evidence_workflow(capability)
 
 
 def verify_image_and_shell_integration(capabilities: list[dict]) -> None:
@@ -195,8 +229,9 @@ def main() -> int:
     verify_baseline_reference()
     data = load_manifest()
     caps = data["capabilities"]
+    evidence_workflows: set[str] = set()
     for capability in caps:
-        verify_source(capability)
+        evidence_workflows.add(verify_source(capability))
     verify_no_web_app_sources(caps)
     verify_image_and_shell_integration(caps)
     summary = {
@@ -208,6 +243,9 @@ def main() -> int:
         "nativeSourceOnly": True,
         "graphicalImageStagingVerified": True,
         "nativeShellReachabilityVerified": True,
+        "runtimeEvidenceCoverageVerified": True,
+        "runtimeEvidenceCapabilityCount": len(caps),
+        "runtimeEvidenceWorkflowCount": len(evidence_workflows),
         "photoStudioBaselineDepthMarkersVerified": True,
         "roadmapCompletionClaimed": False,
     }
