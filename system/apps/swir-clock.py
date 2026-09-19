@@ -362,7 +362,7 @@ class SwirClock(Gtk.Application):
         if self.alarm_load_error:
             self._set_status("Alarm storage is invalid; refusing to overwrite existing data"); return False
         try:
-            self.alarms = _write_alarm_store(self.alarm_state_path, alarms); return True
+            _write_alarm_store(self.alarm_state_path, alarms); return True
         except (OSError, PermissionError, ValueError) as exc:
             self._set_status(f"Could not save alarms: {exc}"); return False
 
@@ -375,7 +375,7 @@ class SwirClock(Gtk.Application):
         except ValueError as exc:
             self._set_status(str(exc)); return
         if not self._persist_candidate([*self.alarms, alarm]): return
-        self._append_alarm_row(self.alarms[-1]); self.label_entry.set_text(""); self._set_status(f"Added and saved {alarm.key} • {alarm.label}")
+        self.alarms.append(alarm); self._append_alarm_row(alarm); self.label_entry.set_text(""); self._set_status(f"Added and saved {alarm.key} • {alarm.label}")
 
     def _append_alarm_row(self, alarm: Alarm) -> None:
         assert self.alarm_list is not None
@@ -396,6 +396,7 @@ class SwirClock(Gtk.Application):
 
     def _remove_alarm(self, _button: Gtk.Button, alarm: Alarm, row: Gtk.Widget) -> None:
         if not self._persist_candidate([current for current in self.alarms if current is not alarm]): return
+        self.alarms.remove(alarm)
         if self.alarm_list is not None: self.alarm_list.remove(row)
         self._set_status("Alarm removed and saved")
 
