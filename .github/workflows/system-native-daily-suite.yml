@@ -52,6 +52,7 @@ jobs:
           assert data['nativeSourceOnly'] is True
           assert data['graphicalImageStagingVerified'] is True
           assert data['nativeShellReachabilityVerified'] is True
+          assert data['photoStudioBaselineDepthMarkersVerified'] is True
           assert data['roadmapCompletionClaimed'] is False
           PY
           bash -n system/session/provision-graphical-session.sh
