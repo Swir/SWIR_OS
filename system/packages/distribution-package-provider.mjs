@@ -1,6 +1,7 @@
 const SUPPORTED_MANAGERS = new Set(['apt', 'dnf', 'rpm-ostree', 'pacman', 'zypper']);
 const OPERATIONS = new Set(['install', 'update', 'remove']);
 const PACKAGE_NAME = /^[A-Za-z0-9][A-Za-z0-9+._:@-]{0,127}$/;
+const HEX64 = /^[a-f0-9]{64}$/;
 
 const FAMILY_PREFERENCE = Object.freeze({
   debian: ['apt'],
@@ -21,6 +22,25 @@ function uniqueStrings(values) {
 function validatePackageName(value) {
   if (typeof value !== 'string' || !PACKAGE_NAME.test(value)) throw new Error('invalid distribution package sourceRef');
   return value;
+}
+
+function validateVendorRepositoryBinding(trust) {
+  const hasUpstreamClass = Object.prototype.hasOwnProperty.call(trust, 'upstreamSourceClass');
+  const hasBindingDigest = Object.prototype.hasOwnProperty.call(trust, 'vendorRepositoryBindingDigest');
+  if (!hasUpstreamClass && !hasBindingDigest) return null;
+  if (trust.upstreamSourceClass !== 'vendor-official-repository') {
+    throw new Error('vendor repository binding requires vendor-official-repository upstream source class');
+  }
+  if (!HEX64.test(String(trust.vendorRepositoryBindingDigest || ''))) {
+    throw new Error('vendor repository binding digest must be a 64-character lowercase SHA-256 digest');
+  }
+  if (typeof trust.repositoryId !== 'string' || trust.repositoryId.length === 0) {
+    throw new Error('vendor repository binding requires an explicit repository id');
+  }
+  return Object.freeze({
+    upstreamSourceClass: 'vendor-official-repository',
+    bindingDigest: trust.vendorRepositoryBindingDigest
+  });
 }
 
 export function selectDistributionPackageManager(host = {}) {
@@ -47,7 +67,8 @@ export function validateDistributionPackageManifest(manifest, options = {}) {
   if (manifest.trust.sourceClass !== 'distribution-repository') throw new Error('distribution provider requires distribution-repository trust');
   if (manifest.trust.signatureRequired !== true) throw new Error('distribution repository signatures must be required');
   if (options.trustVerified === false) throw new Error('explicit trust verification failure');
-  return { packageName };
+  const vendorRepositoryBinding = validateVendorRepositoryBinding(manifest.trust);
+  return { packageName, vendorRepositoryBinding };
 }
 
 function commandPreview(manager, operation, packageName) {
@@ -87,7 +108,7 @@ function rollbackPolicy(manager, operation) {
 
 export function buildDistributionPackagePlan(operation, manifest, options = {}) {
   if (!OPERATIONS.has(operation)) throw new Error('unsupported package operation');
-  const { packageName } = validateDistributionPackageManifest(manifest, options);
+  const { packageName, vendorRepositoryBinding } = validateDistributionPackageManifest(manifest, options);
   const managerState = selectDistributionPackageManager(options.host);
   const manager = options.manager || managerState.selected;
   if (!manager || !SUPPORTED_MANAGERS.has(manager)) throw new Error('no supported distribution package manager available');
@@ -118,11 +139,16 @@ export function buildDistributionPackagePlan(operation, manifest, options = {}) 
     },
     source: {
       class: 'distribution-repository',
-      repositoryId
+      repositoryId,
+      ...(vendorRepositoryBinding ? { upstreamClass: vendorRepositoryBinding.upstreamSourceClass } : {})
     },
     trust: {
       signatureVerificationRequired: true,
-      arbitraryRepositoryUrlAllowed: false
+      arbitraryRepositoryUrlAllowed: false,
+      ...(vendorRepositoryBinding ? {
+        upstreamSourceClass: vendorRepositoryBinding.upstreamSourceClass,
+        vendorRepositoryBindingDigest: vendorRepositoryBinding.bindingDigest
+      } : {})
     },
     transaction: {
       requiresPrivilege: true,
@@ -197,6 +223,7 @@ export const DistributionPackageProviderPolicy = Object.freeze({
   autoExecutable: false,
   signatureVerificationRequired: true,
   arbitraryRepositoryUrls: false,
+  vendorRepositoryBindingPreserved: true,
   privilegedMutationRequiresPlan: true,
   privilegedMutationRequiresJournal: true
 });
