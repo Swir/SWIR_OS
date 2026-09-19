@@ -10,7 +10,7 @@ on:
       - 'system/session/swir-shell.py'
       - 'system/session/provision-graphical-session.sh'
       - 'system/SWIR-NATIVE-DAILY-SUITE-0.1.md'
-      - '.github/workflows/system-native-daily-suite.yml'
+      - '.github/workflows/system-native-*.yml'
   pull_request:
     paths:
       - 'SWIR-PRODUCT-BASELINE-1.0.md'
@@ -19,7 +19,7 @@ on:
       - 'system/session/swir-shell.py'
       - 'system/session/provision-graphical-session.sh'
       - 'system/SWIR-NATIVE-DAILY-SUITE-0.1.md'
-      - '.github/workflows/system-native-daily-suite.yml'
+      - '.github/workflows/system-native-*.yml'
   workflow_dispatch:
 
 permissions:
@@ -36,7 +36,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify baseline-to-native-suite integration
+      - name: Verify baseline-to-native-suite integration and runtime evidence coverage
         shell: bash
         run: |
           set -euo pipefail
@@ -52,6 +52,9 @@ jobs:
           assert data['nativeSourceOnly'] is True
           assert data['graphicalImageStagingVerified'] is True
           assert data['nativeShellReachabilityVerified'] is True
+          assert data['runtimeEvidenceCoverageVerified'] is True
+          assert data['runtimeEvidenceCapabilityCount'] == 19
+          assert data['runtimeEvidenceWorkflowCount'] == 14
           assert data['photoStudioBaselineDepthMarkersVerified'] is True
           assert data['roadmapCompletionClaimed'] is False
           PY
