@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=SWIR Text Editor
+Comment=Edit local UTF-8 text and code files with SWIR Text Editor
+Exec=/usr/local/bin/swir-text-editor %f
+TryExec=/usr/local/bin/swir-text-editor
+Icon=accessories-text-editor
+Terminal=false
+Categories=Utility;TextEditor;
+MimeType=text/plain;text/markdown;application/json;application/xml;text/x-python;text/x-shellscript;text/css;text/javascript;
+StartupNotify=true
+StartupWMClass=dev.swir.TextEditor
