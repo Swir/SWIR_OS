@@ -57,6 +57,8 @@ Failed or still-executing transactions are never promoted by the verifier, and t
 
 The caller first obtains `firmwareTransactions.plan(candidate)`, displays the plan, then invokes the parent driver transaction with the same context containing `plan`, the exact `confirmationDigest`, and the authenticated local `actorId` when available. The parent forwards that context to the firmware child; the child independently revalidates the plan and live metadata and owns the firmware journal.
 
+The native GTK4 Hardware & Driver Center also exposes the trusted LVFS candidate set as a bounded **Firmware updates** diagnostics tab. `driver-center-report.mjs` obtains the same read-only `fwupdmgr` inventory and adds only candidates that retain the `fwupd-lvfs` / `lvfs` source binding, no direct-download URL, and `mutationAuthorized:false`. The Python adapter revalidates that boundary and caps the visible set before the UI renders device name, current/target version, release ID, checksum count and reboot-review requirement. The graphical app intentionally exposes no firmware mutation button, does not accept a confirmation digest and cannot invoke the privileged update transaction; mutation remains a separate reviewed broker path.
+
 ## Verification
 
 `firmware-update-transaction-selftest.mjs` uses a fake read-only fwupd/LVFS inventory and fake command runner; it never flashes hardware. It verifies plan hashing, exact digest confirmation, stale-plan refusal, ambiguous-candidate refusal, safe argv construction, journal state/permissions, no automatic reboot/rollback and rejection of unsafe flags.
@@ -65,7 +67,7 @@ The caller first obtains `firmwareTransactions.plan(candidate)`, displays the pl
 
 `firmware-driver-mutation-integration.selftest.mjs` wires the real `DriverMutationTransactionService` to the real firmware transaction service with controlled fakes only at the fwupd inventory/command boundary. It verifies that the reviewed plan/digest reaches the child transaction, the parent records the child journal identity, and a reboot-required result propagates as a recovery-relevant parent state.
 
-`.github/workflows/system-firmware-update-transactions.yml` runs syntax, transaction, post-update verification and Driver Center integration self-tests on the normal GitHub runner and on Debian 13, the current System Edition base. These are contract tests only, not evidence of a real firmware flash.
+`.github/workflows/system-firmware-update-transactions.yml` runs syntax, transaction, post-update verification and Driver Center integration self-tests on the normal GitHub runner and on Debian 13, the current System Edition base. `.github/workflows/system-native-hardware-center.yml` additionally maps the real GTK4 Hardware Center on headless Wayland and asserts that firmware inventory remains read-only, rows stay bounded and the UI exposes no firmware mutation controls. These are contract/runtime tests only, not evidence of a real firmware flash.
 
 ## Required E2E before roadmap completion
 
