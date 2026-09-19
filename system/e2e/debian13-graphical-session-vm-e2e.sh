@@ -176,7 +176,7 @@ python3 - "$OUTDIR/session.json" "$OUTDIR/plymouth.json" <<'PY' || fail evidence
 import json, sys
 session = json.load(open(sys.argv[1], encoding='utf-8'))
 plymouth = json.load(open(sys.argv[2], encoding='utf-8'))
-assert session.get('schema') == 'swir.graphical-session-runtime-evidence/0.1'
+assert session.get('schema') == 'swir.graphical-session-runtime-evidence/0.2'
 assert session.get('passed') is True and session.get('user') == 'swir-e2e'
 assert session.get('logind', {}).get('service') == 'greetd'
 assert session.get('logind', {}).get('remote') == 'no'
@@ -190,12 +190,16 @@ assert shell.get('nativeToolkit') == 'gtk4' and shell.get('displayProtocol') == 
 assert shell.get('windowMapped') is True and shell.get('fullscreenRequested') is True
 assert shell.get('privilegedOperationsInShell') is False
 assert {'Files', 'Terminal', 'Settings', 'Screenshot', 'Install SWIR OS'} <= set(shell.get('launcherEntries', []))
+alarm_service = session.get('clockAlarmService', {})
+assert alarm_service.get('activeSessionOnly') is True
+assert alarm_service.get('privileged') is False
+assert isinstance(alarm_service.get('pid'), int) and alarm_service['pid'] > 0
 assert session.get('desktopShellClaim') is True
 assert plymouth.get('selectedTheme') == 'swir' and plymouth.get('activeDuringBoot') is True
 PY
 
 printf 'PASS\n' > "$STATUS"
-serial 'SWIR_GRAPHICAL_E2E_PASS plymouth=swir login=greetd pam=true wayland=weston desktop-shell=true toolkit=gtk4 screenshot=provisioned'
+serial 'SWIR_GRAPHICAL_E2E_PASS plymouth=swir login=greetd pam=true wayland=weston desktop-shell=true toolkit=gtk4 screenshot=provisioned alarm-service=active-unprivileged'
 sync
 systemctl --no-block poweroff
 GUEST
