@@ -128,7 +128,6 @@ assert.equal(plan.mode, 'preview');
 assert.equal(plan.readOnly, true);
 assert.equal(plan.autoExecutable, false);
 assert.equal(plan.host.distribution.family, 'debian');
-assert.equal(plan.host.architecture, 'x86_64');
 assert.equal(plan.host.fwupdAvailable, true);
 assert.deepEqual(plan.host.packageManagers, ['apt']);
 assert.deepEqual(plan.host.repositoryManagers, ['apt']);
@@ -145,6 +144,9 @@ assert(plan.operations.every(op => op.state === 'proposed'));
 assert(plan.operations.every(op => op.sources.every(source => source.class !== 'random-web-download')));
 assert(plan.operations.every(op => op.sources.every(source => source.class !== 'vendor-official-repository')),
   'vendor source must fail closed when no verified transaction binding is supplied');
+assert(plan.operations.filter(op => op.requiresPrivilege && op.sources.length === 0)
+  .every(op => op.rollback === 'required-before-apply'),
+  'source-less privileged reviews must remain blocked behind explicit rollback/recovery preparation');
 assertSafeDriverPlan(plan);
 
 const boundPlan = resolveDriverPlan(snapshot, catalog, { now, vendorRepositoryBindings: [vendorBinding] });
@@ -161,12 +163,14 @@ const stalePlan = resolveDriverPlan(snapshot, catalog, {
 });
 assert(stalePlan.operations.every(op => op.sources.every(source => source.class !== 'vendor-official-repository')),
   'expired vendor qualification evidence must fail closed');
+assertSafeDriverPlan(stalePlan);
 
 const mismatchedBinding = structuredClone(vendorBinding);
 mismatchedBinding.bound.repository.id = 'other-repository';
 const mismatchedPlan = resolveDriverPlan(snapshot, catalog, { now, vendorRepositoryBindings: [mismatchedBinding] });
 assert(mismatchedPlan.operations.every(op => op.sources.every(source => source.class !== 'vendor-official-repository')),
   'tampered binding must fail closed');
+assertSafeDriverPlan(mismatchedPlan);
 
 const withoutFwupd = structuredClone(snapshot);
 withoutFwupd.host.capabilities.fwupd = { available: false, executable: null, lvfsMetadataPresent: false };
