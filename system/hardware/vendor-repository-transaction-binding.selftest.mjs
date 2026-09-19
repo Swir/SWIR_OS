@@ -4,6 +4,7 @@ import {
   assertVendorRepositoryTransactionBinding,
   VendorRepositoryTransactionBindingPolicy
 } from './vendor-repository-transaction-binding.mjs';
+import { buildDistributionPackagePlan } from '../packages/distribution-package-provider.mjs';
 
 const fingerprint = '02182E60104FCDC26EAE1B8597A5D4CB8793F200';
 const review = {
@@ -64,6 +65,31 @@ assert.equal(first.packagePlanInputs[0].trust.upstreamSourceClass, 'vendor-offic
 assert.equal(first.mutationAuthorized, false);
 assert.equal(first.repositoryEnablementAuthorized, false);
 assert.equal(bind().bindingDigest, first.bindingDigest, 'binding digest must be deterministic');
+
+const providerPlan = buildDistributionPackagePlan('install', first.packagePlanInputs[0], {
+  host: {
+    distribution: { id: 'debian', family: 'debian', versionId: '13', architecture: 'x86_64' },
+    capabilities: { packageManagers: ['apt'] }
+  },
+  allowlistedRepositories: [review.repositoryId]
+});
+assert.equal(providerPlan.schema, 'swir.system-package-plan/0.1');
+assert.equal(providerPlan.provider, 'swir.package.system');
+assert.equal(providerPlan.mode, 'preview');
+assert.equal(providerPlan.readOnly, true);
+assert.equal(providerPlan.autoExecutable, false);
+assert.equal(providerPlan.source.repositoryId, review.repositoryId);
+assert.equal(providerPlan.transaction.requiresPrivilege, true);
+assert.equal(providerPlan.transaction.journalRequired, true);
+assert.deepEqual(providerPlan.commandPreview, ['apt-get', 'install', '--', 'nvidia-open']);
+
+assert.throws(() => buildDistributionPackagePlan('install', first.packagePlanInputs[0], {
+  host: {
+    distribution: { id: 'debian', family: 'debian', versionId: '13', architecture: 'x86_64' },
+    capabilities: { packageManagers: ['apt'] }
+  },
+  allowlistedRepositories: ['debian-main']
+}), /repository is not allowlisted/, 'existing provider must reject a vendor repository absent from its trusted repository boundary');
 
 const changedScope = structuredClone(review);
 changedScope.suites = ['stable'];
