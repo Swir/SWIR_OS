@@ -4,6 +4,8 @@ import { FileFirmwareUpdateJournal } from './firmware-update-transaction-service
 const RESULT_SCHEMA = 'swir.firmware-update-verification/0.1';
 const SAFE_SOURCE_STATES = new Set(['committed', 'staged-reboot-required', 'verified']);
 const TRANSACTION_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,159}$/;
+const FWUPD_UPDATE_SUCCESS = 2;
+const FWUPD_UPDATE_FAILED = 3;
 
 function fail(code, message) {
   const error = new Error(message);
@@ -24,18 +26,43 @@ function clone(value) {
   return value == null ? value : JSON.parse(JSON.stringify(value));
 }
 
-function assessmentFor(entry, device, checkedAt) {
+function latestHistory(history, deviceId) {
+  const matches = (Array.isArray(history) ? history : [])
+    .filter(item => item?.deviceId === deviceId)
+    .map((item, index) => ({ item, index }));
+  if (matches.length === 0) return null;
+  matches.sort((a, b) => {
+    const aModified = Number.isFinite(a.item?.modified) ? a.item.modified : -1;
+    const bModified = Number.isFinite(b.item?.modified) ? b.item.modified : -1;
+    if (aModified !== bModified) return bModified - aModified;
+    return a.index - b.index;
+  });
+  return matches[0].item;
+}
+
+function assessmentFor(entry, device, history, checkedAt) {
   const targetVersion = clean(entry?.plan?.binding?.targetVersion, 128) || null;
   const currentVersion = clean(device?.version, 128) || null;
-  const updateError = clean(device?.updateError, 1024) || null;
+  const deviceUpdateError = clean(device?.updateError, 1024) || null;
+  const historyUpdateError = clean(history?.updateError, 1024) || null;
   const devicePresent = Boolean(device);
+  const historyPresent = Boolean(history);
+  const requiresReboot = entry?.plan?.binding?.requiresReboot === true;
   const versionMatches = devicePresent && targetVersion !== null && currentVersion === targetVersion;
-  const verified = versionMatches && updateError === null;
+  const historyUpdateState = Number.isInteger(history?.updateState) ? history.updateState : null;
+  const historyFailure = historyPresent && (historyUpdateState === FWUPD_UPDATE_FAILED || historyUpdateError !== null);
+  const historySuccess = historyPresent && historyUpdateState === FWUPD_UPDATE_SUCCESS && historyUpdateError === null;
+  const verified = versionMatches
+    && deviceUpdateError === null
+    && !historyFailure
+    && (!requiresReboot || historySuccess);
 
   let status;
   if (verified) status = 'verified';
   else if (!devicePresent) status = 'device-not-present';
-  else if (entry.state === 'staged-reboot-required' && updateError === null) status = 'pending-reboot-or-power-cycle';
+  else if (deviceUpdateError !== null || historyFailure) status = 'needs-review';
+  else if (versionMatches && requiresReboot && !historySuccess) status = 'pending-history-verification';
+  else if (entry.state === 'staged-reboot-required') status = 'pending-reboot-or-power-cycle';
   else status = 'needs-review';
 
   return Object.freeze({
@@ -45,12 +72,16 @@ function assessmentFor(entry, device, checkedAt) {
     status,
     verified,
     devicePresent,
+    historyPresent,
+    historyRequired: requiresReboot,
     deviceId: entry?.plan?.binding?.deviceId ?? null,
     fromVersion: entry?.plan?.binding?.currentVersion ?? null,
     targetVersion,
     currentVersion,
-    updateState: Number.isInteger(device?.updateState) ? device.updateState : null,
-    updateError,
+    deviceUpdateState: Number.isInteger(device?.updateState) ? device.updateState : null,
+    deviceUpdateError,
+    historyUpdateState,
+    historyUpdateError,
     planDigest: entry.planDigest,
     sourceTransactionState: entry.state,
     automaticRollback: false,
@@ -92,9 +123,10 @@ export class FirmwareUpdateVerificationService {
     const matches = (Array.isArray(inventory.devices) ? inventory.devices : [])
       .filter(device => device?.deviceId === entry.plan.binding.deviceId);
     assert(matches.length <= 1, 'FIRMWARE_VERIFY_DEVICE_AMBIGUOUS', 'firmware verification found duplicate device identities');
+    const history = latestHistory(inventory.history, entry.plan.binding.deviceId);
 
     const checkedAt = this.#clock();
-    const result = assessmentFor(entry, matches[0] ?? null, checkedAt);
+    const result = assessmentFor(entry, matches[0] ?? null, history, checkedAt);
     const updated = {
       ...clone(entry),
       state: result.verified ? 'verified' : entry.state,
@@ -105,7 +137,7 @@ export class FirmwareUpdateVerificationService {
         automaticRollback: false,
         operatorReviewRequired: !result.verified,
         note: result.verified
-          ? 'Installed firmware version matches the reviewed target. This is transaction verification only and does not prove physical-hardware qualification or a required reboot/power-cycle.'
+          ? 'Installed firmware version and required fwupd history evidence match the reviewed target. This is transaction verification only and does not prove physical-hardware qualification or a required reboot/power-cycle.'
           : 'Firmware state is not yet verified. Do not retry, downgrade or force a flash automatically; follow device-specific operator review and recovery guidance.'
       }
     };
@@ -121,7 +153,9 @@ export const FirmwareUpdateVerificationPolicy = Object.freeze({
   trustedFwupdInventoryRequired: true,
   exactDeviceIdentityRequired: true,
   targetVersionMatchRequired: true,
-  updateErrorMustBeClear: true,
+  getDevicesAloneSufficientAfterReboot: false,
+  historyRequiredForRebootedUpdate: true,
+  historyFailureBlocksVerification: true,
   failedTransactionAutoPromotion: false,
   automaticRetry: false,
   automaticRollback: false,
