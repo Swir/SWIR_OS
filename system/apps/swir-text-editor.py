@@ -7,6 +7,7 @@ import json
 import os
 import pathlib
 import stat
+import sys
 import tempfile
 from dataclasses import dataclass
 from typing import Final
@@ -287,4 +288,4 @@ class SwirTextEditor(Gtk.Application):
 
 
 if __name__ == "__main__":
-    raise SystemExit(SwirTextEditor().run())
+    raise SystemExit(SwirTextEditor().run(sys.argv))
