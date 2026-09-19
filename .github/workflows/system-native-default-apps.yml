@@ -59,14 +59,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            python3-gi gir1.2-gtk-4.0 desktop-file-utils
           python3 -m py_compile \
             system/apps/swir-settings.py \
             system/apps/swir-text-editor.py \
             system/apps/swir-files.py
           python3 system/apps/swir-text-editor.py --self-test
           python3 system/apps/swir-files.py --archive-self-test
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends desktop-file-utils
           for desktop in \
             swir-browser.desktop \
             swir-player.desktop \
