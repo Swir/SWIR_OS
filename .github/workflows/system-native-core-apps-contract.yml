@@ -54,6 +54,7 @@ jobs:
           grep -F 'mutationControlsExposed": False' system/apps/swir-network-center.py >/dev/null
           grep -F 'ownerOnlyNotesFile' system/apps/swir-notes.py >/dev/null
           grep -F 'ownerOnlySettingsFile' system/apps/swir-settings.py >/dev/null
+          grep -F 'defaultAppCategoryCount' system/apps/swir-settings.py >/dev/null
           grep -F 'processRowsBounded' system/apps/swir-system-monitor.py >/dev/null
           grep -F 'shellCommandInterpolation": False' system/apps/swir-terminal.py >/dev/null
           grep -F 'Terminal", (("/usr/local/bin/swir-terminal",)' system/session/swir-shell.py >/dev/null
@@ -149,11 +150,14 @@ jobs:
           assert notes_path.read_text(encoding='utf-8') == 'SWIR Notes E2E\n'
           assert stat.S_IMODE(notes_path.stat().st_mode) == 0o600
 
-          assert settings['schema'] == 'swir.native-settings-runtime-evidence/0.1'
+          assert settings['schema'] == 'swir.native-settings-runtime-evidence/0.2'
           assert settings['passed'] is True and settings['applicationId'] == 'dev.swir.Settings'
           assert settings['nativeToolkit'] == 'gtk4' and settings['displayProtocol'] == 'wayland'
           assert settings['windowMapped'] is True and settings['privilegedOperations'] is False
           assert settings['ownerOnlySettingsFile'] is True and settings['settingsSchema'] == 'swir.user-settings/0.1'
+          assert settings['defaultAppCategoryCount'] == 4
+          assert settings['defaultAppCategories'] == ['browser', 'media', 'image', 'pdf']
+          assert settings['defaultAppsMutationOnExplicitActionOnly'] is True
           assert stored['schema'] == 'swir.user-settings/0.1'
           assert stat.S_IMODE(pathlib.Path(sys.argv[7]).stat().st_mode) == 0o600
 

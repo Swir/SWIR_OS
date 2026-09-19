@@ -4,7 +4,7 @@
   "sourceOfTruth": "SWIR-PRODUCT-BASELINE-1.0.md#6-essential-utilities",
   "capabilities": [
     {"id":"files","source":"system/apps/swir-files.py","stage":"/usr/local/bin/swir-files","launcher":"Files","evidenceWorkflow":".github/workflows/system-native-core-apps-contract.yml"},
-    {"id":"settings","source":"system/apps/swir-settings.py","stage":"/usr/local/bin/swir-settings","launcher":"Settings","evidenceWorkflow":".github/workflows/system-native-core-apps-contract.yml"},
+    {"id":"settings","source":"system/apps/swir-settings.py","stage":"/usr/local/bin/swir-settings","launcher":"Settings","evidenceWorkflow":".github/workflows/system-native-default-apps.yml"},
     {"id":"terminal","source":"system/apps/swir-terminal.py","stage":"/usr/local/bin/swir-terminal","launcher":"Terminal","evidenceWorkflow":".github/workflows/system-native-core-apps-contract.yml"},
     {"id":"software","source":"system/apps/swir-software-center.py","stage":"/usr/local/bin/swir-software-center","launcher":"Software","evidenceWorkflow":".github/workflows/system-native-software-update-centers.yml"},
     {"id":"updates","source":"system/apps/swir-update-center.py","stage":"/usr/local/bin/swir-update-center","launcher":"Updates","evidenceWorkflow":".github/workflows/system-native-software-update-centers.yml"},
