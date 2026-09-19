@@ -35,6 +35,7 @@ const inventory = {
   trustedRemoteId: 'lvfs',
   devices: [],
   candidates: [candidate],
+  history: [],
   ignoredNonLvfsCandidates: 0,
   probe: { available: true, trustedBinary: true }
 };
