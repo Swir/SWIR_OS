@@ -22,8 +22,7 @@ from core_runtime import DEFAULT_THEME_ID, UserSettingsStore  # noqa: E402
 from theme_runtime import ThemePolicyError, ThemeStore  # noqa: E402
 
 APP_ID: Final = "dev.swir.Settings"
-EVIDENCE_SCHEMA: Final = "swir.native-settings-runtime-evidence/0.1"
-BROWSER_HANDLER_TYPES: Final = ("x-scheme-handler/http", "x-scheme-handler/https", "text/html")
+EVIDENCE_SCHEMA: Final = "swir.native-settings-runtime-evidence/0.2"
 LANGUAGES: Final = (
     ("English", "en"),
     ("Polski", "pl-PL"),
@@ -41,6 +40,24 @@ LANGUAGES: Final = (
     ("日本語", "ja"),
     ("简体中文", "zh-CN"),
 )
+
+# Product Baseline 1.0 requires Default Apps to grow beyond the browser-only
+# foundation. Keep these categories explicit and conservative: candidates must
+# advertise every canonical handler type in their category before Settings will
+# offer them. This prevents a partial default from being presented as complete.
+DEFAULT_APP_CATEGORIES: Final = (
+    ("browser", "Web browser", ("x-scheme-handler/http", "x-scheme-handler/https", "text/html")),
+    ("media", "Media player", ("audio/mpeg", "video/mp4")),
+    ("image", "Image viewer / editor", ("image/png", "image/jpeg")),
+    ("pdf", "PDF viewer", ("application/pdf",)),
+)
+DEFAULT_FIRST_PARTY_IDS: Final = {
+    "browser": "swir-browser.desktop",
+    "media": "swir-player.desktop",
+    "image": "swir-photo-studio.desktop",
+    "pdf": "swir-pdf-viewer.desktop",
+}
+BROWSER_HANDLER_TYPES: Final = DEFAULT_APP_CATEGORIES[0][2]
 
 CSS = b"""
 window.swir-app { background: #02050A; color: #F4FAFF; }
@@ -61,8 +78,8 @@ class SwirSettings(Gtk.Application):
         self.language: Gtk.ComboBoxText | None = None
         self.appearance: Gtk.ComboBoxText | None = None
         self.clock24h: Gtk.CheckButton | None = None
-        self.browser_combo: Gtk.ComboBoxText | None = None
-        self.browser_apps: dict[str, Gio.AppInfo] = {}
+        self.default_combos: dict[str, Gtk.ComboBoxText] = {}
+        self.default_apps: dict[str, dict[str, Gio.AppInfo]] = {}
         self.theme_combo: Gtk.ComboBoxText | None = None
         self.theme_store = ThemeStore()
         self.status: Gtk.Label | None = None
@@ -70,7 +87,10 @@ class SwirSettings(Gtk.Application):
         self.e2e = os.environ.get("SWIR_APP_E2E", "0") == "1"
         self.evidence_path = os.environ.get("SWIR_APP_EVIDENCE_PATH", "")
         self.theme_e2e_package = os.environ.get("SWIR_THEME_E2E_PACKAGE", "")
+        self.default_apps_e2e = os.environ.get("SWIR_DEFAULT_APPS_E2E", "0") == "1"
         self.theme_import_verified = False
+        self.default_apps_mutation_verified = False
+        self.default_apps_verified_ids: dict[str, str] = {}
 
     def do_startup(self) -> None:
         Gtk.Application.do_startup(self)
@@ -91,29 +111,88 @@ class SwirSettings(Gtk.Application):
         row.append(widget)
         return row
 
-    def _load_browser_apps(self) -> None:
-        assert self.browser_combo is not None
-        self.browser_apps.clear()
-        self.browser_combo.remove_all()
-        default = Gio.AppInfo.get_default_for_uri_scheme("http")
-        default_id = default.get_id() if default is not None else None
-        active_key: str | None = None
-        apps = sorted(Gio.AppInfo.get_all_for_type("x-scheme-handler/http"), key=lambda app: app.get_display_name().casefold())
-        seen: set[str] = set()
-        for index, app in enumerate(apps):
-            identity = app.get_id() or f"{app.get_name()}:{index}"
-            if identity in seen:
-                continue
-            seen.add(identity)
-            key = f"browser-{index}"
-            self.browser_apps[key] = app
-            self.browser_combo.append(key, app.get_display_name())
-            if default_id and app.get_id() == default_id:
-                active_key = key
-        if active_key is not None:
-            self.browser_combo.set_active_id(active_key)
-        elif self.browser_apps:
-            self.browser_combo.set_active(0)
+    @staticmethod
+    def _category_types(category_id: str) -> tuple[str, ...]:
+        for item_id, _label, handler_types in DEFAULT_APP_CATEGORIES:
+            if item_id == category_id:
+                return handler_types
+        raise KeyError(category_id)
+
+    @staticmethod
+    def _apps_for_all_types(handler_types: tuple[str, ...]) -> dict[str, Gio.AppInfo]:
+        """Return only applications advertising every canonical type."""
+        per_type: list[dict[str, Gio.AppInfo]] = []
+        for content_type in handler_types:
+            apps: dict[str, Gio.AppInfo] = {}
+            for app in Gio.AppInfo.get_all_for_type(content_type):
+                identity = app.get_id()
+                if identity:
+                    apps.setdefault(identity, app)
+            per_type.append(apps)
+        if not per_type:
+            return {}
+        shared = set(per_type[0])
+        for apps in per_type[1:]:
+            shared.intersection_update(apps)
+        return {identity: per_type[0][identity] for identity in sorted(shared)}
+
+    def _load_default_category(self, category_id: str) -> None:
+        combo = self.default_combos[category_id]
+        combo.remove_all()
+        apps = self._apps_for_all_types(self._category_types(category_id))
+        self.default_apps[category_id] = apps
+        for identity, app in sorted(apps.items(), key=lambda item: item[1].get_display_name().casefold()):
+            combo.append(identity, app.get_display_name())
+
+        primary_type = self._category_types(category_id)[0]
+        current = Gio.AppInfo.get_default_for_type(primary_type, False)
+        current_id = current.get_id() if current is not None else None
+        if current_id and current_id in apps:
+            combo.set_active_id(current_id)
+        elif apps:
+            combo.set_active(0)
+
+    def _load_default_apps(self) -> None:
+        for category_id, _label, _types in DEFAULT_APP_CATEGORIES:
+            self._load_default_category(category_id)
+
+    @staticmethod
+    def _is_default_for_all(app: Gio.AppInfo, handler_types: tuple[str, ...]) -> bool:
+        identity = app.get_id()
+        if not identity:
+            return False
+        for content_type in handler_types:
+            current = Gio.AppInfo.get_default_for_type(content_type, False)
+            if current is None or current.get_id() != identity:
+                return False
+        return True
+
+    def _apply_default_app(self, category_id: str, app: Gio.AppInfo, *, update_status: bool = True) -> bool:
+        handler_types = self._category_types(category_id)
+        failed: list[str] = []
+        for content_type in handler_types:
+            try:
+                if not app.set_as_default_for_type(content_type):
+                    failed.append(content_type)
+            except GLib.Error:
+                failed.append(content_type)
+        verified = not failed and self._is_default_for_all(app, handler_types)
+        if update_status and self.status is not None:
+            if verified:
+                self.status.set_text(f"Default {category_id} app changed to {app.get_display_name()}.")
+            else:
+                self.status.set_text(f"Could not update every {category_id} handler; no system privilege was used.")
+        return verified
+
+    def _apply_default_clicked(self, _button: Gtk.Button, category_id: str) -> None:
+        combo = self.default_combos[category_id]
+        identity = combo.get_active_id()
+        app = self.default_apps.get(category_id, {}).get(identity or "")
+        if app is None:
+            if self.status is not None:
+                self.status.set_text(f"No compatible {category_id} handler is available.")
+            return
+        self._apply_default_app(category_id, app)
 
     def _load_themes(self, selected_id: str) -> None:
         assert self.theme_combo is not None
@@ -131,7 +210,7 @@ class SwirSettings(Gtk.Application):
         settings = self.store.load()
         window = Gtk.ApplicationWindow(application=self)
         window.set_title("SWIR Settings")
-        window.set_default_size(780, 760)
+        window.set_default_size(820, 820)
         window.add_css_class("swir-app")
         self.window = window
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -226,30 +305,33 @@ class SwirSettings(Gtk.Application):
         defaults_title.add_css_class("swir-section")
         defaults_title.set_xalign(0)
         defaults_card.append(defaults_title)
-        self.browser_combo = Gtk.ComboBoxText()
-        self.browser_combo.set_hexpand(True)
-        self._load_browser_apps()
-        browser_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        browser_label = Gtk.Label(label="Web browser")
-        browser_label.set_xalign(0)
-        browser_label.set_hexpand(True)
-        browser_row.append(browser_label)
-        browser_row.append(self.browser_combo)
-        apply_browser = Gtk.Button(label="Apply")
-        apply_browser.add_css_class("swir-button")
-        apply_browser.connect("clicked", self._apply_browser_default)
-        browser_row.append(apply_browser)
-        defaults_card.append(browser_row)
         defaults_note = Gtk.Label(
             label=(
-                "Changes only standard HTTP, HTTPS and HTML handlers for your user. "
-                "SWIR Browser stays installed even when another browser is selected."
+                "Choose per-user handlers from installed applications that advertise every canonical type for the category. "
+                "Changes use the desktop application registry only; no root access, package mutation or application removal is performed."
             ),
             wrap=True,
         )
         defaults_note.add_css_class("swir-muted")
         defaults_note.set_xalign(0)
         defaults_card.append(defaults_note)
+
+        for category_id, label, _handler_types in DEFAULT_APP_CATEGORIES:
+            combo = Gtk.ComboBoxText()
+            combo.set_hexpand(True)
+            self.default_combos[category_id] = combo
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+            row_label = Gtk.Label(label=label)
+            row_label.set_xalign(0)
+            row_label.set_hexpand(True)
+            row.append(row_label)
+            row.append(combo)
+            apply_button = Gtk.Button(label="Apply")
+            apply_button.add_css_class("swir-button")
+            apply_button.connect("clicked", self._apply_default_clicked, category_id)
+            row.append(apply_button)
+            defaults_card.append(row)
+        self._load_default_apps()
         content.append(defaults_card)
 
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
@@ -310,25 +392,6 @@ class SwirSettings(Gtk.Application):
         if self.status is not None:
             self.status.set_text("SWIR Default selected. Save to activate it.")
 
-    def _apply_browser_default(self, _button: Gtk.Button | None = None) -> bool:
-        assert self.browser_combo is not None
-        key = self.browser_combo.get_active_id()
-        app = self.browser_apps.get(key or "")
-        if app is None:
-            if self.status is not None:
-                self.status.set_text("No browser handler is available.")
-            return False
-        failed: list[str] = []
-        for content_type in BROWSER_HANDLER_TYPES:
-            try:
-                if not app.set_as_default_for_type(content_type):
-                    failed.append(content_type)
-            except GLib.Error:
-                failed.append(content_type)
-        if self.status is not None:
-            self.status.set_text("Could not update every browser handler." if failed else f"Default browser changed to {app.get_display_name()}.")
-        return not failed
-
     def _payload(self) -> dict[str, object]:
         assert self.language is not None and self.appearance is not None and self.clock24h is not None and self.theme_combo is not None
         return {
@@ -352,6 +415,20 @@ class SwirSettings(Gtk.Application):
         self._load_themes(str(theme["id"]))
         self.theme_import_verified = True
 
+    def _verify_default_apps_e2e(self) -> None:
+        if not self.default_apps_e2e:
+            return
+        verified: dict[str, str] = {}
+        for category_id, expected_id in DEFAULT_FIRST_PARTY_IDS.items():
+            app = self.default_apps.get(category_id, {}).get(expected_id)
+            if app is None:
+                raise RuntimeError(f"missing first-party Default Apps candidate for {category_id}: {expected_id}")
+            if not self._apply_default_app(category_id, app, update_status=False):
+                raise RuntimeError(f"failed to set and verify first-party default for {category_id}")
+            verified[category_id] = expected_id
+        self.default_apps_verified_ids = verified
+        self.default_apps_mutation_verified = len(verified) == len(DEFAULT_APP_CATEGORIES)
+
     def _on_mapped(self, _window: Gtk.Window) -> None:
         if not self.e2e or not self.evidence_path:
             return
@@ -360,8 +437,10 @@ class SwirSettings(Gtk.Application):
         if not runtime_text or path.parent.resolve() != pathlib.Path(runtime_text).resolve():
             raise RuntimeError("refusing SWIR Settings evidence path outside XDG_RUNTIME_DIR")
         self._prepare_theme_e2e()
+        self._verify_default_apps_e2e()
         saved = self._save()
         installed_ids = [str(theme["id"]) for theme in self.theme_store.list_themes()]
+        candidate_counts = {category_id: len(self.default_apps.get(category_id, {})) for category_id, _label, _types in DEFAULT_APP_CATEGORIES}
         payload = {
             "schema": EVIDENCE_SCHEMA,
             "passed": True,
@@ -375,7 +454,16 @@ class SwirSettings(Gtk.Application):
             "language": saved["language"],
             "clock24h": saved["clock24h"],
             "defaultAppsPanel": True,
-            "browserHandlerCount": len(self.browser_apps),
+            "defaultAppCategoryCount": len(DEFAULT_APP_CATEGORIES),
+            "defaultAppCategories": [category_id for category_id, _label, _types in DEFAULT_APP_CATEGORIES],
+            "defaultAppHandlerTypes": {category_id: list(handler_types) for category_id, _label, handler_types in DEFAULT_APP_CATEGORIES},
+            "defaultAppCandidateCounts": candidate_counts,
+            "defaultAppsMutationOnExplicitActionOnly": True,
+            "defaultAppsMutationVerified": self.default_apps_mutation_verified,
+            "defaultAppsVerifiedDesktopIds": self.default_apps_verified_ids,
+            # Backward-compatible browser evidence fields retained for the
+            # existing core-apps contract while the dedicated gate is adopted.
+            "browserHandlerCount": candidate_counts.get("browser", 0),
             "browserDefaultMutationOnExplicitActionOnly": True,
             "browserHandlerTypes": list(BROWSER_HANDLER_TYPES),
             "themeFramework": True,
