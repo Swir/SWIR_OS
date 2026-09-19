@@ -26,7 +26,16 @@ const candidate = Object.freeze({
   mutationAuthorized: false
 });
 
-function inventory({ version = '1.0.0', updateError = null, includeDevice = true, includeCandidate = true } = {}) {
+function inventory({
+  version = '1.0.0',
+  updateError = null,
+  includeDevice = true,
+  includeCandidate = true,
+  includeHistory = false,
+  historyState = 2,
+  historyError = null,
+  historyModified = 1789800000
+} = {}) {
   return {
     schema: 'swir.fwupd-lvfs-inventory/0.1',
     available: true,
@@ -42,6 +51,14 @@ function inventory({ version = '1.0.0', updateError = null, includeDevice = true
       updateError
     }] : [],
     candidates: includeCandidate ? [candidate] : [],
+    history: includeHistory ? [{
+      deviceId: candidate.deviceId,
+      name: candidate.deviceName,
+      version,
+      updateState: historyState,
+      updateError: historyError,
+      modified: historyModified
+    }] : [],
     ignoredNonLvfsCandidates: 0,
     probe: { available: true, trustedBinary: true }
   };
@@ -77,7 +94,7 @@ const verifiedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'swir-fwupd-verify-ok
 const verifiedFixture = await createStagedTransaction({
   root: verifiedRoot,
   transactionId: 'fwtx-verify-0001',
-  verificationInventory: inventory({ version: '1.2.0', includeCandidate: false })
+  verificationInventory: inventory({ version: '1.2.0', includeCandidate: false, includeHistory: true, historyState: 2 })
 });
 const verifier = new FirmwareUpdateVerificationService({
   inventoryService: verifiedFixture.inventoryService,
@@ -90,6 +107,8 @@ assert.equal(verified.status, 'verified');
 assert.equal(verified.verified, true);
 assert.equal(verified.currentVersion, '1.2.0');
 assert.equal(verified.targetVersion, '1.2.0');
+assert.equal(verified.historyUpdateState, 2);
+assert.equal(verified.historyUpdateError, null);
 assert.equal(verified.physicalHardwareQualification, false);
 assert.equal(verified.rebootOrPowerCycleProven, false);
 const verifiedJournal = verifiedFixture.journal.read('fwtx-verify-0001');
@@ -101,7 +120,7 @@ const pendingRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'swir-fwupd-verify-pen
 const pendingFixture = await createStagedTransaction({
   root: pendingRoot,
   transactionId: 'fwtx-pending-0001',
-  verificationInventory: inventory({ version: '1.0.0', includeCandidate: false })
+  verificationInventory: inventory({ version: '1.0.0', includeCandidate: false, includeHistory: true, historyState: 2 })
 });
 const pendingVerifier = new FirmwareUpdateVerificationService({
   inventoryService: pendingFixture.inventoryService,
@@ -114,27 +133,57 @@ assert.equal(pending.verified, false);
 assert.equal(pending.operatorReviewRequired, true);
 assert.equal(pendingFixture.journal.read('fwtx-pending-0001').state, 'staged-reboot-required');
 
+const historyMissingRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'swir-fwupd-verify-history-'));
+const historyMissingFixture = await createStagedTransaction({
+  root: historyMissingRoot,
+  transactionId: 'fwtx-history-0001',
+  verificationInventory: inventory({ version: '1.2.0', includeCandidate: false, includeHistory: false })
+});
+const historyMissingVerifier = new FirmwareUpdateVerificationService({
+  inventoryService: historyMissingFixture.inventoryService,
+  journal: historyMissingFixture.journal,
+  clock: () => '2026-09-19T09:33:00.000Z'
+});
+const historyPending = await historyMissingVerifier.verify('fwtx-history-0001');
+assert.equal(historyPending.status, 'pending-history-verification');
+assert.equal(historyPending.verified, false);
+assert.equal(historyPending.historyRequired, true);
+assert.equal(historyPending.historyPresent, false);
+
 const errorRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'swir-fwupd-verify-error-'));
 const errorFixture = await createStagedTransaction({
   root: errorRoot,
   transactionId: 'fwtx-review-0001',
-  verificationInventory: inventory({ version: '1.2.0', updateError: 'device reported a firmware error', includeCandidate: false })
+  verificationInventory: inventory({
+    version: '1.2.0',
+    updateError: null,
+    includeCandidate: false,
+    includeHistory: true,
+    historyState: 3,
+    historyError: 'failed to run update on reboot: expected 1.2.0 and got 1.0.0'
+  })
 });
 const errorVerifier = new FirmwareUpdateVerificationService({
   inventoryService: errorFixture.inventoryService,
   journal: errorFixture.journal,
-  clock: () => '2026-09-19T09:33:00.000Z'
+  clock: () => '2026-09-19T09:34:00.000Z'
 });
 const review = await errorVerifier.verify('fwtx-review-0001');
 assert.equal(review.status, 'needs-review');
 assert.equal(review.verified, false);
+assert.equal(review.deviceUpdateError, null, 'device view intentionally simulates fwupd get-devices hiding the failure');
+assert.equal(review.historyUpdateState, 3);
+assert.match(review.historyUpdateError, /failed to run update on reboot/);
 assert.equal(errorFixture.journal.read('fwtx-review-0001').state, 'staged-reboot-required');
 
 assert.equal(FirmwareUpdateVerificationPolicy.readOnlyHardwareInspection, true);
+assert.equal(FirmwareUpdateVerificationPolicy.getDevicesAloneSufficientAfterReboot, false);
+assert.equal(FirmwareUpdateVerificationPolicy.historyRequiredForRebootedUpdate, true);
+assert.equal(FirmwareUpdateVerificationPolicy.historyFailureBlocksVerification, true);
 assert.equal(FirmwareUpdateVerificationPolicy.failedTransactionAutoPromotion, false);
 assert.equal(FirmwareUpdateVerificationPolicy.automaticRetry, false);
 assert.equal(FirmwareUpdateVerificationPolicy.automaticRollback, false);
 assert.equal(FirmwareUpdateVerificationPolicy.physicalHardwareQualification, false);
 
-for (const root of [verifiedRoot, pendingRoot, errorRoot]) fs.rmSync(root, { recursive: true, force: true });
+for (const root of [verifiedRoot, pendingRoot, historyMissingRoot, errorRoot]) fs.rmSync(root, { recursive: true, force: true });
 console.log('firmware update verification self-test: ok');
