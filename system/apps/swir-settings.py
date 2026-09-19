@@ -41,24 +41,20 @@ LANGUAGES: Final = (
     ("简体中文", "zh-CN"),
 )
 
-# Product Baseline 1.0 requires Default Apps for browser, media, image, PDF,
-# text/code and archives. Candidates are intentionally conservative: an app is
-# offered only when it advertises every canonical handler type in its category.
+# These four categories already have first-party desktop registrations staged
+# into the System image. Text/code and archive remain explicit follow-up work
+# until their handlers are staged and verified on the final image as well.
 DEFAULT_APP_CATEGORIES: Final = (
     ("browser", "Web browser", ("x-scheme-handler/http", "x-scheme-handler/https", "text/html")),
     ("media", "Media player", ("audio/mpeg", "video/mp4")),
     ("image", "Image viewer / editor", ("image/png", "image/jpeg")),
     ("pdf", "PDF viewer", ("application/pdf",)),
-    ("text", "Text / code editor", ("text/plain", "text/markdown")),
-    ("archive", "Archive handler", ("application/zip", "application/x-tar")),
 )
 DEFAULT_FIRST_PARTY_IDS: Final = {
     "browser": "swir-browser.desktop",
     "media": "swir-player.desktop",
     "image": "swir-photo-studio.desktop",
     "pdf": "swir-pdf-viewer.desktop",
-    "text": "swir-notes.desktop",
-    "archive": "swir-archive-manager.desktop",
 }
 BROWSER_HANDLER_TYPES: Final = DEFAULT_APP_CATEGORIES[0][2]
 
@@ -145,7 +141,6 @@ class SwirSettings(Gtk.Application):
         self.default_apps[category_id] = apps
         for identity, app in sorted(apps.items(), key=lambda item: item[1].get_display_name().casefold()):
             combo.append(identity, app.get_display_name())
-
         primary_type = self._category_types(category_id)[0]
         current = Gio.AppInfo.get_default_for_type(primary_type, False)
         current_id = current.get_id() if current is not None else None
@@ -212,7 +207,7 @@ class SwirSettings(Gtk.Application):
         settings = self.store.load()
         window = Gtk.ApplicationWindow(application=self)
         window.set_title("SWIR Settings")
-        window.set_default_size(820, 860)
+        window.set_default_size(820, 820)
         window.add_css_class("swir-app")
         self.window = window
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -317,7 +312,6 @@ class SwirSettings(Gtk.Application):
         defaults_note.add_css_class("swir-muted")
         defaults_note.set_xalign(0)
         defaults_card.append(defaults_note)
-
         for category_id, label, _handler_types in DEFAULT_APP_CATEGORIES:
             combo = Gtk.ComboBoxText()
             combo.set_hexpand(True)
