@@ -69,6 +69,16 @@ The intended complete path is therefore:
 
 No stage may convert qualification evidence into authorization by itself.
 
+## Package journal integrity
+
+The production distribution-provider path now preserves the vendor binding instead of dropping it while translating the binder manifest into `swir.system-package-plan/0.1`. A vendor-backed manifest is accepted only when it retains `upstreamSourceClass=vendor-official-repository`, an explicit repository ID and a lowercase 64-hex `vendorRepositoryBindingDigest`. Partial, malformed or foreign upstream binding metadata fails closed before a package plan is produced.
+
+The resulting package plan retains both the upstream source class and exact binding digest inside the trust section. The existing `SystemPackageTransactionService` already hashes the complete plan before authorization, stores that plan plus its digest in the durable owner-only transaction journal before privileged mutation, and passes the same plan digest to the guarded executor. This means the reviewed vendor binding is now covered by the exact digest that authorizes and journals the package mutation route instead of existing only in pre-transaction metadata.
+
+`system/hardware/vendor-repository-journal-binding.selftest.mjs` exercises the complete in-process path from `bindVendorRepositoryTransaction(...)` through `buildDistributionPackagePlan(...)` into a real `SystemPackageTransactionService` journal. It verifies that the binding digest survives into the committed journal, that authorization and executor handoff use the digest of the same complete plan, and that post-write tampering with `vendorRepositoryBindingDigest` is rejected by journal digest verification.
+
+This closes the **binding-digest-to-package-journal integrity gap**. It still does not enable the vendor repository, write an APT source, import a system signing key or prove interruption/recovery for repository activation. Those remain separate release gates.
+
 ## Verification
 
 `vendor-official-repository-service.selftest.mjs` exercises exact platform/vendor matching and fail-closed rejection of HTTP URLs, foreign hosts, direct downloads, automatic enablement, arbitrary package policy, key downloads, unsafe keyring paths, wildcard packages and duplicate IDs.
@@ -77,18 +87,20 @@ No stage may convert qualification evidence into authorization by itself.
 
 `vendor-repository-transaction-binding.selftest.mjs` verifies deterministic binding, digest changes when repository scope changes, package-provider manifest linkage, and fail-closed rejection of fingerprint, repository URL, platform, policy package, evidence package, expiry, preauthorization and signature-binding mismatches. It performs no privileged operation.
 
+`vendor-repository-journal-binding.selftest.mjs` verifies the canonical vendor manifest → distribution provider plan → package transaction path and proves the exact binding digest is retained in the durable package journal and covered by the transaction plan digest. It also corrupts the stored binding digest after commit and requires journal verification to reject the modified record.
+
 The dedicated GitHub Actions workflow additionally:
 
 - creates a real root-owned policy fixture and proves writable/symlink policy files are rejected;
-- runs syntax and unit/self-test gates for policy, evidence and transaction-binding layers;
+- runs syntax and unit/self-test gates for policy, evidence, transaction-binding, distribution-provider and journal-integrity layers;
 - performs the pinned NVIDIA Debian 13 public-metadata qualification against the exact official origin;
 - requires the exact reviewed 40-hex signing-key fingerprint and `InRelease` signature binding;
 - requires fresh signed metadata under the 14-day maximum-age and 24-hour future-skew policy;
 - verifies `cuda-keyring` and `nvidia-open` are present in the live package index;
-- statically rejects package/source mutation shortcuts from both qualification and binding layers.
+- statically rejects package/source mutation shortcuts from qualification and binding layers.
 
 A transient, stale or changed upstream repository fails this qualification gate closed and requires review; CI does not silently change hostnames, paths, packages, freshness limits or key identity.
 
 ## Roadmap accounting
 
-This is meaningful implementation and transaction-integrity progress but does **not** complete the roadmap checkbox by itself. The item remains open until a real exceptional proprietary component is represented by reviewed root-owned project policy with the complete signing-key fingerprint, repository activation is implemented through the existing privileged/journaled broker, the exact binding digest reaches that mutation journal, and disposable-VM activation/interruption/recovery behavior is verified without bypassing distribution trust or safety gates.
+This is meaningful implementation and transaction-integrity progress but does **not** complete the roadmap checkbox by itself. The exact vendor binding digest now reaches and is integrity-protected by the existing package mutation journal, satisfying that sub-gate. The item remains open until a real exceptional proprietary component is represented by reviewed root-owned project policy with the complete signing-key fingerprint, repository activation is implemented through the existing privileged/journaled broker, and disposable-VM activation/interruption/recovery behavior is verified without bypassing distribution trust or safety gates.

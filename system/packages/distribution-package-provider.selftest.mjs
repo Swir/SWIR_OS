@@ -11,6 +11,7 @@ assert.equal(DistributionPackageProviderPolicy.previewOnly, true);
 assert.equal(DistributionPackageProviderPolicy.autoExecutable, false);
 assert.equal(DistributionPackageProviderPolicy.signatureVerificationRequired, true);
 assert.equal(DistributionPackageProviderPolicy.arbitraryRepositoryUrls, false);
+assert.equal(DistributionPackageProviderPolicy.vendorRepositoryBindingPreserved, true);
 assert.equal(DistributionPackageProviderPolicy.privilegedMutationRequiresJournal, true);
 
 const aptHost = {
@@ -46,11 +47,45 @@ const manifest = {
 };
 
 assert.equal(validateDistributionPackageManifest(manifest).packageName, 'example-editor');
+assert.equal(validateDistributionPackageManifest(manifest).vendorRepositoryBinding, null);
 assert.throws(() => validateDistributionPackageManifest({ ...manifest, executionClass: 'windows-compat' }), /linux-native only/);
 assert.throws(() => validateDistributionPackageManifest({ ...manifest, provider: 'swir.package.flatpak' }), /requires swir.package.system/);
 assert.throws(() => validateDistributionPackageManifest({ ...manifest, package: { ...manifest.package, sourceRef: 'pkg;rm -rf /' } }), /invalid distribution package/);
 assert.throws(() => validateDistributionPackageManifest({ ...manifest, trust: { ...manifest.trust, sourceClass: 'local-user-selected' } }), /distribution-repository trust/);
 assert.throws(() => validateDistributionPackageManifest({ ...manifest, trust: { ...manifest.trust, signatureRequired: false } }), /signatures must be required/);
+
+const vendorDigest = 'a'.repeat(64);
+const vendorManifest = {
+  ...manifest,
+  id: 'vendor.nvidia.nvidia-open',
+  package: { ...manifest.package, sourceRef: 'nvidia-open', nativeEntryPoint: null },
+  trust: {
+    sourceClass: 'distribution-repository',
+    repositoryId: 'nvidia-cuda-debian13-x86_64',
+    signatureRequired: true,
+    upstreamSourceClass: 'vendor-official-repository',
+    vendorRepositoryBindingDigest: vendorDigest
+  }
+};
+const validatedVendor = validateDistributionPackageManifest(vendorManifest);
+assert.equal(validatedVendor.vendorRepositoryBinding.upstreamSourceClass, 'vendor-official-repository');
+assert.equal(validatedVendor.vendorRepositoryBinding.bindingDigest, vendorDigest);
+assert.throws(() => validateDistributionPackageManifest({
+  ...vendorManifest,
+  trust: { ...vendorManifest.trust, upstreamSourceClass: 'random-driver-site' }
+}), /vendor-official-repository upstream source class/);
+assert.throws(() => validateDistributionPackageManifest({
+  ...vendorManifest,
+  trust: { ...vendorManifest.trust, vendorRepositoryBindingDigest: 'not-a-digest' }
+}), /64-character lowercase SHA-256/);
+assert.throws(() => validateDistributionPackageManifest({
+  ...vendorManifest,
+  trust: { ...vendorManifest.trust, repositoryId: '' }
+}), /explicit repository id/);
+assert.throws(() => validateDistributionPackageManifest({
+  ...manifest,
+  trust: { ...manifest.trust, vendorRepositoryBindingDigest: vendorDigest }
+}), /vendor-official-repository upstream source class/);
 
 const install = buildDistributionPackagePlan('install', manifest, {
   host: aptHost,
@@ -66,6 +101,19 @@ assert.equal(install.trust.signatureVerificationRequired, true);
 assert.equal(install.trust.arbitraryRepositoryUrlAllowed, false);
 assert.equal(install.transaction.requiresPrivilege, true);
 assert.equal(install.transaction.journalRequired, true);
+
+const vendorPlan = buildDistributionPackagePlan('install', vendorManifest, {
+  host: {
+    distribution: { id: 'debian', versionId: '13', family: 'debian', architecture: 'x86_64' },
+    capabilities: { packageManagers: ['apt'] }
+  },
+  allowlistedRepositories: ['nvidia-cuda-debian13-x86_64']
+});
+assert.equal(vendorPlan.source.repositoryId, 'nvidia-cuda-debian13-x86_64');
+assert.equal(vendorPlan.source.upstreamClass, 'vendor-official-repository');
+assert.equal(vendorPlan.trust.upstreamSourceClass, 'vendor-official-repository');
+assert.equal(vendorPlan.trust.vendorRepositoryBindingDigest, vendorDigest);
+assert.deepEqual(vendorPlan.commandPreview, ['apt-get', 'install', '--', 'nvidia-open']);
 
 const update = buildDistributionPackagePlan('update', manifest, { host: aptHost, allowlistedRepositories: ['ubuntu-main'] });
 assert.deepEqual(update.commandPreview, ['apt-get', 'install', '--only-upgrade', '--', 'example-editor']);

@@ -9,7 +9,12 @@ on:
       - 'system/hardware/vendor-repository-trust-evidence.selftest.mjs'
       - 'system/hardware/vendor-repository-transaction-binding.mjs'
       - 'system/hardware/vendor-repository-transaction-binding.selftest.mjs'
+      - 'system/hardware/vendor-repository-journal-binding.selftest.mjs'
       - 'system/hardware/vendor-repositories.example.json'
+      - 'system/packages/distribution-package-provider.mjs'
+      - 'system/packages/distribution-package-provider.selftest.mjs'
+      - 'system/packages/package-transaction-service.mjs'
+      - 'system/packages/package-transaction-service.selftest.mjs'
       - 'system/SWIR-VENDOR-OFFICIAL-REPOSITORIES-0.1.md'
       - '.github/workflows/system-vendor-official-repositories.yml'
   pull_request:
@@ -20,7 +25,12 @@ on:
       - 'system/hardware/vendor-repository-trust-evidence.selftest.mjs'
       - 'system/hardware/vendor-repository-transaction-binding.mjs'
       - 'system/hardware/vendor-repository-transaction-binding.selftest.mjs'
+      - 'system/hardware/vendor-repository-journal-binding.selftest.mjs'
       - 'system/hardware/vendor-repositories.example.json'
+      - 'system/packages/distribution-package-provider.mjs'
+      - 'system/packages/distribution-package-provider.selftest.mjs'
+      - 'system/packages/package-transaction-service.mjs'
+      - 'system/packages/package-transaction-service.selftest.mjs'
       - 'system/SWIR-VENDOR-OFFICIAL-REPOSITORIES-0.1.md'
       - '.github/workflows/system-vendor-official-repositories.yml'
   workflow_dispatch:
@@ -45,12 +55,20 @@ jobs:
           node --check system/hardware/vendor-repository-trust-evidence.selftest.mjs
           node --check system/hardware/vendor-repository-transaction-binding.mjs
           node --check system/hardware/vendor-repository-transaction-binding.selftest.mjs
+          node --check system/hardware/vendor-repository-journal-binding.selftest.mjs
+          node --check system/packages/distribution-package-provider.mjs
+          node --check system/packages/distribution-package-provider.selftest.mjs
+          node --check system/packages/package-transaction-service.mjs
       - name: Run policy self-test
         run: node system/hardware/vendor-official-repository-service.selftest.mjs
       - name: Run evidence self-test
         run: node system/hardware/vendor-repository-trust-evidence.selftest.mjs
       - name: Run transaction-binding self-test
         run: node system/hardware/vendor-repository-transaction-binding.selftest.mjs
+      - name: Run distribution provider binding self-test
+        run: node system/packages/distribution-package-provider.selftest.mjs
+      - name: Verify binding digest reaches durable package journal
+        run: node system/hardware/vendor-repository-journal-binding.selftest.mjs
       - name: Verify production root-owned policy boundary
         run: |
           set -euo pipefail
@@ -125,6 +143,7 @@ jobs:
           grep -F "repositoryActivationImplementedHere: false" system/hardware/vendor-repository-transaction-binding.mjs >/dev/null
           grep -F "directAptMutationAllowed: false" system/hardware/vendor-repository-transaction-binding.mjs >/dev/null
           grep -F "directPkexecAllowed: false" system/hardware/vendor-repository-transaction-binding.mjs >/dev/null
+          grep -F "vendorRepositoryBindingPreserved: true" system/packages/distribution-package-provider.mjs >/dev/null
           ! grep -RE "child_process|exec\(|spawn\(|sudo|pkexec|curl|wget|fetch\(" system/hardware/vendor-official-repository-service.mjs
           ! grep -RE "apt-get|apt install|dpkg|sources\.list|trusted\.gpg|sudo|pkexec" system/hardware/vendor-repository-trust-evidence.mjs
           ! grep -RE "child_process|exec\(|spawn\(|apt-get|apt install|dpkg|sources\.list|trusted\.gpg|sudo|pkexec|curl|wget|fetch\(" system/hardware/vendor-repository-transaction-binding.mjs
