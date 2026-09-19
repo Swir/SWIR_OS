@@ -41,21 +41,24 @@ LANGUAGES: Final = (
     ("简体中文", "zh-CN"),
 )
 
-# Product Baseline 1.0 requires Default Apps to grow beyond the browser-only
-# foundation. Keep these categories explicit and conservative: candidates must
-# advertise every canonical handler type in their category before Settings will
-# offer them. This prevents a partial default from being presented as complete.
+# Product Baseline 1.0 requires Default Apps for browser, media, image, PDF,
+# text/code and archives. Candidates are intentionally conservative: an app is
+# offered only when it advertises every canonical handler type in its category.
 DEFAULT_APP_CATEGORIES: Final = (
     ("browser", "Web browser", ("x-scheme-handler/http", "x-scheme-handler/https", "text/html")),
     ("media", "Media player", ("audio/mpeg", "video/mp4")),
     ("image", "Image viewer / editor", ("image/png", "image/jpeg")),
     ("pdf", "PDF viewer", ("application/pdf",)),
+    ("text", "Text / code editor", ("text/plain", "text/markdown")),
+    ("archive", "Archive handler", ("application/zip", "application/x-tar")),
 )
 DEFAULT_FIRST_PARTY_IDS: Final = {
     "browser": "swir-browser.desktop",
     "media": "swir-player.desktop",
     "image": "swir-photo-studio.desktop",
     "pdf": "swir-pdf-viewer.desktop",
+    "text": "swir-notes.desktop",
+    "archive": "swir-archive-manager.desktop",
 }
 BROWSER_HANDLER_TYPES: Final = DEFAULT_APP_CATEGORIES[0][2]
 
@@ -120,7 +123,6 @@ class SwirSettings(Gtk.Application):
 
     @staticmethod
     def _apps_for_all_types(handler_types: tuple[str, ...]) -> dict[str, Gio.AppInfo]:
-        """Return only applications advertising every canonical type."""
         per_type: list[dict[str, Gio.AppInfo]] = []
         for content_type in handler_types:
             apps: dict[str, Gio.AppInfo] = {}
@@ -210,7 +212,7 @@ class SwirSettings(Gtk.Application):
         settings = self.store.load()
         window = Gtk.ApplicationWindow(application=self)
         window.set_title("SWIR Settings")
-        window.set_default_size(820, 820)
+        window.set_default_size(820, 860)
         window.add_css_class("swir-app")
         self.window = window
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -461,8 +463,6 @@ class SwirSettings(Gtk.Application):
             "defaultAppsMutationOnExplicitActionOnly": True,
             "defaultAppsMutationVerified": self.default_apps_mutation_verified,
             "defaultAppsVerifiedDesktopIds": self.default_apps_verified_ids,
-            # Backward-compatible browser evidence fields retained for the
-            # existing core-apps contract while the dedicated gate is adopted.
             "browserHandlerCount": candidate_counts.get("browser", 0),
             "browserDefaultMutationOnExplicitActionOnly": True,
             "browserHandlerTypes": list(BROWSER_HANDLER_TYPES),
