@@ -84,6 +84,26 @@ function deviceAssessment(device) {
   };
 }
 
+function assertSafeFirmwareDiagnostics(firmware) {
+  if (firmware == null) return true;
+  if (firmware?.provider !== 'fwupd-lvfs') throw new Error('Driver Center firmware provider must be fwupd/LVFS');
+  if (firmware?.readOnly !== true || firmware?.mutationAuthorized !== false) {
+    throw new Error('Driver Center firmware surface must remain read-only and non-authorizing');
+  }
+  if (!Array.isArray(firmware?.updates)) throw new Error('Driver Center firmware updates must be an array');
+  for (const update of firmware.updates) {
+    if (update?.remoteId !== 'lvfs') throw new Error('Driver Center firmware update must come from LVFS');
+    if (update?.trustedSource !== true || update?.directDownloadUrlExposed !== false || update?.mutationAuthorized !== false) {
+      throw new Error('Driver Center firmware update crossed the read-only trust boundary');
+    }
+    if (update?.source?.class !== 'fwupd-lvfs' || update?.source?.repositoryId !== 'lvfs') {
+      throw new Error('Driver Center firmware update source is not trusted fwupd/LVFS');
+    }
+    if (!String(update?.source?.ref || '').startsWith('fwupd:')) throw new Error('Driver Center firmware update source ref is invalid');
+  }
+  return true;
+}
+
 export function createDriverCenterReport(snapshot, plan, trustedSources, { now = new Date() } = {}) {
   if (snapshot?.schema !== 'swir.hardware-snapshot/0.2' || snapshot?.host?.readOnly !== true) {
     throw new Error('Driver Center requires a read-only SWIR hardware snapshot');
@@ -168,6 +188,7 @@ export function assertSafeDriverCenterReport(report) {
   if (report?.policy?.privilegedMutationRequiresPlan !== true || report?.policy?.privilegedMutationRequiresJournal !== true) {
     throw new Error('Privileged hardware changes require plan + journal policy');
   }
+  assertSafeFirmwareDiagnostics(report?.firmware);
   if (asArray(report?.violations).length) {
     throw new Error(`Unsafe Driver Center report: ${report.violations.map(item => item.code).join(', ')}`);
   }
