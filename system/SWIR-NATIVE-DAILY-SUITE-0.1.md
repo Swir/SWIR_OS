@@ -22,9 +22,10 @@ The gate fails closed when:
 - graphical-image provisioning stops staging a required native executable;
 - the fixed SWIR Shell launcher no longer exposes a required capability;
 - high-risk implementations lose key safety markers, such as Archive Manager no-follow/exclusive extraction, Screenshot portal mediation, same-user Task Manager identity binding, or read-only diagnostics command allowlisting;
-- Backup/Restore loses the recovery companions used by System Edition.
+- Backup/Restore loses the recovery companions used by System Edition;
+- Photo Studio loses the Product Baseline implementation markers for rectangular crop, color transforms, bounded text annotation or bounded drawing/annotation.
 
-CI additionally executes the real Archive Manager hostile-input/self-test and the Recovery Mode provisioning self-test.
+CI additionally executes the real Archive Manager hostile-input/self-test and the Recovery Mode provisioning self-test. Photo Studio retains its separate dedicated Wayland/Debian 13 workflow, which is the runtime authority for real pixel changes, source immutability and export behavior.
 
 ## Security boundary
 
@@ -36,6 +37,8 @@ The gate never replaces the dedicated per-application workflows. Browser, Player
 
 Passing this gate does **not** automatically complete `essential native Linux application suite for dependable daily use`.
 
-The umbrella roadmap item remains open until the full Product Baseline definition of done is satisfied, including required feature depth and integration. In particular, the current SWIR Photo Studio basic milestone still lacks Product Baseline features such as crop, exposure/brightness/contrast and color controls, filters, text, and drawing/annotation. A green inventory/integration gate must not hide those product gaps or inflate roadmap progress.
+Photo Studio 0.3 closes the previously documented image-editor depth gap by implementing and separately runtime-verifying user-selectable crop, exposure/brightness/contrast, color controls, filters, bounded text, bounded line drawing/annotation, undo/redo and common-format export. The integration verifier now fails closed if those implementation markers disappear.
+
+The umbrella roadmap item remains open in this change while the broader 19-capability Product Baseline is re-audited against dedicated per-application runtime evidence. A green inventory/integration gate must not hide a product-depth gap or inflate roadmap progress.
 
 The canonical checklist and percentage remain exclusively in `SWIR-OS-ARCHITECTURE.md`.
