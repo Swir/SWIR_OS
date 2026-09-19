@@ -46,6 +46,7 @@ try {
           source: { class: 'fwupd-lvfs', repositoryId: 'lvfs', ref: 'fwupd:fixture-device:fixture-release' },
           trustedSource: true, directDownloadUrlExposed: false, mutationAuthorized: false
         }],
+        history: [],
         ignoredNonLvfsCandidates: 0,
         probe: { available: true, trustedBinary: true, ownerUid: 0 }
       };
