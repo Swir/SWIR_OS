@@ -1,8 +1,8 @@
 # SWIR Native Default Apps 0.1
 
-System Edition Settings now provides a native GTK4 **Default Apps** panel for verified first-party desktop categories instead of exposing only the browser selector.
+System Edition Settings provides a native GTK4 **Default Apps** panel for all six Product Baseline categories. Every first-party handler is source-controlled, staged through the trusted graphical-session provisioning path, and verified as a per-user Gio association without privileged mutation.
 
-## Current verified categories
+## Verified categories
 
 | Category | Canonical handler types | First-party application |
 |---|---|---|
@@ -10,8 +10,10 @@ System Edition Settings now provides a native GTK4 **Default Apps** panel for ve
 | Media player | `audio/mpeg`, `video/mp4` | `swir-player.desktop` |
 | Image viewer / editor | `image/png`, `image/jpeg` | `swir-photo-studio.desktop` |
 | PDF viewer | `application/pdf` | `swir-pdf-viewer.desktop` |
+| Text / code editor | `text/plain`, `text/markdown`, `application/json`, `text/x-python` | `swir-text-editor.desktop` |
+| Archive manager | `application/zip`, `application/x-tar`, `application/gzip`, `application/x-xz`, `application/x-bzip2` | `swir-archive-manager.desktop` |
 
-Settings discovers applications through the native Gio desktop application registry. A candidate is offered only when it advertises **every canonical handler type** for the category, which avoids presenting a partial association as a complete category default.
+Settings discovers applications through the native Gio desktop application registry. A candidate is offered only when it advertises **every canonical handler type** for the category, which prevents a partial association from being presented as a complete category default.
 
 ## Mutation boundary
 
@@ -25,10 +27,10 @@ The panel does **not**:
 - edit `/etc` or package-manager configuration;
 - uninstall SWIR first-party applications when an alternative is selected.
 
-The current change intentionally leaves **text/code** and **archive** Default Apps categories open. They require first-party desktop-handler registration and file-opening behavior that must be implemented and runtime-verified before those Product Baseline categories can be claimed complete.
+## Image staging and runtime evidence
 
-## Runtime evidence
+`system/session/provision-graphical-session.sh` stages the Text Editor binary and both text/archive desktop registrations into the final System image beside the four previously staged Default Apps handlers. The provisioning path verifies trusted regular-file ownership/modes and rebuilds the desktop database inside the root filesystem.
 
-`.github/workflows/system-native-default-apps.yml` installs the four reviewed first-party `.desktop` files into an isolated temporary `XDG_DATA_HOME`, validates their metadata, starts a headless Wayland session, maps real SWIR Settings, applies all four first-party defaults, verifies Gio resolves each canonical MIME/scheme type back to the expected desktop ID, and checks owner-only Settings/evidence files.
+`.github/workflows/system-native-default-apps.yml` validates all six desktop registrations and their image-staging declarations, maps real SWIR Settings in a controlled headless Wayland session, applies all six first-party defaults, and verifies Gio resolves every canonical MIME/scheme type back to the expected desktop ID. The gate then launches representative Python/text and ZIP inputs through the **default Gio registry** and requires runtime evidence from the selected Text Editor and Archive Manager, proving the associations are usable rather than metadata-only.
 
-This is a real user-level handler mutation test in an isolated CI profile. It is not a roadmap-completion claim for the entire essential native application suite.
+This completes the Product Baseline Default Apps **six-category integration slice**. It does not by itself close the broader roadmap item for the entire essential native Linux application suite, and it does not change the project percentage without that wider deliverable being fully implemented and verified.

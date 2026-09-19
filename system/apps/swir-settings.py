@@ -22,7 +22,7 @@ from core_runtime import DEFAULT_THEME_ID, UserSettingsStore  # noqa: E402
 from theme_runtime import ThemePolicyError, ThemeStore  # noqa: E402
 
 APP_ID: Final = "dev.swir.Settings"
-EVIDENCE_SCHEMA: Final = "swir.native-settings-runtime-evidence/0.2"
+EVIDENCE_SCHEMA: Final = "swir.native-settings-runtime-evidence/0.3"
 LANGUAGES: Final = (
     ("English", "en"),
     ("Polski", "pl-PL"),
@@ -41,20 +41,24 @@ LANGUAGES: Final = (
     ("简体中文", "zh-CN"),
 )
 
-# These four categories already have first-party desktop registrations staged
-# into the System image. Text/code and archive remain explicit follow-up work
-# until their handlers are staged and verified on the final image as well.
+# All six Product Baseline Default Apps categories have first-party desktop
+# registrations staged into the System image. Candidates must advertise every
+# canonical handler type for their category before Settings exposes them.
 DEFAULT_APP_CATEGORIES: Final = (
     ("browser", "Web browser", ("x-scheme-handler/http", "x-scheme-handler/https", "text/html")),
     ("media", "Media player", ("audio/mpeg", "video/mp4")),
     ("image", "Image viewer / editor", ("image/png", "image/jpeg")),
     ("pdf", "PDF viewer", ("application/pdf",)),
+    ("text", "Text / code editor", ("text/plain", "text/markdown", "application/json", "text/x-python")),
+    ("archive", "Archive manager", ("application/zip", "application/x-tar", "application/gzip", "application/x-xz", "application/x-bzip2")),
 )
 DEFAULT_FIRST_PARTY_IDS: Final = {
     "browser": "swir-browser.desktop",
     "media": "swir-player.desktop",
     "image": "swir-photo-studio.desktop",
     "pdf": "swir-pdf-viewer.desktop",
+    "text": "swir-text-editor.desktop",
+    "archive": "swir-archive-manager.desktop",
 }
 BROWSER_HANDLER_TYPES: Final = DEFAULT_APP_CATEGORIES[0][2]
 
