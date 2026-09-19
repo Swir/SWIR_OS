@@ -50,7 +50,9 @@ The caller first obtains `firmwareTransactions.plan(candidate)`, displays the pl
 
 `firmware-update-transaction-selftest.mjs` uses a fake read-only fwupd/LVFS inventory and fake command runner; it never flashes hardware. It verifies plan hashing, exact digest confirmation, stale-plan refusal, ambiguous-candidate refusal, safe argv construction, journal state/permissions, no automatic reboot/rollback and rejection of unsafe flags.
 
-`.github/workflows/system-firmware-update-transactions.yml` runs syntax and self-tests on the normal GitHub runner and on Debian 13, the current System Edition base. These are contract tests only, not evidence of a real firmware flash.
+`firmware-driver-mutation-integration.selftest.mjs` wires the real `DriverMutationTransactionService` to the real firmware transaction service with controlled fakes only at the fwupd inventory/command boundary. It verifies that the reviewed plan/digest reaches the child transaction, the parent records the child journal identity, and a reboot-required result propagates as a recovery-relevant parent state.
+
+`.github/workflows/system-firmware-update-transactions.yml` runs syntax, transaction and Driver Center integration self-tests on the normal GitHub runner and on Debian 13, the current System Edition base. These are contract tests only, not evidence of a real firmware flash.
 
 ## Required E2E before roadmap completion
 
