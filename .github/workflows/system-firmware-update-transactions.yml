@@ -7,6 +7,7 @@ on:
       - 'system/hardware/fwupd-lvfs-service.mjs'
       - 'system/hardware/firmware-update-transaction-service.mjs'
       - 'system/hardware/firmware-update-transaction-selftest.mjs'
+      - 'system/hardware/firmware-driver-mutation-integration.selftest.mjs'
       - 'system/hardware/driver-mutation-transaction-service.mjs'
       - 'system/SWIR-FIRMWARE-UPDATE-TRANSACTIONS-0.1.md'
       - '.github/workflows/system-firmware-update-transactions.yml'
@@ -15,6 +16,7 @@ on:
       - 'system/hardware/fwupd-lvfs-service.mjs'
       - 'system/hardware/firmware-update-transaction-service.mjs'
       - 'system/hardware/firmware-update-transaction-selftest.mjs'
+      - 'system/hardware/firmware-driver-mutation-integration.selftest.mjs'
       - 'system/hardware/driver-mutation-transaction-service.mjs'
       - 'system/SWIR-FIRMWARE-UPDATE-TRANSACTIONS-0.1.md'
       - '.github/workflows/system-firmware-update-transactions.yml'
@@ -42,8 +44,11 @@ jobs:
           node --check system/hardware/fwupd-lvfs-service.mjs
           node --check system/hardware/firmware-update-transaction-service.mjs
           node --check system/hardware/firmware-update-transaction-selftest.mjs
+          node --check system/hardware/firmware-driver-mutation-integration.selftest.mjs
       - name: Transaction self-test
         run: node system/hardware/firmware-update-transaction-selftest.mjs
+      - name: Driver Center integration self-test
+        run: node system/hardware/firmware-driver-mutation-integration.selftest.mjs
       - name: Fail-closed policy assertions
         shell: bash
         run: |
@@ -68,5 +73,7 @@ jobs:
       - name: Install runtime
         run: apt-get update && apt-get install -y --no-install-recommends nodejs ca-certificates && rm -rf /var/lib/apt/lists/*
       - uses: actions/checkout@v4
-      - name: Run self-test on System Edition base
-        run: node system/hardware/firmware-update-transaction-selftest.mjs
+      - name: Run self-tests on System Edition base
+        run: |
+          node system/hardware/firmware-update-transaction-selftest.mjs
+          node system/hardware/firmware-driver-mutation-integration.selftest.mjs
