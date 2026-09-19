@@ -1,0 +1,138 @@
+name: System Physical Live USB Evidence
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'system/e2e/collect-physical-live-usb-evidence.py'
+      - 'system/e2e/collect-physical-live-usb-evidence.selftest.py'
+      - 'system/e2e/verify-physical-live-usb-sequence.py'
+      - 'system/e2e/verify-physical-live-usb-sequence.selftest.py'
+      - 'system/SWIR-PHYSICAL-LIVE-USB-QUALIFICATION-0.1.md'
+      - '.github/workflows/system-physical-live-usb-evidence.yml'
+  pull_request:
+    paths:
+      - 'system/e2e/collect-physical-live-usb-evidence.py'
+      - 'system/e2e/collect-physical-live-usb-evidence.selftest.py'
+      - 'system/e2e/verify-physical-live-usb-sequence.py'
+      - 'system/e2e/verify-physical-live-usb-sequence.selftest.py'
+      - 'system/SWIR-PHYSICAL-LIVE-USB-QUALIFICATION-0.1.md'
+      - '.github/workflows/system-physical-live-usb-evidence.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: system-physical-live-usb-evidence-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  evidence-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compile evidence tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            system/e2e/collect-physical-live-usb-evidence.py \
+            system/e2e/collect-physical-live-usb-evidence.selftest.py \
+            system/e2e/verify-physical-live-usb-sequence.py \
+            system/e2e/verify-physical-live-usb-sequence.selftest.py
+
+      - name: Exercise collector security and privacy fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 system/e2e/collect-physical-live-usb-evidence.selftest.py | tee "${RUNNER_TEMP}/collector-selftest.json"
+          python3 - "${RUNNER_TEMP}/collector-selftest.json" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1], encoding="utf-8"))
+          assert data["passed"] is True
+          assert data["serialRedactionVerified"] is True
+          assert data["exclusive0600OutputVerified"] is True
+          assert data["qualificationClaimed"] is False
+          PY
+
+      - name: Exercise two-phase physical sequence verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 system/e2e/verify-physical-live-usb-sequence.selftest.py | tee "${RUNNER_TEMP}/sequence-selftest.json"
+          python3 - "${RUNNER_TEMP}/sequence-selftest.json" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1], encoding="utf-8"))
+          assert data["passed"] is True
+          assert data["virtualEvidenceRejected"] is True
+          assert data["sourceUsbStillAttachedRejected"] is True
+          assert data["persistenceMismatchRejected"] is True
+          assert data["tamperRejected"] is True
+          assert data["roadmapCompletionClaimed"] is False
+          PY
+
+      - name: Smoke-test the real hosted runner probe without promoting it to physical evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 system/e2e/collect-physical-live-usb-evidence.py \
+            --phase live > "${RUNNER_TEMP}/hosted-runner-evidence.json"
+          python3 - "${RUNNER_TEMP}/hosted-runner-evidence.json" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1], encoding="utf-8"))
+          assert data["schema"] == "swir.physical-live-usb-evidence/1.0"
+          assert data["claims"]["physicalHardwareQualificationClaim"] is False
+          assert data["claims"]["secureBootSupportClaim"] is False
+          assert data["collector"]["destructiveActions"] is False
+          PY
+
+      - name: Fail closed on destructive or privilege-escalating implementation drift
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import ast
+          from pathlib import Path
+
+          production = [
+              Path("system/e2e/collect-physical-live-usb-evidence.py"),
+              Path("system/e2e/verify-physical-live-usb-sequence.py"),
+          ]
+          forbidden_command_names = {
+              "sudo", "pkexec", "su", "mkfs", "wipefs", "sgdisk",
+              "parted", "fdisk", "mount", "umount", "dd",
+          }
+          allowed_probe_paths = {
+              "/usr/bin/lsblk",
+              "/usr/bin/findmnt",
+              "/usr/bin/systemd-detect-virt",
+          }
+
+          for path in production:
+              text = path.read_text(encoding="utf-8")
+              tree = ast.parse(text, filename=str(path))
+              for node in ast.walk(tree):
+                  if not isinstance(node, ast.Call):
+                      continue
+                  for keyword in node.keywords:
+                      if keyword.arg == "shell" and isinstance(keyword.value, ast.Constant) and keyword.value.value is True:
+                          raise SystemExit(f"{path}: shell=True is forbidden")
+                  func = node.func
+                  if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+                      if func.value.id == "os" and func.attr == "system":
+                          raise SystemExit(f"{path}: os.system is forbidden")
+
+              for constant in (n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str)):
+                  if constant.startswith("/usr/") and "/bin/" in constant:
+                      name = constant.rsplit("/", 1)[-1]
+                      if name in forbidden_command_names:
+                          raise SystemExit(f"{path}: destructive or privileged command literal forbidden: {constant}")
+                      if path.name.startswith("collect-") and constant.startswith(("/usr/bin/", "/usr/sbin/")) and constant not in allowed_probe_paths:
+                          raise SystemExit(f"{path}: unexpected executable probe path: {constant}")
+          PY
+          grep -F '"physicalHardwareQualificationClaim": False' system/e2e/collect-physical-live-usb-evidence.py >/dev/null
+          grep -F '"physicalHardwareRoadmapCompletionClaimed": False' system/e2e/verify-physical-live-usb-sequence.py >/dev/null
+          grep -F 'does **not** complete the physical-hardware roadmap gate' system/SWIR-PHYSICAL-LIVE-USB-QUALIFICATION-0.1.md >/dev/null
