@@ -36,9 +36,20 @@ The command boundary is intentionally narrow:
 - `executing` — the exact reviewed device update command is running.
 - `committed` — fwupd returned success and the candidate did not declare a reboot requirement.
 - `staged-reboot-required` — fwupd returned success for a candidate whose metadata requires reboot; SWIR does not reboot automatically.
+- `verified` — a later read-only fwupd inventory shows the same bound device at the reviewed target version with no reported update error.
 - `failed-needs-recovery` — result is ambiguous or failed; no automatic rollback is attempted.
 
-Every successful result still carries `verificationRequired: true`. Firmware version/history must be checked after any required reboot or power cycle before hardware qualification evidence can be claimed.
+Every successful mutation result still carries `verificationRequired: true`. Transaction verification is a separate step and does not prove that a required reboot/power-cycle happened, nor does it count as physical-hardware qualification.
+
+## Post-update verification
+
+`system/hardware/firmware-update-verification-service.mjs` adds a fail-closed, read-only verification layer over the transaction journal and trusted fwupd inventory.
+
+Verification is allowed only for `committed`, `staged-reboot-required` or already `verified` transactions. It reopens the exact journal entry, binds to the same device ID and target version, requires trusted read-only fwupd inventory, rejects duplicate device identities, and records the observed installed version and fwupd update error state back into the owner-only transaction journal.
+
+A transaction becomes `verified` only when the bound device is present, its current firmware version exactly matches the reviewed target version and fwupd reports no update error. A missing device, unchanged version or update error remains pending/review-required. Failed or still-executing transactions are never promoted by the verifier, and the verifier never retries, downgrades, force-flashes or claims automatic rollback.
+
+The verification result intentionally includes `physicalHardwareQualification: false` and `rebootOrPowerCycleProven: false`. Those stronger claims require separate operator-controlled evidence on supported hardware.
 
 ## Driver Center integration
 
@@ -50,10 +61,12 @@ The caller first obtains `firmwareTransactions.plan(candidate)`, displays the pl
 
 `firmware-update-transaction-selftest.mjs` uses a fake read-only fwupd/LVFS inventory and fake command runner; it never flashes hardware. It verifies plan hashing, exact digest confirmation, stale-plan refusal, ambiguous-candidate refusal, safe argv construction, journal state/permissions, no automatic reboot/rollback and rejection of unsafe flags.
 
+`firmware-update-verification-selftest.mjs` creates real journaled transaction fixtures through `FirmwareUpdateTransactionService` and then exercises the separate verifier. It proves exact target-version verification, persistence of verified evidence, pending reboot/power-cycle handling, update-error refusal, no physical-qualification claim, no automatic retry and no automatic rollback.
+
 `firmware-driver-mutation-integration.selftest.mjs` wires the real `DriverMutationTransactionService` to the real firmware transaction service with controlled fakes only at the fwupd inventory/command boundary. It verifies that the reviewed plan/digest reaches the child transaction, the parent records the child journal identity, and a reboot-required result propagates as a recovery-relevant parent state.
 
-`.github/workflows/system-firmware-update-transactions.yml` runs syntax, transaction and Driver Center integration self-tests on the normal GitHub runner and on Debian 13, the current System Edition base. These are contract tests only, not evidence of a real firmware flash.
+`.github/workflows/system-firmware-update-transactions.yml` runs syntax, transaction, post-update verification and Driver Center integration self-tests on the normal GitHub runner and on Debian 13, the current System Edition base. These are contract tests only, not evidence of a real firmware flash.
 
 ## Required E2E before roadmap completion
 
-A later disposable-machine or dedicated physical-hardware qualification must use a genuinely fwupd-supported device and keep VM/emulation evidence separate from physical evidence. It must cover preview, explicit digest confirmation, mutation, interruption/recovery handling, required reboot or power cycle, post-boot `fwupdmgr` history/device verification, and persistence of the SWIR journal. No test may flash a user's real device without explicit interaction.
+A later disposable-machine or dedicated physical-hardware qualification must use a genuinely fwupd-supported device and keep VM/emulation evidence separate from physical evidence. It must cover preview, explicit digest confirmation, mutation, interruption/recovery handling, required reboot or power cycle, post-boot `fwupdmgr` history/device verification, persistence of the SWIR journal, and confirmation that the installed device version matches the reviewed target. No test may flash a user's real device without explicit interaction.
