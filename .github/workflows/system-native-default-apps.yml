@@ -10,6 +10,7 @@ on:
       - 'system/apps/swir-photo-studio.desktop'
       - 'system/apps/swir-pdf-viewer.desktop'
       - 'system/apps/native-daily-suite.json'
+      - 'system/session/provision-graphical-session.sh'
       - 'system/SWIR-NATIVE-DEFAULT-APPS-0.1.md'
       - '.github/workflows/system-native-default-apps.yml'
   pull_request:
@@ -20,6 +21,7 @@ on:
       - 'system/apps/swir-photo-studio.desktop'
       - 'system/apps/swir-pdf-viewer.desktop'
       - 'system/apps/native-daily-suite.json'
+      - 'system/session/provision-graphical-session.sh'
       - 'system/SWIR-NATIVE-DEFAULT-APPS-0.1.md'
       - '.github/workflows/system-native-default-apps.yml'
   workflow_dispatch:
@@ -37,7 +39,7 @@ jobs:
     timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
-      - name: Verify Default Apps policy and desktop metadata
+      - name: Verify Default Apps policy, desktop metadata and image staging
         shell: bash
         run: |
           set -euo pipefail
@@ -45,11 +47,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends desktop-file-utils
           for desktop in \
-            system/apps/swir-browser.desktop \
-            system/apps/swir-player.desktop \
-            system/apps/swir-photo-studio.desktop \
-            system/apps/swir-pdf-viewer.desktop; do
-            desktop-file-validate "$desktop"
+            swir-browser.desktop \
+            swir-player.desktop \
+            swir-photo-studio.desktop \
+            swir-pdf-viewer.desktop; do
+            desktop-file-validate "system/apps/$desktop"
+            grep -F "system/apps/$desktop" system/session/provision-graphical-session.sh >/dev/null
+            grep -F "/usr/share/applications/$desktop" system/session/provision-graphical-session.sh >/dev/null
           done
           grep -F '"browser", "Web browser"' system/apps/swir-settings.py >/dev/null
           grep -F '"media", "Media player"' system/apps/swir-settings.py >/dev/null
