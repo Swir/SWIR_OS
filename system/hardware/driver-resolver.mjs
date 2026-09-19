@@ -1,3 +1,5 @@
+import { assertVendorRepositoryTransactionBinding } from './vendor-repository-transaction-binding.mjs';
+
 const TRUSTED_SOURCE_CLASSES = new Set([
   'kernel-in-tree',
   'linux-firmware',
@@ -5,15 +7,76 @@ const TRUSTED_SOURCE_CLASSES = new Set([
   'fwupd-lvfs',
   'vendor-official-repository'
 ]);
+const VENDOR_SOURCE_CLASS = 'vendor-official-repository';
+const VENDOR_BINDING_SCHEMA = 'swir.vendor-repository-transaction-binding/0.1';
+const HEX64 = /^[a-f0-9]{64}$/;
 
 function uniqueStrings(values) {
   return [...new Set((values || []).filter(value => typeof value === 'string' && value.trim()).map(value => value.trim()))].sort();
 }
 
-function trustedSources(device) {
-  return (device?.catalog?.recommendedSources || []).filter(source =>
-    source && TRUSTED_SOURCE_CLASSES.has(source.class) && typeof source.ref === 'string' && source.ref.trim()
-  );
+function normalizeArchitecture(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (raw === 'x64' || raw === 'amd64') return 'x86_64';
+  if (raw === 'arm64') return 'aarch64';
+  return raw;
+}
+
+function verifiedVendorBinding(source, device, snapshot, support, bindings, now) {
+  const repositoryId = String(source?.repositoryId || '').trim();
+  const vendorId = String(device?.ids?.vendor || '').trim().toLowerCase();
+  const distro = snapshot?.host?.distribution || {};
+  const architecture = normalizeArchitecture(snapshot?.host?.arch);
+  const packageCandidates = new Set(support?.packages || []);
+  if (!repositoryId || !/^[a-f0-9]{4}$/.test(vendorId) || !distro.id || !distro.versionId || !architecture || packageCandidates.size === 0) {
+    return null;
+  }
+
+  for (const candidate of bindings || []) {
+    try {
+      assertVendorRepositoryTransactionBinding(candidate);
+    } catch {
+      continue;
+    }
+    const bound = candidate?.bound;
+    if (bound?.repository?.id !== repositoryId || bound?.repository?.sourceClass !== VENDOR_SOURCE_CLASS) continue;
+    if (String(bound?.platform?.hardwareVendor || '').toLowerCase() !== vendorId) continue;
+    if (String(bound?.platform?.id || '').toLowerCase() !== String(distro.id).toLowerCase()) continue;
+    if (String(bound?.platform?.versionId || '') !== String(distro.versionId)) continue;
+    if (normalizeArchitecture(bound?.platform?.architecture) !== architecture) continue;
+    if (!Array.isArray(bound?.packages) || !bound.packages.some(name => packageCandidates.has(name))) continue;
+    if (candidate?.transactionRoute?.repositoryActivationImplementedHere !== false) continue;
+
+    const validUntil = Date.parse(bound?.metadata?.effectiveValidUntil);
+    if (!Number.isFinite(validUntil) || validUntil < now.getTime()) continue;
+    return candidate;
+  }
+  return null;
+}
+
+function trustedSources(device, snapshot, support, vendorRepositoryBindings, now) {
+  const trusted = [];
+  for (const source of device?.catalog?.recommendedSources || []) {
+    if (!source || !TRUSTED_SOURCE_CLASSES.has(source.class) || typeof source.ref !== 'string' || !source.ref.trim()) continue;
+    if (source.class !== VENDOR_SOURCE_CLASS) {
+      trusted.push(source);
+      continue;
+    }
+
+    const binding = verifiedVendorBinding(source, device, snapshot, support, vendorRepositoryBindings, now);
+    if (!binding) continue;
+    trusted.push(Object.freeze({
+      ...source,
+      repositoryId: binding.bound.repository.id,
+      verification: Object.freeze({
+        schema: VENDOR_BINDING_SCHEMA,
+        bindingDigest: binding.bindingDigest,
+        evidenceValidUntil: binding.bound.metadata.effectiveValidUntil,
+        packages: Object.freeze([...binding.bound.packages])
+      })
+    }));
+  }
+  return trusted;
 }
 
 function aggregateSupport(device, catalog) {
@@ -27,7 +90,7 @@ function aggregateSupport(device, catalog) {
 }
 
 function rollbackMode(sources) {
-  if (!sources.length) return 'not-required';
+  if (!sources.length) return 'required-before-apply';
   if (sources.some(source => source.rollback === true)) return 'source-supported';
   return 'required-before-apply';
 }
@@ -52,10 +115,13 @@ function hostFacts(snapshot) {
   };
 }
 
-export function resolveDriverPlan(snapshot, catalog, { now = new Date() } = {}) {
+export function resolveDriverPlan(snapshot, catalog, { now = new Date(), vendorRepositoryBindings = [] } = {}) {
   if (snapshot?.schema !== 'swir.hardware-snapshot/0.2' || snapshot?.host?.readOnly !== true) {
     throw new Error('Driver resolver requires a trusted read-only hardware snapshot');
   }
+  const current = now instanceof Date ? new Date(now.getTime()) : new Date(now);
+  if (!Number.isFinite(current.getTime())) throw new Error('Driver resolver requires a valid current time');
+  if (!Array.isArray(vendorRepositoryBindings)) throw new Error('Vendor repository bindings must be an array');
 
   const facts = hostFacts(snapshot);
   const operations = [];
@@ -67,7 +133,7 @@ export function resolveDriverPlan(snapshot, catalog, { now = new Date() } = {}) 
     const isMatched = device?.catalog?.matched === true;
     if (isMatched) matched += 1;
     const support = aggregateSupport(device, catalog);
-    const sources = trustedSources(device);
+    const sources = trustedSources(device, snapshot, support, vendorRepositoryBindings, current);
     const moduleLoaded = device?.driver?.status === 'loaded' && typeof device?.driver?.module === 'string';
     const expectedModuleLoaded = moduleLoaded && (support.modules.length === 0 || support.modules.includes(device.driver.module));
 
@@ -79,15 +145,16 @@ export function resolveDriverPlan(snapshot, catalog, { now = new Date() } = {}) 
 
     let index = 0;
     const push = (kind, reason, extra = {}) => {
+      const requiresPrivilege = kind !== 'diagnose-unbound';
       operations.push({
         id: operationId(device.key, kind, ++index),
         deviceKey: device.key,
         kind,
         state: 'proposed',
-        requiresPrivilege: kind !== 'diagnose-unbound',
+        requiresPrivilege,
         reason,
         sources,
-        rollback: rollbackMode(sources),
+        rollback: requiresPrivilege ? rollbackMode(sources) : 'not-required',
         ...extra
       });
     };
@@ -133,7 +200,7 @@ export function resolveDriverPlan(snapshot, catalog, { now = new Date() } = {}) 
 
   return {
     schema: 'swir.driver-plan/0.1',
-    generatedAt: now.toISOString(),
+    generatedAt: current.toISOString(),
     mode: 'preview',
     readOnly: true,
     autoExecutable: false,
@@ -158,6 +225,17 @@ export function assertSafeDriverPlan(plan) {
     for (const source of operation.sources || []) {
       if (!TRUSTED_SOURCE_CLASSES.has(source.class)) {
         throw new Error(`Untrusted driver source class: ${source.class}`);
+      }
+      if (source.class === VENDOR_SOURCE_CLASS) {
+        if (!String(source.repositoryId || '').trim()) throw new Error('Vendor driver source requires repositoryId');
+        if (source?.verification?.schema !== VENDOR_BINDING_SCHEMA || !HEX64.test(String(source?.verification?.bindingDigest || ''))) {
+          throw new Error('Vendor driver source requires a verified transaction binding');
+        }
+        const expiry = Date.parse(source?.verification?.evidenceValidUntil);
+        if (!Number.isFinite(expiry)) throw new Error('Vendor driver source requires bounded evidence expiry');
+        if (!Array.isArray(source?.verification?.packages) || source.verification.packages.length === 0) {
+          throw new Error('Vendor driver source requires verified package scope');
+        }
       }
     }
     if (operation.requiresPrivilege && operation.rollback === 'not-required') {
