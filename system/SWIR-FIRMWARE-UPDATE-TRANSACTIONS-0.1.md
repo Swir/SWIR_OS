@@ -36,7 +36,7 @@ The command boundary is intentionally narrow:
 - `executing` — the exact reviewed device update command is running.
 - `committed` — fwupd returned success and the candidate did not declare a reboot requirement.
 - `staged-reboot-required` — fwupd returned success for a candidate whose metadata requires reboot; SWIR does not reboot automatically.
-- `verified` — a later read-only fwupd inventory shows the same bound device at the reviewed target version with no reported update error.
+- `verified` — a later read-only fwupd inventory shows the same bound device at the reviewed target version and the required fwupd history evidence does not report failure.
 - `failed-needs-recovery` — result is ambiguous or failed; no automatic rollback is attempted.
 
 Every successful mutation result still carries `verificationRequired: true`. Transaction verification is a separate step and does not prove that a required reboot/power-cycle happened, nor does it count as physical-hardware qualification.
@@ -45,11 +45,11 @@ Every successful mutation result still carries `verificationRequired: true`. Tra
 
 `system/hardware/firmware-update-verification-service.mjs` adds a fail-closed, read-only verification layer over the transaction journal and trusted fwupd inventory.
 
-Verification is allowed only for `committed`, `staged-reboot-required` or already `verified` transactions. It reopens the exact journal entry, binds to the same device ID and target version, requires trusted read-only fwupd inventory, rejects duplicate device identities, and records the observed installed version and fwupd update error state back into the owner-only transaction journal.
+Verification is allowed only for `committed`, `staged-reboot-required` or already `verified` transactions. It reopens the exact journal entry, binds to the same device ID and target version, requires trusted read-only fwupd inventory, rejects duplicate device identities, and records the observed installed version plus fwupd history state back into the owner-only transaction journal.
 
-A transaction becomes `verified` only when the bound device is present, its current firmware version exactly matches the reviewed target version and fwupd reports no update error. A missing device, unchanged version or update error remains pending/review-required. Failed or still-executing transactions are never promoted by the verifier, and the verifier never retries, downgrades, force-flashes or claims automatic rollback.
+The trusted read-only fwupd surface includes `get-devices`, `get-updates` and `get-history`. For reboot-required updates SWIR does **not** accept `get-devices` alone as success evidence: the current installed version must equal the reviewed target and the latest matching history record must report update state `2` with no update error. A history state `3`, any history error, a missing history record, a missing device or an unchanged version blocks verification or keeps it pending. This protects SWIR from treating a live device view as authoritative when fwupd history records a failed post-reboot update.
 
-The verification result intentionally includes `physicalHardwareQualification: false` and `rebootOrPowerCycleProven: false`. Those stronger claims require separate operator-controlled evidence on supported hardware.
+Failed or still-executing transactions are never promoted by the verifier, and the verifier never retries, downgrades, force-flashes or claims automatic rollback. The verification result intentionally includes `physicalHardwareQualification: false` and `rebootOrPowerCycleProven: false`; those stronger claims require separate operator-controlled evidence on supported hardware.
 
 ## Driver Center integration
 
@@ -61,7 +61,7 @@ The caller first obtains `firmwareTransactions.plan(candidate)`, displays the pl
 
 `firmware-update-transaction-selftest.mjs` uses a fake read-only fwupd/LVFS inventory and fake command runner; it never flashes hardware. It verifies plan hashing, exact digest confirmation, stale-plan refusal, ambiguous-candidate refusal, safe argv construction, journal state/permissions, no automatic reboot/rollback and rejection of unsafe flags.
 
-`firmware-update-verification-selftest.mjs` creates real journaled transaction fixtures through `FirmwareUpdateTransactionService` and then exercises the separate verifier. It proves exact target-version verification, persistence of verified evidence, pending reboot/power-cycle handling, update-error refusal, no physical-qualification claim, no automatic retry and no automatic rollback.
+`firmware-update-verification-selftest.mjs` creates real journaled transaction fixtures through `FirmwareUpdateTransactionService` and then exercises the separate verifier. It proves exact target-version plus history verification, persistence of verified evidence, pending reboot/power-cycle handling, missing-history handling, explicit rejection of a history-reported reboot failure even when the live device view has no error, no physical-qualification claim, no automatic retry and no automatic rollback.
 
 `firmware-driver-mutation-integration.selftest.mjs` wires the real `DriverMutationTransactionService` to the real firmware transaction service with controlled fakes only at the fwupd inventory/command boundary. It verifies that the reviewed plan/digest reaches the child transaction, the parent records the child journal identity, and a reboot-required result propagates as a recovery-relevant parent state.
 
