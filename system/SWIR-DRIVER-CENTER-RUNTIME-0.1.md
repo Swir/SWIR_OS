@@ -49,14 +49,18 @@ Driver Center diagnostics
 - an unavailable/offline fwupd inventory is reported as diagnostics state rather than weakening trust checks;
 - the CLI refuses symlink output targets and writes evidence mode `0600`.
 
-## Live proof
+## Contract and host-visibility proof
 
-The dedicated Driver Center contract runs the production runtime against the CI host's real Linux sysfs inventory and requires live PCI inventory, at least one bound kernel driver, a preview-only plan, zero trust-policy violations and a non-mutating fwupd/LVFS boundary. Existing Hardware Service Live E2E separately validates the same Hardware Service, catalog and Driver Center policy against real kernel sysfs.
+The dedicated Driver Center contract always runs the complete deterministic Hardware Service, catalog, resolver, Driver Center, fwupd/LVFS and runtime self-test suite. It then executes the production CLI against the hosted runner's actual Linux sysfs and requires the diagnostics/read-only/mutation-policy invariants regardless of how much hardware the host exposes.
 
-The Hardware Catalog now includes the QEMU virtio block path used by the System Edition boot lane and keeps source classes limited to controlled Linux sources. The NVIDIA vendor source also carries an explicit repository identity so it cannot become a latent policy violation when matching real hardware.
+Hosted CI hardware visibility is an environment property, not a product invariant. Before the production probe the workflow checks `/sys/bus/pci/devices/*` explicitly. If PCI devices are visible, the runtime must observe at least one real PCI device. If the hosted runner exposes zero PCI devices, the runtime must report zero PCI devices; the workflow records that limitation in the job summary and **does not fabricate a device, a bound driver, live-hardware evidence or a hardware-qualification claim**. This keeps the safety/runtime contract deterministic without weakening the separate live-hardware gate.
+
+`System Hardware Live E2E` remains the stronger live-environment lane. It executes the production Hardware Service only when the runner actually exposes PCI sysfs inventory and then requires PCI inventory, a loaded kernel driver, zero Driver Center policy violations and `hardwareQualificationClaim=false`. A no-PCI hosted runner is reported as unavailable evidence, not converted into synthetic proof. Physical-machine qualification remains separate from both hosted-runner lanes.
+
+The Hardware Catalog includes the QEMU virtio block path used by the System Edition boot lane and keeps source classes limited to controlled Linux sources. The NVIDIA vendor source also carries an explicit repository identity so it cannot become a latent policy violation when matching real hardware.
 
 ## Roadmap interpretation
 
-Once the exact revision passes the Driver Center contract and the existing live Hardware Service gate, the scoped **SWIR Driver Center / Hardware Catalog** deliverable is implemented: real PCI/USB IDs are mapped to controlled support/source metadata, loaded-driver status is visible, proposed package/firmware operations carry rollback metadata, fwupd/LVFS update availability is surfaced read-only when available, and diagnostics remain fail-closed.
+Once the exact revision passes the Driver Center contract and the existing live Hardware Service gate on an environment that exposes qualifying kernel sysfs inventory, the scoped **SWIR Driver Center / Hardware Catalog** deliverable is implemented: real PCI/USB IDs are mapped to controlled support/source metadata, loaded-driver status is visible, proposed package/firmware operations carry rollback metadata, fwupd/LVFS update availability is surfaced read-only when available, and diagnostics remain fail-closed.
 
 Separate roadmap items remain open for actual driver/firmware mutation transactions, production fwupd update/reboot/recovery, vendor repository onboarding and broad physical hardware qualification.
