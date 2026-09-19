@@ -18,6 +18,11 @@ const runner = async (binary, args, options) => {
       ] }
     ] }) };
   }
+  if (args[0] === 'get-history') {
+    return { stdout: JSON.stringify({ Devices: [
+      { DeviceId: 'dev-1', Name: 'System Firmware', Version: '1.0', VersionOld: '0.9', UpdateState: 2, Modified: 1789800000 }
+    ] }) };
+  }
   throw new Error(`Unexpected command ${args[0]}`);
 };
 
@@ -27,24 +32,30 @@ assertSafeFwupdLvfsInventory(inventory);
 assert.equal(inventory.available, true);
 assert.equal(inventory.devices.length, 2);
 assert.equal(inventory.candidates.length, 1);
+assert.equal(inventory.history.length, 1);
+assert.equal(inventory.history[0].deviceId, 'dev-1');
+assert.equal(inventory.history[0].previousVersion, '0.9');
+assert.equal(inventory.history[0].updateState, 2);
 assert.equal(inventory.ignoredNonLvfsCandidates, 1);
 assert.equal(inventory.candidates[0].source.class, 'fwupd-lvfs');
 assert.equal(inventory.candidates[0].source.repositoryId, 'lvfs');
 assert.equal(inventory.candidates[0].mutationAuthorized, false);
 assert.equal(inventory.candidates[0].requiresReboot, true);
-assert.equal(calls.length, 2);
+assert.equal(calls.length, 3);
 for (const call of calls) {
   assert.equal(call.options.shell, false);
   assert.equal(call.options.env.PATH, '/usr/sbin:/usr/bin:/sbin:/bin');
   assert.deepEqual(call.args.slice(1), ['--json']);
-  assert.ok(['get-devices', 'get-updates'].includes(call.args[0]));
+  assert.ok(['get-devices', 'get-updates', 'get-history'].includes(call.args[0]));
 }
 assert.equal(FwupdLvfsPolicy.refreshCommandExposed, false);
 assert.equal(FwupdLvfsPolicy.updateCommandExposed, false);
+assert.equal(FwupdLvfsPolicy.historyReadOnly, true);
 assert.equal(FwupdLvfsPolicy.mutationRequiresSeparatePrivilegedTransaction, true);
 
 assert.throws(() => new FwupdLvfsService({ binary: '/tmp/fwupdmgr' }), error => error?.code === 'FWUPD_BINARY_NOT_ALLOWLISTED');
 assert.throws(() => assertSafeFwupdLvfsInventory({ ...inventory, mutationCapable: true }), error => error?.code === 'FWUPD_MUTATION_BOUNDARY_INVALID');
+assert.throws(() => assertSafeFwupdLvfsInventory({ ...inventory, history: null }), error => error?.code === 'FWUPD_HISTORY_INVALID');
 assert.throws(() => assertSafeFwupdLvfsInventory({ ...inventory, candidates: [{ ...inventory.candidates[0], remoteId: 'vendor' }] }), error => error?.code === 'FWUPD_REMOTE_INVALID');
 
 console.log('fwupd/LVFS read-only service self-test: OK');

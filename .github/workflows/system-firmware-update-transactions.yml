@@ -1,0 +1,97 @@
+name: System Firmware Update Transactions
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'system/hardware/fwupd-lvfs-service.mjs'
+      - 'system/hardware/firmware-update-transaction-service.mjs'
+      - 'system/hardware/firmware-update-transaction-selftest.mjs'
+      - 'system/hardware/firmware-update-verification-service.mjs'
+      - 'system/hardware/firmware-update-verification-selftest.mjs'
+      - 'system/hardware/firmware-driver-mutation-integration.selftest.mjs'
+      - 'system/hardware/driver-mutation-transaction-service.mjs'
+      - 'system/SWIR-FIRMWARE-UPDATE-TRANSACTIONS-0.1.md'
+      - '.github/workflows/system-firmware-update-transactions.yml'
+  pull_request:
+    paths:
+      - 'system/hardware/fwupd-lvfs-service.mjs'
+      - 'system/hardware/firmware-update-transaction-service.mjs'
+      - 'system/hardware/firmware-update-transaction-selftest.mjs'
+      - 'system/hardware/firmware-update-verification-service.mjs'
+      - 'system/hardware/firmware-update-verification-selftest.mjs'
+      - 'system/hardware/firmware-driver-mutation-integration.selftest.mjs'
+      - 'system/hardware/driver-mutation-transaction-service.mjs'
+      - 'system/SWIR-FIRMWARE-UPDATE-TRANSACTIONS-0.1.md'
+      - '.github/workflows/system-firmware-update-transactions.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: system-firmware-update-transactions-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: Firmware transaction contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax checks
+        run: |
+          node --check system/hardware/fwupd-lvfs-service.mjs
+          node --check system/hardware/firmware-update-transaction-service.mjs
+          node --check system/hardware/firmware-update-transaction-selftest.mjs
+          node --check system/hardware/firmware-update-verification-service.mjs
+          node --check system/hardware/firmware-update-verification-selftest.mjs
+          node --check system/hardware/firmware-driver-mutation-integration.selftest.mjs
+      - name: Transaction self-test
+        run: node system/hardware/firmware-update-transaction-selftest.mjs
+      - name: Post-update verification self-test
+        run: node system/hardware/firmware-update-verification-selftest.mjs
+      - name: Driver Center integration self-test
+        run: node system/hardware/firmware-driver-mutation-integration.selftest.mjs
+      - name: Fail-closed policy assertions
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F "SAFE_COMMANDS = new Set(['get-devices', 'get-updates', 'get-history'])" system/hardware/fwupd-lvfs-service.mjs
+          grep -F "historyReadOnly: true" system/hardware/fwupd-lvfs-service.mjs
+          grep -F "exactPlanDigestConfirmation: true" system/hardware/firmware-update-transaction-service.mjs
+          grep -F "liveMetadataRevalidation: true" system/hardware/firmware-update-transaction-service.mjs
+          grep -F "arbitraryFirmwareUrlOrFile: false" system/hardware/firmware-update-transaction-service.mjs
+          grep -F "noSafetyCheck: false" system/hardware/firmware-update-transaction-service.mjs
+          grep -F "automaticReboot: false" system/hardware/firmware-update-transaction-service.mjs
+          grep -F "automaticRollback: false" system/hardware/firmware-update-transaction-service.mjs
+          grep -F "durableJournalBeforeMutation: true" system/hardware/firmware-update-transaction-service.mjs
+          grep -F "argv: ['update', live.deviceId, '--assume-yes', '--no-reboot-check', '--no-unreported-check', '--json']" system/hardware/firmware-update-transaction-service.mjs
+          grep -F "readOnlyHardwareInspection: true" system/hardware/firmware-update-verification-service.mjs
+          grep -F "getDevicesAloneSufficientAfterReboot: false" system/hardware/firmware-update-verification-service.mjs
+          grep -F "historyRequiredForRebootedUpdate: true" system/hardware/firmware-update-verification-service.mjs
+          grep -F "historyFailureBlocksVerification: true" system/hardware/firmware-update-verification-service.mjs
+          grep -F "failedTransactionAutoPromotion: false" system/hardware/firmware-update-verification-service.mjs
+          grep -F "automaticRetry: false" system/hardware/firmware-update-verification-service.mjs
+          grep -F "physicalHardwareQualification: false" system/hardware/firmware-update-verification-service.mjs
+          grep -F "shell: false" system/hardware/firmware-update-transaction-service.mjs
+
+  debian-13:
+    name: Debian 13 Node contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    container:
+      image: debian:13-slim
+    steps:
+      - name: Install runtime
+        run: apt-get update && apt-get install -y --no-install-recommends nodejs ca-certificates && rm -rf /var/lib/apt/lists/*
+      - uses: actions/checkout@v4
+      - name: Run self-tests on System Edition base
+        run: |
+          node system/hardware/firmware-update-transaction-selftest.mjs
+          node system/hardware/firmware-update-verification-selftest.mjs
+          node system/hardware/firmware-driver-mutation-integration.selftest.mjs

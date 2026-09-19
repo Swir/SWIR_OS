@@ -23,6 +23,7 @@ from hardware_center_runtime import (  # noqa: E402
     HardwareCenterError,
     HardwareReport,
     MAX_DEVICE_ROWS,
+    MAX_FIRMWARE_ROWS,
     MAX_OPERATION_ROWS,
     QUERY_TIMEOUT_SECONDS,
     read_hardware_report,
@@ -51,6 +52,7 @@ class SwirHardwareCenter(Gtk.Application):
         self.summary_label: Gtk.Label | None = None
         self.devices_list: Gtk.ListBox | None = None
         self.operations_list: Gtk.ListBox | None = None
+        self.firmware_list: Gtk.ListBox | None = None
         self.refresh_button: Gtk.Button | None = None
         self.e2e = os.environ.get("SWIR_APP_E2E", "0") == "1"
         self.evidence_path = os.environ.get("SWIR_APP_EVIDENCE_PATH", "")
@@ -123,10 +125,16 @@ class SwirHardwareCenter(Gtk.Application):
         operations_scroll.set_child(self.operations_list)
         stack.add_titled(operations_scroll, "reviews", "Recommended reviews")
 
+        self.firmware_list = Gtk.ListBox()
+        self.firmware_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        firmware_scroll = Gtk.ScrolledWindow()
+        firmware_scroll.set_child(self.firmware_list)
+        stack.add_titled(firmware_scroll, "firmware", "Firmware updates")
+
         footer = Gtk.Label(
             label=(
                 "Read-only diagnostics • Linux in-tree drivers and linux-firmware first • "
-                "no random binary downloads • no Windows kernel-driver fallback"
+                "LVFS candidates are review-only here • no random binary downloads • no Windows kernel-driver fallback"
             ),
             wrap=True,
         )
@@ -179,19 +187,31 @@ class SwirHardwareCenter(Gtk.Application):
         listbox.append(row)
 
     def _apply_error(self, message: str) -> bool:
-        assert self.summary_label is not None and self.devices_list is not None and self.operations_list is not None
+        assert (
+            self.summary_label is not None
+            and self.devices_list is not None
+            and self.operations_list is not None
+            and self.firmware_list is not None
+        )
         self.last_error = message
         self.summary_label.set_text(f"Hardware diagnostics unavailable: {message}")
         self.summary_label.add_css_class("swir-warning")
         self._clear_list(self.devices_list)
         self._clear_list(self.operations_list)
+        self._clear_list(self.firmware_list)
         self._append_message(self.devices_list, "No trusted hardware report is available.")
         self._append_message(self.operations_list, "No driver or firmware review is available.")
+        self._append_message(self.firmware_list, "No trusted LVFS firmware inventory is available.")
         self._finish_refresh()
         return False
 
     def _apply_report(self, report: HardwareReport) -> bool:
-        assert self.summary_label is not None and self.devices_list is not None and self.operations_list is not None
+        assert (
+            self.summary_label is not None
+            and self.devices_list is not None
+            and self.operations_list is not None
+            and self.firmware_list is not None
+        )
         self.last_report = report
         self.summary_label.remove_css_class("swir-warning")
         self.summary_label.set_text(
@@ -199,10 +219,12 @@ class SwirHardwareCenter(Gtk.Application):
             f"{report.devices_total} devices • {report.healthy} healthy • "
             f"{report.attention} attention • {report.unknown} unknown • "
             f"fwupd {'available' if report.fwupd_available else 'unavailable'} • "
-            f"LVFS metadata {'present' if report.lvfs_metadata_present else 'not detected'}"
+            f"LVFS inventory {'ready' if report.firmware_inventory_ready else 'not ready'} • "
+            f"{len(report.firmware_updates)} trusted firmware update(s)"
         )
         self._clear_list(self.devices_list)
         self._clear_list(self.operations_list)
+        self._clear_list(self.firmware_list)
 
         if not report.devices:
             self._append_message(self.devices_list, "No PCI/USB devices were visible to this session.")
@@ -251,6 +273,40 @@ class SwirHardwareCenter(Gtk.Application):
             row.set_child(box)
             self.operations_list.append(row)
 
+        if not report.firmware_inventory_ready:
+            message = "Trusted LVFS firmware inventory is not ready."
+            if report.firmware_error_code:
+                message += f" Diagnostic code: {report.firmware_error_code}."
+            self._append_message(self.firmware_list, message)
+        elif not report.firmware_updates:
+            self._append_message(self.firmware_list, "No trusted LVFS firmware updates are currently offered.")
+        for update in report.firmware_updates:
+            row = Gtk.ListBoxRow()
+            row.add_css_class("swir-row")
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+            title = Gtk.Label(
+                label=f"{update.device_name} • {update.current_version} → {update.target_version}",
+                wrap=True,
+            )
+            title.set_xalign(0)
+            box.append(title)
+            detail = Gtk.Label(
+                label=(
+                    f"LVFS • release {update.release_id} • {update.checksum_count} signed metadata checksum(s) • "
+                    f"{'reboot/power-cycle review required' if update.requires_reboot else 'post-update verification required'}"
+                ),
+                wrap=True,
+            )
+            detail.set_xalign(0)
+            detail.add_css_class("swir-muted")
+            box.append(detail)
+            source = Gtk.Label(label=f"Read-only source binding: {update.source_ref}", wrap=True, selectable=True)
+            source.set_xalign(0)
+            source.add_css_class("swir-muted")
+            box.append(source)
+            row.set_child(box)
+            self.firmware_list.append(row)
+
         self._finish_refresh()
         return False
 
@@ -287,17 +343,22 @@ class SwirHardwareCenter(Gtk.Application):
             "windowMapped": True,
             "privilegedOperationsInUi": False,
             "mutationControlsExposed": False,
+            "firmwareMutationControlsExposed": False,
             "driverReportReadOnly": True,
+            "firmwareInventoryReadOnly": True,
             "arbitraryDriverDownloadsAllowed": False,
             "windowsKernelDriversAsLinuxPath": False,
             "queryTimeoutSeconds": QUERY_TIMEOUT_SECONDS,
             "deviceRowsBounded": MAX_DEVICE_ROWS,
             "operationRowsBounded": MAX_OPERATION_ROWS,
+            "firmwareRowsBounded": MAX_FIRMWARE_ROWS,
             "reportLoaded": report is not None,
             "visibleDeviceCount": len(report.devices) if report else 0,
             "visibleOperationCount": len(report.operations) if report else 0,
+            "visibleFirmwareUpdateCount": len(report.firmware_updates) if report else 0,
             "fwupdAvailable": report.fwupd_available if report else False,
             "lvfsMetadataPresent": report.lvfs_metadata_present if report else False,
+            "firmwareInventoryReady": report.firmware_inventory_ready if report else False,
             "error": self.last_error,
         }
         path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")

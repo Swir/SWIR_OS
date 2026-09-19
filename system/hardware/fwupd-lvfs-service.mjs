@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 
 const fsp = fs.promises;
 const DEFAULT_BINARY = '/usr/bin/fwupdmgr';
-const SAFE_COMMANDS = new Set(['get-devices', 'get-updates']);
+const SAFE_COMMANDS = new Set(['get-devices', 'get-updates', 'get-history']);
 const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 
 function fail(code, message) {
@@ -46,6 +46,15 @@ function normalizeDevice(device) {
     flags: list(device?.Flags).map(item => text(item, 128)).filter(Boolean),
     updateState: Number.isInteger(device?.UpdateState) ? device.UpdateState : null,
     updateError: text(device?.UpdateError, 1024) || null
+  };
+}
+
+function normalizeHistoryDevice(device) {
+  return {
+    ...normalizeDevice(device),
+    previousVersion: text(device?.VersionOld ?? device?.PreviousVersion, 128) || null,
+    created: Number.isFinite(device?.Created) ? Number(device.Created) : null,
+    modified: Number.isFinite(device?.Modified) ? Number(device.Modified) : null
   };
 }
 
@@ -116,7 +125,7 @@ export class FwupdLvfsService {
   }
 
   async #run(command) {
-    assert(SAFE_COMMANDS.has(command), 'FWUPD_COMMAND_FORBIDDEN', 'Only read-only fwupd inventory commands are exposed');
+    assert(SAFE_COMMANDS.has(command), 'FWUPD_COMMAND_FORBIDDEN', 'Only read-only fwupd inventory/history commands are exposed');
     const probe = await this.probe();
     assert(probe.available, 'FWUPD_UNAVAILABLE', 'fwupdmgr is not installed on this host');
     const result = await this.#runner(this.#binary, [command, '--json'], {
@@ -134,13 +143,15 @@ export class FwupdLvfsService {
     if (!probe.available) {
       return Object.freeze({
         schema: 'swir.fwupd-lvfs-inventory/0.1', available: false, readOnly: true, mutationCapable: false,
-        provider: 'fwupd-lvfs', trustedRemoteId: 'lvfs', devices: [], candidates: [], ignoredNonLvfsCandidates: 0, probe
+        provider: 'fwupd-lvfs', trustedRemoteId: 'lvfs', devices: [], candidates: [], history: [], ignoredNonLvfsCandidates: 0, probe
       });
     }
 
     const devicesDocument = await this.#run('get-devices');
     const updatesDocument = await this.#run('get-updates');
+    const historyDocument = await this.#run('get-history');
     const devices = list(devicesDocument.Devices).map(normalizeDevice);
+    const history = list(historyDocument.Devices).map(normalizeHistoryDevice);
     const allReleases = list(updatesDocument.Devices).flatMap(releasesFromDevice);
     const candidates = allReleases
       .filter(release => release.remoteId === 'lvfs')
@@ -161,6 +172,7 @@ export class FwupdLvfsService {
       trustedRemoteId: 'lvfs',
       devices,
       candidates,
+      history,
       ignoredNonLvfsCandidates: allReleases.length - candidates.length,
       probe
     });
@@ -170,6 +182,7 @@ export class FwupdLvfsService {
 export function assertSafeFwupdLvfsInventory(inventory) {
   assert(inventory?.schema === 'swir.fwupd-lvfs-inventory/0.1', 'FWUPD_INVENTORY_SCHEMA_INVALID', 'fwupd inventory schema mismatch');
   assert(inventory.readOnly === true && inventory.mutationCapable === false, 'FWUPD_MUTATION_BOUNDARY_INVALID', 'fwupd inventory surface must remain read-only');
+  assert(Array.isArray(inventory.history), 'FWUPD_HISTORY_INVALID', 'fwupd inventory must include a read-only history array');
   for (const candidate of list(inventory.candidates)) {
     assert(candidate?.source?.class === 'fwupd-lvfs', 'FWUPD_SOURCE_CLASS_INVALID', 'Firmware candidate must use fwupd-lvfs source class');
     assert(candidate?.source?.repositoryId === 'lvfs' && candidate?.remoteId === 'lvfs', 'FWUPD_REMOTE_INVALID', 'Firmware candidate must be sourced from the LVFS remote');
@@ -187,6 +200,7 @@ export const FwupdLvfsPolicy = Object.freeze({
   refreshCommandExposed: false,
   updateCommandExposed: false,
   installCommandExposed: false,
+  historyReadOnly: true,
   shell: false,
   readOnly: true,
   mutationRequiresSeparatePrivilegedTransaction: true
