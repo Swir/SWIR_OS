@@ -18,25 +18,10 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 
 EXPECTED_IDS: Final = frozenset(
     {
-        "files",
-        "settings",
-        "terminal",
-        "software",
-        "updates",
-        "hardware",
-        "network",
-        "browser",
-        "notes",
-        "player",
-        "photo-studio",
-        "pdf-viewer",
-        "archive-manager",
-        "calculator",
-        "screenshot",
-        "clock",
-        "system-monitor",
-        "logs-diagnostics",
-        "backup-restore",
+        "files", "settings", "terminal", "software", "updates", "hardware",
+        "network", "browser", "notes", "player", "photo-studio", "pdf-viewer",
+        "archive-manager", "calculator", "screenshot", "clock", "system-monitor",
+        "logs-diagnostics", "backup-restore",
     }
 )
 
@@ -45,7 +30,11 @@ EXPECTED_IDS: Final = frozenset(
 REQUIRED_MARKERS: Final = {
     "browser": ("gi.require_version(\"Gtk\", \"4.0\")", "WebKit"),
     "player": ("gi.require_version(\"Gtk\", \"4.0\")", "Gst"),
-    "photo-studio": ("GdkPixbuf", "EditHistory", "_atomic_export"),
+    "photo-studio": (
+        "GdkPixbuf", "EditHistory", "_atomic_export", "def _crop_pixbuf(",
+        "def _transform_pixels(", "def _annotate_text(", "def _draw_line(",
+        "swir.native-photo-studio-runtime-evidence/0.3",
+    ),
     "pdf-viewer": ("Poppler", "gi.require_version(\"Gtk\", \"4.0\")"),
     "archive-manager": ("_safe_member_parts", "O_NOFOLLOW", "O_EXCL", "--archive-self-test"),
     "terminal": ("Vte", "gi.require_version(\"Gtk\", \"4.0\")"),
@@ -117,6 +106,14 @@ def verify_baseline_reference() -> None:
     for label in required_labels:
         if f"- {label}" not in text:
             fail(f"Product Baseline essential-utility label changed or disappeared: {label}")
+
+    photo_required = (
+        "crop, rotate/flip, resize, exposure/brightness/contrast, color controls, filters, text, drawing/annotation, undo/redo",
+        "explicit save/export behavior",
+    )
+    for marker in photo_required:
+        if marker not in text:
+            fail(f"Photo Studio Product Baseline depth changed or disappeared: {marker}")
 
 
 def verify_source(capability: dict) -> None:
@@ -211,6 +208,7 @@ def main() -> int:
         "nativeSourceOnly": True,
         "graphicalImageStagingVerified": True,
         "nativeShellReachabilityVerified": True,
+        "photoStudioBaselineDepthMarkersVerified": True,
         "roadmapCompletionClaimed": False,
     }
     print(json.dumps(summary, sort_keys=True))
