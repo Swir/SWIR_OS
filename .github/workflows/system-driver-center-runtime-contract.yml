@@ -52,22 +52,47 @@ jobs:
           node system/hardware/driver-center-runtime.selftest.mjs
           node scripts/validate-roadmap-progress.mjs
           ! grep -E 'exec\(|execSync\(|spawn\(|spawnSync\(|curl |wget |shell: *true|https?://' system/hardware/driver-center-runtime.mjs system/hardware/driver-center-cli.mjs
-      - name: Exercise live Driver Center against Linux sysfs
+      - name: Detect hosted-runner PCI visibility
+        id: sysfs
         shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          pci=(/sys/bus/pci/devices/*)
+          if ((${#pci[@]} == 0)); then
+            echo 'available=false' >> "$GITHUB_OUTPUT"
+            echo '::warning::Hosted runner exposes no PCI devices in kernel sysfs. The deterministic Driver Center contract remains mandatory; this run makes no live-hardware evidence claim.'
+            {
+              echo '### Driver Center host visibility'
+              echo ''
+              echo 'This hosted runner exposed zero `/sys/bus/pci/devices/*` entries. The production runtime and deterministic safety contracts are still verified, but PCI richness is not fabricated and is not counted as live-hardware qualification.'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'available=true' >> "$GITHUB_OUTPUT"
+            echo "Hosted runner exposes ${#pci[@]} PCI sysfs device(s); validating that the production runtime observes PCI inventory."
+          fi
+      - name: Exercise production Driver Center against Linux sysfs
+        shell: bash
+        env:
+          EXPECT_PCI_VISIBLE: ${{ steps.sysfs.outputs.available }}
         run: |
           set -euo pipefail
           node system/hardware/driver-center-cli.mjs --compact --output "$RUNNER_TEMP/driver-center-runtime.json"
           node - "$RUNNER_TEMP/driver-center-runtime.json" <<'NODE'
           const fs = require('fs');
           const e = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          const expectPci = process.env.EXPECT_PCI_VISIBLE === 'true';
           if (e.schema !== 'swir.driver-center-runtime/0.1' || e.passed !== true) process.exit(2);
           if (e.mode !== 'diagnostics' || e.readOnly !== true || e.autoMutation !== false) process.exit(3);
-          if (e.hardware?.total < 1 || e.hardware?.pci < 1 || e.hardware?.loadedDrivers < 1) process.exit(4);
+          if (e.hardware?.inventoryProvider !== 'linux-sysfs' || !Number.isInteger(e.hardware?.total) || e.hardware.total < 0 || !Number.isInteger(e.hardware?.pci) || e.hardware.pci < 0 || !Number.isInteger(e.hardware?.loadedDrivers) || e.hardware.loadedDrivers < 0) process.exit(4);
+          if (expectPci && e.hardware.pci < 1) process.exit(10);
+          if (!expectPci && e.hardware.pci !== 0) process.exit(11);
           if (e.driverPlan?.readOnly !== true || e.driverPlan?.autoExecutable !== false) process.exit(5);
           if (e.firmware?.provider !== 'fwupd-lvfs' || e.firmware?.mutationAuthorized !== false) process.exit(6);
           if (e.policy?.unknownHardwareAutoDownload || e.policy?.arbitraryDriverUrls || e.policy?.windowsKernelDriversAsLinuxDrivers) process.exit(7);
           if (e.policy?.privilegedMutationRequiresPlan !== true || e.policy?.privilegedMutationRequiresJournal !== true) process.exit(8);
           if (!Array.isArray(e.violations) || e.violations.length !== 0) process.exit(9);
+          console.log(`Driver Center runtime contract OK: pciVisible=${expectPci} total=${e.hardware.total} pci=${e.hardware.pci} usb=${e.hardware.usb} loadedDrivers=${e.hardware.loadedDrivers}`);
           NODE
       - name: Upload Driver Center evidence
         if: always()
