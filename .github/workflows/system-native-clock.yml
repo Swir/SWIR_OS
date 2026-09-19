@@ -48,8 +48,12 @@ jobs:
           grep -F 'Clock", (("/usr/local/bin/swir-clock",)' system/session/swir-shell.py >/dev/null
           grep -F 'system/apps/swir-clock.py' system/session/provision-graphical-session.sh >/dev/null
           grep -F 'system/apps/swir-clock.desktop' system/session/provision-graphical-session.sh >/dev/null
+          grep -F 'ALARM_STORE_SCHEMA: Final = "swir.clock.alarms/1"' system/apps/swir-clock.py >/dev/null
           grep -F 'MAX_ALARMS: Final = 32' system/apps/swir-clock.py >/dev/null
           grep -F 'MAX_LABEL_CHARS: Final = 80' system/apps/swir-clock.py >/dev/null
+          grep -F 'MAX_ALARM_STATE_BYTES: Final = 64 * 1024' system/apps/swir-clock.py >/dev/null
+          grep -F 'O_NOFOLLOW' system/apps/swir-clock.py >/dev/null
+          grep -F 'os.replace(tmp_name, path)' system/apps/swir-clock.py >/dev/null
           ! grep -RE 'shell *= *True|os\.system\(|subprocess\.' system/apps/swir-clock.py
           ! grep -RE "/usr/bin/(sudo|pkexec|su)([[:space:]\"']|$)|/bin/su([[:space:]\"']|$)" system/apps/swir-clock.py
 
@@ -67,7 +71,7 @@ jobs:
           sudo install -m 0644 system/apps/swir-clock.desktop /usr/share/applications/swir-clock.desktop
           sudo update-desktop-database /usr/share/applications
           python3 system/apps/swir-clock.py --self-test
-      - name: Map Clock on Wayland and verify local utility path
+      - name: Map Clock on Wayland and verify persisted alarm storage
         run: |
           set -euo pipefail
           RUNTIME="${{ runner.temp }}/swir-clock-runtime"
@@ -96,13 +100,16 @@ jobs:
           python3 - "$RUNTIME/clock.json" <<'PY'
           import json, sys
           evidence = json.load(open(sys.argv[1], encoding='utf-8'))
-          assert evidence['schema'] == 'swir.native-clock-runtime-evidence/0.1'
+          assert evidence['schema'] == 'swir.native-clock-runtime-evidence/0.2'
           assert evidence['passed'] is True
           assert evidence['applicationId'] == 'dev.swir.Clock'
           assert evidence['nativeToolkit'] == 'gtk4'
           assert evidence['displayProtocol'] == 'wayland' and evidence['windowMapped'] is True
           assert evidence['localTimeAvailable'] is True and evidence['calendarAvailable'] is True
           assert evidence['alarmValidationPassed'] is True and evidence['alarmLimit'] == 32
+          assert evidence['alarmPersistenceRoundTrip'] is True
+          assert evidence['alarmStoreSchema'] == 'swir.clock.alarms/1'
+          assert evidence['alarmStoreMaxBytes'] == 65536
           assert evidence['alarmBackgroundServiceClaimed'] is False
           assert evidence['networkAccess'] is False and evidence['privilegedOperations'] is False
           assert evidence['selfUpdater'] is False
