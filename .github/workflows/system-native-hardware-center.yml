@@ -11,6 +11,7 @@ on:
       - 'system/hardware/driver-resolver.mjs'
       - 'system/hardware/driver-center-service.mjs'
       - 'system/hardware/driver-center-report.mjs'
+      - 'system/hardware/fwupd-lvfs-service.mjs'
       - 'system/hardware/hardware-catalog.json'
       - 'system/contracts/trusted-sources.json'
       - 'system/session/swir-shell.py'
@@ -26,6 +27,7 @@ on:
       - 'system/hardware/driver-resolver.mjs'
       - 'system/hardware/driver-center-service.mjs'
       - 'system/hardware/driver-center-report.mjs'
+      - 'system/hardware/fwupd-lvfs-service.mjs'
       - 'system/hardware/hardware-catalog.json'
       - 'system/contracts/trusted-sources.json'
       - 'system/session/swir-shell.py'
@@ -64,6 +66,7 @@ jobs:
           node --check system/hardware/driver-resolver.mjs
           node --check system/hardware/driver-center-service.mjs
           node --check system/hardware/driver-center-report.mjs
+          node --check system/hardware/fwupd-lvfs-service.mjs
           node system/hardware/driver-center-runtime.selftest.mjs
           node system/hardware/driver-center-service.selftest.mjs
           bash -n system/session/provision-graphical-session.sh
@@ -73,6 +76,8 @@ jobs:
           grep -F '/usr/local/bin/swir-hardware-center' system/session/provision-graphical-session.sh >/dev/null
           grep -F '/usr/local/lib/swir/hardware/driver-center-report.mjs' system/session/provision-graphical-session.sh >/dev/null
           grep -F 'mutationControlsExposed": False' system/apps/swir-hardware-center.py >/dev/null
+          grep -F 'firmwareMutationControlsExposed": False' system/apps/swir-hardware-center.py >/dev/null
+          grep -F 'firmwareInventoryReadOnly": True' system/apps/swir-hardware-center.py >/dev/null
           grep -F 'arbitraryDriverDownloadsAllowed": False' system/apps/swir-hardware-center.py >/dev/null
           grep -F 'windowsKernelDriversAsLinuxPath": False' system/apps/swir-hardware-center.py >/dev/null
           ! grep -RE '/usr/bin/(sudo|pkexec|su)|/bin/su|os\.system\(|shell *= *True' \
@@ -129,12 +134,16 @@ jobs:
           assert evidence['windowMapped'] is True and evidence['reportLoaded'] is True
           assert evidence['privilegedOperationsInUi'] is False
           assert evidence['mutationControlsExposed'] is False
+          assert evidence['firmwareMutationControlsExposed'] is False
           assert evidence['driverReportReadOnly'] is True
+          assert evidence['firmwareInventoryReadOnly'] is True
           assert evidence['arbitraryDriverDownloadsAllowed'] is False
           assert evidence['windowsKernelDriversAsLinuxPath'] is False
           assert evidence['queryTimeoutSeconds'] == 6
           assert evidence['deviceRowsBounded'] == 256 and evidence['operationRowsBounded'] == 256
+          assert evidence['firmwareRowsBounded'] == 128
           assert 0 <= evidence['visibleDeviceCount'] <= 256
           assert 0 <= evidence['visibleOperationCount'] <= 256
+          assert 0 <= evidence['visibleFirmwareUpdateCount'] <= 128
           assert evidence['error'] == ''
           PY
