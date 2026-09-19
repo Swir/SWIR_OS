@@ -90,7 +90,7 @@ function aggregateSupport(device, catalog) {
 }
 
 function rollbackMode(sources) {
-  if (!sources.length) return 'not-required';
+  if (!sources.length) return 'required-before-apply';
   if (sources.some(source => source.rollback === true)) return 'source-supported';
   return 'required-before-apply';
 }
@@ -108,7 +108,6 @@ function hostFacts(snapshot) {
       versionId: distro.versionId ?? null,
       family: distro.family || 'unknown'
     },
-    architecture: normalizeArchitecture(snapshot?.host?.arch) || 'unknown',
     fwupdAvailable: capabilities.fwupd?.available === true,
     lvfsMetadataPresent: capabilities.fwupd?.lvfsMetadataPresent === true,
     packageManagers: uniqueStrings(capabilities.packageManagers || []),
@@ -146,15 +145,16 @@ export function resolveDriverPlan(snapshot, catalog, { now = new Date(), vendorR
 
     let index = 0;
     const push = (kind, reason, extra = {}) => {
+      const requiresPrivilege = kind !== 'diagnose-unbound';
       operations.push({
         id: operationId(device.key, kind, ++index),
         deviceKey: device.key,
         kind,
         state: 'proposed',
-        requiresPrivilege: kind !== 'diagnose-unbound',
+        requiresPrivilege,
         reason,
         sources,
-        rollback: rollbackMode(sources),
+        rollback: requiresPrivilege ? rollbackMode(sources) : 'not-required',
         ...extra
       });
     };
