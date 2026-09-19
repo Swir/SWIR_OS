@@ -33,6 +33,7 @@ function inventoryFor(item = candidate, extras = []) {
     trustedRemoteId: 'lvfs',
     devices: [],
     candidates: [item, ...extras],
+    history: [],
     ignoredNonLvfsCandidates: 0,
     probe: { available: true, trustedBinary: true }
   };
