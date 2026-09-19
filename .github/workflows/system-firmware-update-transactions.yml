@@ -61,6 +61,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          grep -F "SAFE_COMMANDS = new Set(['get-devices', 'get-updates', 'get-history'])" system/hardware/fwupd-lvfs-service.mjs
+          grep -F "historyReadOnly: true" system/hardware/fwupd-lvfs-service.mjs
           grep -F "exactPlanDigestConfirmation: true" system/hardware/firmware-update-transaction-service.mjs
           grep -F "liveMetadataRevalidation: true" system/hardware/firmware-update-transaction-service.mjs
           grep -F "arbitraryFirmwareUrlOrFile: false" system/hardware/firmware-update-transaction-service.mjs
@@ -70,6 +72,9 @@ jobs:
           grep -F "durableJournalBeforeMutation: true" system/hardware/firmware-update-transaction-service.mjs
           grep -F "argv: ['update', live.deviceId, '--assume-yes', '--no-reboot-check', '--no-unreported-check', '--json']" system/hardware/firmware-update-transaction-service.mjs
           grep -F "readOnlyHardwareInspection: true" system/hardware/firmware-update-verification-service.mjs
+          grep -F "getDevicesAloneSufficientAfterReboot: false" system/hardware/firmware-update-verification-service.mjs
+          grep -F "historyRequiredForRebootedUpdate: true" system/hardware/firmware-update-verification-service.mjs
+          grep -F "historyFailureBlocksVerification: true" system/hardware/firmware-update-verification-service.mjs
           grep -F "failedTransactionAutoPromotion: false" system/hardware/firmware-update-verification-service.mjs
           grep -F "automaticRetry: false" system/hardware/firmware-update-verification-service.mjs
           grep -F "physicalHardwareQualification: false" system/hardware/firmware-update-verification-service.mjs
