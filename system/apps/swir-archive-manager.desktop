@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=SWIR Archive Manager
+Comment=Inspect and safely extract supported local archives
+Exec=/usr/local/bin/swir-files --archive-manager --archive-open %f
+TryExec=/usr/local/bin/swir-files
+Icon=package-x-generic
+Terminal=false
+Categories=Utility;Archiving;
+MimeType=application/zip;application/x-tar;application/x-compressed-tar;application/x-xz-compressed-tar;application/x-bzip-compressed-tar;
+StartupNotify=true
