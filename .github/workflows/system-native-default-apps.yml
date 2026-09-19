@@ -56,7 +56,7 @@ jobs:
           grep -F '"image", "Image viewer / editor"' system/apps/swir-settings.py >/dev/null
           grep -F '"pdf", "PDF viewer"' system/apps/swir-settings.py >/dev/null
           grep -F 'defaultAppsMutationOnExplicitActionOnly' system/apps/swir-settings.py >/dev/null
-          ! grep -RE '/usr/bin/(sudo|pkexec|su)([[:space:]\"'"']|$)|/bin/su([[:space:]\"'"']|$)' system/apps/swir-settings.py
+          ! grep -RE '/usr/bin/(sudo|pkexec|su)|/bin/su' system/apps/swir-settings.py
           ! grep -RE 'subprocess\.|os\.system\(' system/apps/swir-settings.py
 
   wayland-runtime:
