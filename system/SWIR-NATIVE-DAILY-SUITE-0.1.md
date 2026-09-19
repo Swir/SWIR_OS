@@ -14,7 +14,7 @@ A single trusted application may satisfy more than one UI surface only when that
 
 ## Runtime-evidence authority audit
 
-Every one of the 19 baseline capabilities now declares an `evidenceWorkflow` in `system/apps/native-daily-suite.json`. The current inventory resolves to 15 distinct first-party runtime/security workflows: the shared core-apps and Software/Update gates plus dedicated Settings/Default Apps, Hardware, Browser, Player, Photo Studio, PDF, Archive, Calculator, Screenshot, Clock, Task Manager, Diagnostics and Backup/Restore authorities.
+Every one of the 19 baseline capabilities declares an `evidenceWorkflow` in `system/apps/native-daily-suite.json`. The current inventory resolves to first-party runtime/security workflows: the shared core-apps and Software/Update gates plus dedicated Settings/Default Apps, Hardware, Browser, Player, Photo Studio, PDF, Archive, Calculator, Screenshot, Clock, Task Manager, Diagnostics and Backup/Restore authorities.
 
 The integration verifier fails closed if an evidence authority disappears, moves outside `.github/workflows`, stops being a pull-request gate, loses read-only repository permissions, no longer references the native source it claims to cover, or no longer contains a runtime/self-test execution marker. This prevents a capability from remaining in the umbrella inventory on source/staging evidence alone after its real runtime authority has been removed.
 
@@ -34,7 +34,9 @@ The gate fails closed when:
 - Backup/Restore loses the recovery companions used by System Edition;
 - Photo Studio loses the Product Baseline implementation markers for rectangular crop, color transforms, bounded text annotation or bounded drawing/annotation.
 
-CI additionally executes the real Archive Manager hostile-input/self-test and the Recovery Mode provisioning self-test. Photo Studio retains its separate dedicated Wayland/Debian 13 workflow, which is the runtime authority for real pixel changes, source immutability and export behavior. Settings now has a dedicated Default Apps runtime authority that performs real per-user Gio handler mutations for browser, media, image and PDF categories inside an isolated Wayland profile.
+CI additionally executes the real Archive Manager hostile-input/self-test and the Recovery Mode provisioning self-test. Photo Studio retains its separate dedicated Wayland/Debian 13 workflow, which is the runtime authority for real pixel changes, source immutability and export behavior. Settings has a dedicated Default Apps runtime authority for all six categories — browser, media, image, PDF, text/code and archive — using final-image staged handlers and real per-user Gio association mutations inside an isolated Wayland profile.
+
+Clock has a dedicated runtime authority for local time/calendar/alarm behavior. Alarm definitions are now covered by a strict bounded per-user persistence round trip so they survive Clock restarts; this does **not** claim alarms execute while Clock is closed.
 
 ## Security boundary
 
@@ -48,6 +50,6 @@ Passing this gate does **not** automatically complete `essential native Linux ap
 
 Photo Studio 0.3 closes the previously documented image-editor depth gap by implementing and separately runtime-verifying user-selectable crop, exposure/brightness/contrast, color controls, filters, bounded text, bounded line drawing/annotation, undo/redo and common-format export. The integration verifier fails closed if those implementation markers disappear.
 
-The runtime-evidence coverage gap is machine-audited across all 19 baseline capabilities. Native Default Apps now has separately verified browser, media, image and PDF categories, while text/code and archive handler completion, locale/accessibility depth and remaining daily-use integration gaps stay open. A green inventory/evidence gate must not hide a product-depth gap or inflate roadmap progress.
+The runtime-evidence coverage gap is machine-audited across all 19 baseline capabilities. Native Default Apps now has separately verified browser, media, image, PDF, text/code and archive categories with final-image staging. Clock alarm definitions now persist across restarts with bounded atomic state handling. Locale/accessibility depth, background alarm/session notification delivery, and remaining daily-use integration gaps stay open. A green inventory/evidence gate must not hide a product-depth gap or inflate roadmap progress.
 
 The canonical checklist and percentage remain exclusively in `SWIR-OS-ARCHITECTURE.md`.
