@@ -9,10 +9,14 @@ on:
       - 'system/apps/swir-player.py'
       - 'system/apps/swir-photo-studio.py'
       - 'system/apps/swir-pdf-viewer.py'
+      - 'system/apps/swir-text-editor.py'
+      - 'system/apps/swir-files.py'
       - 'system/apps/swir-browser.desktop'
       - 'system/apps/swir-player.desktop'
       - 'system/apps/swir-photo-studio.desktop'
       - 'system/apps/swir-pdf-viewer.desktop'
+      - 'system/apps/swir-text-editor.desktop'
+      - 'system/apps/swir-archive-manager.desktop'
       - 'system/apps/native-daily-suite.json'
       - 'system/session/provision-graphical-session.sh'
       - 'system/SWIR-NATIVE-DEFAULT-APPS-0.1.md'
@@ -24,10 +28,14 @@ on:
       - 'system/apps/swir-player.py'
       - 'system/apps/swir-photo-studio.py'
       - 'system/apps/swir-pdf-viewer.py'
+      - 'system/apps/swir-text-editor.py'
+      - 'system/apps/swir-files.py'
       - 'system/apps/swir-browser.desktop'
       - 'system/apps/swir-player.desktop'
       - 'system/apps/swir-photo-studio.desktop'
       - 'system/apps/swir-pdf-viewer.desktop'
+      - 'system/apps/swir-text-editor.desktop'
+      - 'system/apps/swir-archive-manager.desktop'
       - 'system/apps/native-daily-suite.json'
       - 'system/session/provision-graphical-session.sh'
       - 'system/SWIR-NATIVE-DEFAULT-APPS-0.1.md'
@@ -44,36 +52,47 @@ concurrency:
 jobs:
   policy:
     runs-on: ubuntu-24.04
-    timeout-minutes: 8
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Verify Default Apps policy, desktop metadata and image staging
+      - name: Verify six-category policy, desktop metadata and image staging
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m py_compile system/apps/swir-settings.py
+          python3 -m py_compile \
+            system/apps/swir-settings.py \
+            system/apps/swir-text-editor.py \
+            system/apps/swir-files.py
+          python3 system/apps/swir-text-editor.py --self-test
+          python3 system/apps/swir-files.py --archive-self-test
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends desktop-file-utils
           for desktop in \
             swir-browser.desktop \
             swir-player.desktop \
             swir-photo-studio.desktop \
-            swir-pdf-viewer.desktop; do
+            swir-pdf-viewer.desktop \
+            swir-text-editor.desktop \
+            swir-archive-manager.desktop; do
             desktop-file-validate "system/apps/$desktop"
             grep -F "system/apps/$desktop" system/session/provision-graphical-session.sh >/dev/null
             grep -F "/usr/share/applications/$desktop" system/session/provision-graphical-session.sh >/dev/null
           done
+          grep -F 'system/apps/swir-text-editor.py' system/session/provision-graphical-session.sh >/dev/null
+          grep -F '/usr/local/bin/swir-text-editor' system/session/provision-graphical-session.sh >/dev/null
           grep -F '"browser", "Web browser"' system/apps/swir-settings.py >/dev/null
           grep -F '"media", "Media player"' system/apps/swir-settings.py >/dev/null
           grep -F '"image", "Image viewer / editor"' system/apps/swir-settings.py >/dev/null
           grep -F '"pdf", "PDF viewer"' system/apps/swir-settings.py >/dev/null
+          grep -F '"text", "Text / code editor"' system/apps/swir-settings.py >/dev/null
+          grep -F '"archive", "Archive manager"' system/apps/swir-settings.py >/dev/null
           grep -F 'defaultAppsMutationOnExplicitActionOnly' system/apps/swir-settings.py >/dev/null
           ! grep -RE '/usr/bin/(sudo|pkexec|su)|/bin/su' system/apps/swir-settings.py
           ! grep -RE 'subprocess\.|os\.system\(' system/apps/swir-settings.py
 
   wayland-runtime:
     runs-on: ubuntu-24.04
-    timeout-minutes: 12
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Install controlled GTK4 and Wayland runtime
@@ -85,27 +104,39 @@ jobs:
             weston dbus-daemon python3-gi gir1.2-gtk-4.0 desktop-file-utils
           # Gio honours TryExec when discovering desktop applications. Install
           # the real first-party entry points exactly where the production
-          # image stages them; the apps are never launched by this gate.
+          # image stages them; tests then exercise user-level associations.
           sudo install -m 0755 system/apps/swir-browser.py /usr/local/bin/swir-browser
           sudo install -m 0755 system/apps/swir-player.py /usr/local/bin/swir-player
           sudo install -m 0755 system/apps/swir-photo-studio.py /usr/local/bin/swir-photo-studio
           sudo install -m 0755 system/apps/swir-pdf-viewer.py /usr/local/bin/swir-pdf-viewer
-      - name: Exercise first-party per-user Default Apps mutation
+          sudo install -m 0755 system/apps/swir-text-editor.py /usr/local/bin/swir-text-editor
+          sudo install -m 0755 system/apps/swir-files.py /usr/local/bin/swir-files
+      - name: Exercise all six per-user defaults and real default launches
         shell: bash
         run: |
           set -euo pipefail
           RUNTIME="${{ runner.temp }}/swir-runtime"
           CONFIG="${{ runner.temp }}/swir-config"
           DATA="${{ runner.temp }}/swir-data"
-          mkdir -p "$RUNTIME" "$CONFIG" "$DATA/applications"
-          chmod 0700 "$RUNTIME" "$CONFIG" "$DATA"
+          ARCHIVE_DEST="$RUNTIME/archive-destination"
+          mkdir -p "$RUNTIME" "$CONFIG" "$DATA/applications" "$ARCHIVE_DEST"
+          chmod 0700 "$RUNTIME" "$CONFIG" "$DATA" "$ARCHIVE_DEST"
           install -m 0644 \
             system/apps/swir-browser.desktop \
             system/apps/swir-player.desktop \
             system/apps/swir-photo-studio.desktop \
             system/apps/swir-pdf-viewer.desktop \
+            system/apps/swir-text-editor.desktop \
+            system/apps/swir-archive-manager.desktop \
             "$DATA/applications/"
           update-desktop-database "$DATA/applications"
+
+          printf 'print("SWIR default-open E2E")\n' > "$RUNTIME/default-open.py"
+          python3 - "$RUNTIME/default-open.zip" <<'PY'
+          import sys, zipfile
+          with zipfile.ZipFile(sys.argv[1], 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+              archive.writestr('docs/default-app.txt', b'SWIR Default Apps archive E2E\n')
+          PY
 
           export XDG_RUNTIME_DIR="$RUNTIME"
           export XDG_CONFIG_HOME="$CONFIG"
@@ -137,7 +168,7 @@ jobs:
           import json, pathlib, sys
           evidence = json.load(open(sys.argv[1], encoding='utf-8'))
           mimeapps = pathlib.Path(sys.argv[2])
-          assert evidence['schema'] == 'swir.native-settings-runtime-evidence/0.2'
+          assert evidence['schema'] == 'swir.native-settings-runtime-evidence/0.3'
           assert evidence['passed'] is True
           assert evidence['applicationId'] == 'dev.swir.Settings'
           assert evidence['nativeToolkit'] == 'gtk4'
@@ -145,8 +176,8 @@ jobs:
           assert evidence['windowMapped'] is True
           assert evidence['privilegedOperations'] is False
           assert evidence['defaultAppsPanel'] is True
-          assert evidence['defaultAppCategoryCount'] == 4
-          assert evidence['defaultAppCategories'] == ['browser', 'media', 'image', 'pdf']
+          assert evidence['defaultAppCategoryCount'] == 6
+          assert evidence['defaultAppCategories'] == ['browser', 'media', 'image', 'pdf', 'text', 'archive']
           assert evidence['defaultAppsMutationOnExplicitActionOnly'] is True
           assert evidence['defaultAppsMutationVerified'] is True
           assert evidence['defaultAppsVerifiedDesktopIds'] == {
@@ -154,6 +185,8 @@ jobs:
               'media': 'swir-player.desktop',
               'image': 'swir-photo-studio.desktop',
               'pdf': 'swir-pdf-viewer.desktop',
+              'text': 'swir-text-editor.desktop',
+              'archive': 'swir-archive-manager.desktop',
           }
           assert all(count >= 1 for count in evidence['defaultAppCandidateCounts'].values())
           expected_types = {
@@ -161,6 +194,8 @@ jobs:
               'media': ['audio/mpeg', 'video/mp4'],
               'image': ['image/png', 'image/jpeg'],
               'pdf': ['application/pdf'],
+              'text': ['text/plain', 'text/markdown', 'application/json', 'text/x-python'],
+              'archive': ['application/zip', 'application/x-tar', 'application/gzip', 'application/x-xz', 'application/x-bzip2'],
           }
           assert evidence['defaultAppHandlerTypes'] == expected_types
           text = mimeapps.read_text(encoding='utf-8')
@@ -171,3 +206,68 @@ jobs:
           [[ "$(stat -c '%a' "$CONFIG/swir/settings.json")" = 600 ]]
           [[ "$(stat -c '%a' "$RUNTIME/default-apps.json")" = 600 ]]
           [[ -f "$CONFIG/mimeapps.list" ]]
+
+          # Launch representative text/code and archive inputs through the
+          # default Gio registry, not by directly invoking the applications.
+          timeout --signal=TERM --kill-after=5s 30s \
+            dbus-run-session -- \
+            env LIBGL_ALWAYS_SOFTWARE=1 GTK_A11Y=none \
+                SWIR_APP_E2E=1 \
+                SWIR_APP_EVIDENCE_PATH="$RUNTIME/text-default-open.json" \
+                SWIR_TEXT_E2E_INPUT="$RUNTIME/default-open.py" \
+            python3 - "$RUNTIME/default-open.py" "$RUNTIME/text-default-open.json" <<'PY'
+          import pathlib, sys, time
+          import gi
+          gi.require_version('Gio', '2.0')
+          from gi.repository import Gio
+          sample = pathlib.Path(sys.argv[1])
+          evidence = pathlib.Path(sys.argv[2])
+          app = Gio.AppInfo.get_default_for_type('text/x-python', False)
+          assert app is not None and app.get_id() == 'swir-text-editor.desktop'
+          assert app.launch([Gio.File.new_for_path(str(sample))], None)
+          for _ in range(100):
+              if evidence.is_file():
+                  break
+              time.sleep(0.1)
+          assert evidence.is_file(), 'text default handler did not produce runtime evidence'
+          PY
+
+          timeout --signal=TERM --kill-after=5s 30s \
+            dbus-run-session -- \
+            env LIBGL_ALWAYS_SOFTWARE=1 GTK_A11Y=none \
+                SWIR_APP_E2E=1 \
+                SWIR_APP_EVIDENCE_PATH="$RUNTIME/archive-default-open.json" \
+                SWIR_ARCHIVE_E2E_INPUT="$RUNTIME/default-open.zip" \
+                SWIR_ARCHIVE_E2E_DESTINATION="$ARCHIVE_DEST" \
+            python3 - "$RUNTIME/default-open.zip" "$RUNTIME/archive-default-open.json" <<'PY'
+          import pathlib, sys, time
+          import gi
+          gi.require_version('Gio', '2.0')
+          from gi.repository import Gio
+          sample = pathlib.Path(sys.argv[1])
+          evidence = pathlib.Path(sys.argv[2])
+          app = Gio.AppInfo.get_default_for_type('application/zip', False)
+          assert app is not None and app.get_id() == 'swir-archive-manager.desktop'
+          assert app.launch([Gio.File.new_for_path(str(sample))], None)
+          for _ in range(100):
+              if evidence.is_file():
+                  break
+              time.sleep(0.1)
+          assert evidence.is_file(), 'archive default handler did not produce runtime evidence'
+          PY
+
+          python3 - "$RUNTIME/text-default-open.json" "$RUNTIME/archive-default-open.json" "$RUNTIME/default-open.py" "$ARCHIVE_DEST" <<'PY'
+          import json, pathlib, sys
+          text = json.load(open(sys.argv[1], encoding='utf-8'))
+          archive = json.load(open(sys.argv[2], encoding='utf-8'))
+          source = pathlib.Path(sys.argv[3])
+          destination = pathlib.Path(sys.argv[4]).resolve()
+          assert text['schema'] == 'swir.native-text-editor-runtime-evidence/0.1'
+          assert text['passed'] is True and text['applicationId'] == 'dev.swir.TextEditor'
+          assert source.read_text(encoding='utf-8').endswith('# SWIR Text Editor E2E saved\n')
+          assert archive['schema'] == 'swir.native-archive-manager-runtime-evidence/0.1'
+          assert archive['passed'] is True and archive['applicationId'] == 'dev.swir.ArchiveManager'
+          root = pathlib.Path(archive['extractionRoot'])
+          assert root.parent == destination
+          assert (root / 'docs' / 'default-app.txt').read_bytes() == b'SWIR Default Apps archive E2E\n'
+          PY

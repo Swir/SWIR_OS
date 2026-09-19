@@ -1,6 +1,6 @@
 # SWIR Native File Handlers 0.1
 
-System Edition now has source-controlled desktop-handler foundations for the missing Product Baseline **text/code** and **archive** categories. This milestone adds real local-file runtime behavior and dedicated verification; it does **not** claim that Settings exposes all six Default Apps categories or that the final boot image stages these registrations yet.
+System Edition has source-controlled first-party desktop handlers for the Product Baseline **text/code** and **archive** categories, with real local-file runtime behavior and dedicated Wayland verification.
 
 ## Text/code handler
 
@@ -10,23 +10,18 @@ The editor fails closed for remote/URI input, symbolic-link paths, hard-linked/n
 
 ## Archive handler
 
-`system/apps/swir-archive-manager.desktop` routes one local archive to the already verified first-party Archive Manager mode:
+`system/apps/swir-archive-manager.desktop` routes one local archive to the verified first-party Archive Manager mode:
 
 `/usr/local/bin/swir-files --archive-manager --archive-open <local-file>`
 
-The underlying Archive Manager continues to enforce canonical local input, archive size/entry bounds, whole-member validation, traversal/symlink/special-member rejection and exclusive no-follow extraction writes.
+The underlying Archive Manager enforces canonical local input, archive size/entry bounds, whole-member validation, traversal/symlink/special-member rejection and exclusive no-follow extraction writes.
 
 ## Verification boundary
 
-`.github/workflows/system-native-file-handlers.yml` validates both desktop entries, runs the text editor and Archive Manager self-tests, and exercises both applications in a headless Wayland session against real local sample files. The test confirms a real text edit/save and a real safe archive extraction while preserving the no-privilege boundary.
+`.github/workflows/system-native-file-handlers.yml` validates both desktop entries, runs the Text Editor and Archive Manager self-tests, and exercises both applications in a headless Wayland session against real local sample files. The test confirms a real text edit/save and a real safe archive extraction while preserving the no-privilege boundary.
 
-## Remaining integration before Default Apps completion
+## Default Apps integration
 
-This milestone intentionally leaves the Product Baseline Default Apps claim open. A later integration must:
+The handlers are now staged by `system/session/provision-graphical-session.sh` into the System image and are included in the six-category Settings Default Apps registry together with browser, media, image and PDF. `.github/workflows/system-native-default-apps.yml` verifies the per-user Gio association for all six categories and launches representative text/code and archive inputs through the selected default handlers.
 
-1. stage `swir-text-editor`, `swir-text-editor.desktop` and `swir-archive-manager.desktop` into the final System image through the trusted provisioning path;
-2. extend Settings from the currently verified four categories to all six (`browser`, `media`, `image`, `pdf`, `text`, `archive`);
-3. prove per-user Gio default association mutation and resolution for all six categories on the staged image;
-4. rerun the image/Wayland gate before the Default Apps portion can be called complete.
-
-No roadmap checkbox or project percentage changes solely because these registrations exist.
+This closes the text/archive integration gap identified when the handlers were introduced. It does not by itself close the broader roadmap item for the full essential native application suite or change the project percentage.
