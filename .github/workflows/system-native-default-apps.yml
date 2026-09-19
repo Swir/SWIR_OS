@@ -5,6 +5,10 @@ on:
     branches: [main]
     paths:
       - 'system/apps/swir-settings.py'
+      - 'system/apps/swir-browser.py'
+      - 'system/apps/swir-player.py'
+      - 'system/apps/swir-photo-studio.py'
+      - 'system/apps/swir-pdf-viewer.py'
       - 'system/apps/swir-browser.desktop'
       - 'system/apps/swir-player.desktop'
       - 'system/apps/swir-photo-studio.desktop'
@@ -16,6 +20,10 @@ on:
   pull_request:
     paths:
       - 'system/apps/swir-settings.py'
+      - 'system/apps/swir-browser.py'
+      - 'system/apps/swir-player.py'
+      - 'system/apps/swir-photo-studio.py'
+      - 'system/apps/swir-pdf-viewer.py'
       - 'system/apps/swir-browser.desktop'
       - 'system/apps/swir-player.desktop'
       - 'system/apps/swir-photo-studio.desktop'
@@ -74,7 +82,14 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            weston python3-gi gir1.2-gtk-4.0 desktop-file-utils
+            weston dbus-daemon python3-gi gir1.2-gtk-4.0 desktop-file-utils
+          # Gio honours TryExec when discovering desktop applications. Install
+          # the real first-party entry points exactly where the production
+          # image stages them; the apps are never launched by this gate.
+          sudo install -m 0755 system/apps/swir-browser.py /usr/local/bin/swir-browser
+          sudo install -m 0755 system/apps/swir-player.py /usr/local/bin/swir-player
+          sudo install -m 0755 system/apps/swir-photo-studio.py /usr/local/bin/swir-photo-studio
+          sudo install -m 0755 system/apps/swir-pdf-viewer.py /usr/local/bin/swir-pdf-viewer
       - name: Exercise first-party per-user Default Apps mutation
         shell: bash
         run: |
@@ -111,7 +126,9 @@ jobs:
           [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]]
 
           timeout --signal=TERM --kill-after=5s 30s \
-            env SWIR_APP_E2E=1 \
+            dbus-run-session -- \
+            env LIBGL_ALWAYS_SOFTWARE=1 \
+                SWIR_APP_E2E=1 \
                 SWIR_DEFAULT_APPS_E2E=1 \
                 SWIR_APP_EVIDENCE_PATH="$RUNTIME/default-apps.json" \
                 python3 system/apps/swir-settings.py
