@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=SWIR Text Editor
+Comment=Open local UTF-8 text and code files safely
+Exec=/usr/local/bin/swir-text-editor %F
+TryExec=/usr/local/bin/swir-text-editor
+Icon=accessories-text-editor
+Terminal=false
+Categories=Utility;TextEditor;
+MimeType=text/plain;application/json;text/x-python;
+StartupNotify=true
