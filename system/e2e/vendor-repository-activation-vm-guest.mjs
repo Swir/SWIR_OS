@@ -77,24 +77,34 @@ async function fetchPinnedKey(profile, evidence) {
 }
 
 function installQualifiedKeyring(profile, evidence, review, keyBytes) {
-  fs.mkdirSync('/run/swir-vendor-e2e', { recursive: true, mode: 0o700 });
-  const armored = '/run/swir-vendor-e2e/vendor-key.asc';
-  const temporary = '/run/swir-vendor-e2e/vendor-key.gpg';
+  const scratchRoot = '/run/swir-vendor-e2e';
+  const targetDir = path.dirname(review.keyring.path);
+  fs.mkdirSync(scratchRoot, { recursive: true, mode: 0o700 });
+  fs.mkdirSync(targetDir, { recursive: true, mode: 0o755 });
+  const armored = path.join(scratchRoot, 'vendor-key.asc');
+  const temporary = path.join(targetDir, `.${path.basename(review.keyring.path)}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`);
   fs.writeFileSync(armored, keyBytes, { mode: 0o600 });
   const shown = command('/usr/bin/gpg', ['--batch', '--no-options', '--with-colons', '--show-keys', armored]);
   const fingerprint = parseGpgPrimaryFingerprint(shown.stdout);
   assert(fingerprint === EXPECTED_FINGERPRINT, 'downloaded signing key does not match pinned full fingerprint');
   assert(fingerprint === evidence.key.fingerprint && fingerprint === review.keyring.fingerprint, 'policy/evidence/signing-key fingerprint mismatch');
-  command('/usr/bin/gpg', ['--batch', '--no-options', '--yes', '--dearmor', '--output', temporary, armored]);
-  fs.mkdirSync(path.dirname(review.keyring.path), { recursive: true, mode: 0o755 });
-  if (fs.existsSync(review.keyring.path)) {
-    const stat = fs.lstatSync(review.keyring.path);
-    assert(stat.isFile() && !stat.isSymbolicLink(), 'pre-existing vendor keyring path is unsafe');
-    fs.unlinkSync(review.keyring.path);
+  try {
+    command('/usr/bin/gpg', ['--batch', '--no-options', '--yes', '--dearmor', '--output', temporary, armored]);
+    const tempStat = fs.lstatSync(temporary);
+    assert(tempStat.isFile() && !tempStat.isSymbolicLink(), 'temporary vendor keyring is not a regular file');
+    fs.chownSync(temporary, 0, 0);
+    fs.chmodSync(temporary, 0o644);
+    if (fs.existsSync(review.keyring.path)) {
+      const stat = fs.lstatSync(review.keyring.path);
+      assert(stat.isFile() && !stat.isSymbolicLink(), 'pre-existing vendor keyring path is unsafe');
+      assert((stat.mode & 0o022) === 0, 'pre-existing vendor keyring path is group/world writable');
+    }
+    fs.renameSync(temporary, review.keyring.path);
+    const finalStat = fs.lstatSync(review.keyring.path);
+    assert(finalStat.isFile() && !finalStat.isSymbolicLink() && finalStat.uid === 0 && (finalStat.mode & 0o777) === 0o644, 'qualified vendor keyring final state is unsafe');
+  } finally {
+    try { fs.unlinkSync(temporary); } catch {}
   }
-  fs.renameSync(temporary, review.keyring.path);
-  fs.chownSync(review.keyring.path, 0, 0);
-  fs.chmodSync(review.keyring.path, 0o644);
 }
 
 function rootPolicyMode(pathname) {
