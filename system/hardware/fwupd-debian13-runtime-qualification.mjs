@@ -42,9 +42,11 @@ function parseOsRelease(text) {
 function rootPath(root, absolutePath) {
   assert(typeof root === 'string' && path.isAbsolute(root), 'ROOT_INVALID', 'qualification root must be absolute');
   assert(typeof absolutePath === 'string' && absolutePath.startsWith('/') && !absolutePath.includes('\0'), 'PATH_INVALID', 'qualified path must be absolute');
+  const pathParts = absolutePath.split('/').filter(Boolean);
+  assert(pathParts.every(part => part !== '.' && part !== '..'), 'PATH_ESCAPE', `qualified path contains traversal: ${absolutePath}`);
   const resolvedRoot = path.resolve(root);
   const target = path.resolve(resolvedRoot, `.${absolutePath}`);
-  assert(target === resolvedRoot || target.startsWith(`${resolvedRoot}${path.sep}`), 'PATH_ESCAPE', `qualified path escaped root: ${absolutePath}`);
+  assert(resolvedRoot === '/' || target === resolvedRoot || target.startsWith(`${resolvedRoot}${path.sep}`), 'PATH_ESCAPE', `qualified path escaped root: ${absolutePath}`);
   return target;
 }
 
