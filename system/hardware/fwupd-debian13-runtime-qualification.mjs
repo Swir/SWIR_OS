@@ -145,7 +145,7 @@ function makeFile(root, rel, content, mode = 0o644) {
 
 function selfTest() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'swir-fwupd-runtime-'));
-  const expectedOwnerUid = os.getuid();
+  const expectedOwnerUid = process.getuid();
   try {
     makeFile(root, '/etc/os-release', 'ID=debian\nVERSION_ID="13"\nVERSION_CODENAME=trixie\n');
     makeFile(root, '/usr/bin/fwupdmgr', '#!/bin/sh\necho fwupdmgr\n', 0o755);
