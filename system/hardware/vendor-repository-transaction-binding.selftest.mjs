@@ -129,7 +129,43 @@ const signatureMismatch = structuredClone(evidence);
 signatureMismatch.inRelease.validSignaturePrimaryFingerprint = 'D'.repeat(40);
 rejects('BINDING_SIGNATURE_MISMATCH', { evidence: signatureMismatch });
 
+const injectedSuite = structuredClone(review);
+injectedSuite.suites = ['./\nTrusted: yes'];
+rejects('BINDING_REVIEW_SUITES_INVALID', { review: injectedSuite });
+
+const traversalSuite = structuredClone(review);
+traversalSuite.suites = ['stable/../evil'];
+rejects('BINDING_REVIEW_SUITES_INVALID', { review: traversalSuite });
+
+const injectedComponent = structuredClone(review);
+injectedComponent.components = ['main\nEnabled: no'];
+rejects('BINDING_REVIEW_COMPONENTS_INVALID', { review: injectedComponent });
+
+const duplicateComponent = structuredClone(review);
+duplicateComponent.components = ['main', 'main'];
+rejects('BINDING_REVIEW_COMPONENTS_INVALID', { review: duplicateComponent });
+
+const mismatchedSourceRef = structuredClone(review);
+mismatchedSourceRef.source.ref = 'vendor-repo:another-repository';
+rejects('BINDING_REVIEW_SOURCE_INVALID', { review: mismatchedSourceRef });
+
+const unsafeRepositoryId = structuredClone(review);
+unsafeRepositoryId.repositoryId = 'repo\nEnabled: yes';
+unsafeRepositoryId.source.ref = `vendor-repo:${unsafeRepositoryId.repositoryId}`;
+rejects('BINDING_REPOSITORY_ID_INVALID', { review: unsafeRepositoryId });
+
+const unsafeKeyring = structuredClone(review);
+unsafeKeyring.keyring.path = '/usr/share/keyrings/../evil.gpg';
+rejects('BINDING_REVIEW_KEYRING_PATH_INVALID', { review: unsafeKeyring });
+
+const unsafePlatform = structuredClone(review);
+unsafePlatform.distribution.architecture = 'x86_64\nTrusted: yes';
+rejects('BINDING_REVIEW_PLATFORM_INVALID', { review: unsafePlatform });
+
 assert.equal(VendorRepositoryTransactionBindingPolicy.sideEffectFree, true);
+assert.equal(VendorRepositoryTransactionBindingPolicy.aptDeb822TokensValidatedBeforeBinding, true);
+assert.equal(VendorRepositoryTransactionBindingPolicy.exactSourceReferenceBindingRequired, true);
+assert.equal(VendorRepositoryTransactionBindingPolicy.pinnedKeyringPathValidatedBeforeBinding, true);
 assert.equal(VendorRepositoryTransactionBindingPolicy.existingJournaledPackageBrokerRequired, true);
 assert.equal(VendorRepositoryTransactionBindingPolicy.directAptMutationAllowed, false);
 assert.equal(VendorRepositoryTransactionBindingPolicy.directPkexecAllowed, false);
