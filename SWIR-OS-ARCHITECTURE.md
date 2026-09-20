@@ -16,13 +16,13 @@ The mandatory end-user application and experience scope is defined in [`SWIR-PRO
 <!-- ROADMAP-PROGRESS:START -->
 <p align="center">
   <a href="https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml"><img alt="CI" src="https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml/badge.svg"></a>
-  <img alt="Roadmap progress" src="https://img.shields.io/badge/ROADMAP-84.6%25-2ea043?style=for-the-badge">
-  <img alt="Completed" src="https://img.shields.io/badge/DONE-55%2F65-1f6feb?style=for-the-badge">
+  <img alt="Roadmap progress" src="https://img.shields.io/badge/ROADMAP-86.2%25-2ea043?style=for-the-badge">
+  <img alt="Completed" src="https://img.shields.io/badge/DONE-56%2F65-1f6feb?style=for-the-badge">
   <img alt="Status" src="https://img.shields.io/badge/STATUS-IN%20PROGRESS-7c3aed?style=for-the-badge">
 </p>
 
 <p align="center">
-  <img width="900" src="assets/readme/progress-mini.svg" alt="SWIR OS roadmap progress — 84.6%, 55 of 65 verified deliverables" />
+  <img width="900" src="assets/readme/progress-mini.svg" alt="SWIR OS roadmap progress — 86.2%, 56 of 65 verified deliverables" />
 </p>
 
 ## 📊 Overall progress
@@ -30,7 +30,7 @@ The mandatory end-user application and experience scope is defined in [`SWIR-PRO
 
 | ✅ Completed | ⏳ Remaining | 📦 Total | 🎯 Progress |
 |---:|---:|---:|---:|
-| **55** | **10** | **65** | **84.6%** |
+| **56** | **9** | **65** | **86.2%** |
 
 > **Progress rule:** the explicit `[x]/[ ]` deliverables in **Version roadmap** are the source of truth for the full Web → Desktop → System plan. Update the checklist first, then badges, numbers, percentage and deterministic SVG outputs. A prototype does not count as complete until the described deliverable is actually implemented and verified.
 <!-- ROADMAP-PROGRESS:END -->
@@ -472,7 +472,7 @@ Planned:
 - [x] SWIR Driver Center / Hardware Catalog
 - [x] in-tree Linux drivers + linux-firmware as primary hardware path
 - [ ] fwupd/LVFS firmware updates where supported
-- [ ] allowlisted official vendor repositories for exceptional proprietary components
+- [x] allowlisted official vendor repositories for exceptional proprietary components
 - [x] dependency-aware system package manager/updater
 - [x] journaled driver/firmware/package transactions
 - [x] filesystem integration and recovery mode
