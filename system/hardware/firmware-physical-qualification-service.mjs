@@ -144,9 +144,10 @@ export class FileFirmwarePhysicalQualificationJournal {
 
   ensureRoot() {
     fs.mkdirSync(this.root, { recursive: true, mode: 0o700 });
-    fs.chmodSync(this.root, 0o700);
-    const stat = fs.lstatSync(this.root);
+    let stat = fs.lstatSync(this.root);
     assert(stat.isDirectory() && !stat.isSymbolicLink(), 'QUALIFICATION_ROOT_UNSAFE', 'qualification journal root must be a real directory');
+    fs.chmodSync(this.root, 0o700);
+    stat = fs.lstatSync(this.root);
     assert((stat.mode & 0o077) === 0, 'QUALIFICATION_ROOT_MODE_UNSAFE', 'qualification journal root must not be group/world accessible');
     if (this.enforceOwnership && this.expectedOwnerUid !== null && typeof stat.uid === 'number') {
       assert(stat.uid === this.expectedOwnerUid, 'QUALIFICATION_ROOT_OWNER_INVALID', 'qualification journal root owner is not trusted');
@@ -224,7 +225,7 @@ export function evaluatePhysicalQualificationEvidence(session) {
   const noVirtualizationHint = before?.virtualizationHintDetected !== true && after?.virtualizationHintDetected !== true;
   const transactionBound = typeof session.transactionId === 'string' && session.transactionId.length >= 8 && verification?.transactionId === session.transactionId;
   const exactPlanBound = verification?.planDigest === session.planDigest;
-  const eligible = sameHost && physicalSource && softwareVerified && requiredRebootObserved && transactionBound && exactPlanBound;
+  const eligible = sameHost && physicalSource && softwareVerified && requiredRebootObserved && noVirtualizationHint && transactionBound && exactPlanBound;
   return Object.freeze({
     schema: 'swir.firmware-physical-qualification-assessment/0.1',
     eligible,
@@ -314,7 +315,7 @@ export class FirmwarePhysicalQualificationService {
     const liveHost = assertHostEvidence(await this.hostProbe.capture());
     assert(sameMachine(session.hostBefore, liveHost), 'QUALIFICATION_HOST_CHANGED', 'qualification session moved to a different machine before mutation');
     assert(session.hostBefore.bootId === liveHost.bootId, 'QUALIFICATION_BOOT_CHANGED_BEFORE_APPLY', 'host rebooted after preflight; prepare a fresh firmware qualification session');
-    assert(liveHost.virtualizationHintDetected !== true, 'QUALIFICATION_VIRTUALIZATION_HINT', 'software detected a virtualization hint; physical qualification cannot proceed');
+    assert(session.hostBefore.virtualizationHintDetected !== true && liveHost.virtualizationHintDetected !== true, 'QUALIFICATION_VIRTUALIZATION_HINT', 'software detected a virtualization hint; physical qualification cannot proceed');
 
     try {
       const result = await this.transactionService.update(session.candidate, {

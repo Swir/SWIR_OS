@@ -288,6 +288,13 @@ assert.equal(directAssessment.softwareVerified, true);
 assert.equal(directAssessment.physicalityProvenBySoftware, false);
 assert.equal(directAssessment.operatorFinalizationRequired, true);
 
+const virtualAssessment = evaluatePhysicalQualificationEvidence({
+  ...postReboot,
+  hostAfter: { ...postReboot.hostAfter, virtualizationHint: 'qemu', virtualizationHintDetected: true }
+});
+assert.equal(virtualAssessment.noVirtualizationHint, false);
+assert.equal(virtualAssessment.eligible, false);
+
 fixture.journal.force(prepared.qualificationId, current => ({
   ...current,
   hostBefore: { ...current.hostBefore, evidenceSource: 'ci-fixture' }
@@ -335,6 +342,15 @@ try {
   assert.equal(fs.statSync(persistedFile).mode & 0o777, 0o600);
   fs.chmodSync(persistedFile, 0o644);
   assert.throws(() => fileJournal.read(finalized.qualificationId), error => error?.code === 'QUALIFICATION_FILE_UNSAFE');
+
+  const symlinkTarget = path.join(temp, 'symlink-target');
+  const symlinkRoot = path.join(temp, 'symlink-root');
+  fs.mkdirSync(symlinkTarget, { mode: 0o755 });
+  fs.chmodSync(symlinkTarget, 0o755);
+  fs.symlinkSync(symlinkTarget, symlinkRoot, 'dir');
+  const unsafeJournal = new FileFirmwarePhysicalQualificationJournal({ root: symlinkRoot, expectedOwnerUid: null, enforceOwnership: false });
+  assert.throws(() => unsafeJournal.write(finalized), error => error?.code === 'QUALIFICATION_ROOT_UNSAFE');
+  assert.equal(fs.statSync(symlinkTarget).mode & 0o777, 0o755, 'unsafe symlink root must not mutate target permissions');
 } finally {
   fs.rmSync(temp, { recursive: true, force: true });
 }
