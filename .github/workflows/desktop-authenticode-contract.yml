@@ -44,9 +44,8 @@ jobs:
           $ErrorActionPreference = 'Stop'
           Set-StrictMode -Version Latest
 
-          # Avoid New-SelfSignedCertificate here. On hosted Windows runners it can
-          # block in the certificate-provider path long enough to hit the job
-          # timeout. Build the short-lived CI identity directly with .NET instead.
+          # Keep CI identity creation fully inside .NET. Hosted Windows certificate
+          # provider cmdlets have occasionally blocked until the job timeout.
           $subject = 'CN=SWIR OS CI Authenticode Contract'
           $rsa = [System.Security.Cryptography.RSA]::Create(2048)
           try {
@@ -78,12 +77,24 @@ jobs:
             try {
               if (-not $cert.HasPrivateKey) { throw 'CI code-signing certificate has no private key.' }
               $passwordText = 'SWIR-CI-Authenticode-Contract-Only!2026'
-              $password = ConvertTo-SecureString $passwordText -AsPlainText -Force
               $pfx = Join-Path $env:RUNNER_TEMP 'swir-ci-authenticode.pfx'
               $cer = Join-Path $env:RUNNER_TEMP 'swir-ci-authenticode.cer'
               [IO.File]::WriteAllBytes($pfx, $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Pfx, $passwordText))
               [IO.File]::WriteAllBytes($cer, $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert))
-              Import-Certificate -FilePath $cer -CertStoreLocation 'Cert:\CurrentUser\Root' | Out-Null
+
+              $publicCert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($cer)
+              $rootStore = [System.Security.Cryptography.X509Certificates.X509Store]::new(
+                [System.Security.Cryptography.X509Certificates.StoreName]::Root,
+                [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
+              )
+              try {
+                $rootStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+                $rootStore.Add($publicCert)
+              } finally {
+                $rootStore.Close()
+                $publicCert.Dispose()
+              }
+
               "SWIR_AUTHENTICODE_PFX_PATH=$pfx" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
               "SWIR_AUTHENTICODE_PFX_PASSWORD=$passwordText" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
               "SWIR_AUTHENTICODE_CERT_THUMBPRINT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
@@ -171,8 +182,21 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          $thumb = $env:SWIR_AUTHENTICODE_CERT_THUMBPRINT
+          $thumb = ($env:SWIR_AUTHENTICODE_CERT_THUMBPRINT -replace '[^A-Fa-f0-9]', '').ToUpperInvariant()
           if ($thumb) {
-            Remove-Item -LiteralPath "Cert:\CurrentUser\My\$thumb" -Force -ErrorAction SilentlyContinue
-            Remove-Item -LiteralPath "Cert:\CurrentUser\Root\$thumb" -Force -ErrorAction SilentlyContinue
+            $rootStore = [System.Security.Cryptography.X509Certificates.X509Store]::new(
+              [System.Security.Cryptography.X509Certificates.StoreName]::Root,
+              [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
+            )
+            try {
+              $rootStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+              $matches = $rootStore.Certificates.Find(
+                [System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
+                $thumb,
+                $false
+              )
+              foreach ($cert in $matches) { $rootStore.Remove($cert) }
+            } finally {
+              $rootStore.Close()
+            }
           }
