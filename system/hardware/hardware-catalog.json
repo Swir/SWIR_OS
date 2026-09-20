@@ -1,6 +1,6 @@
 {
   "schema": "swir.hardware-catalog/0.1",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "entries": [
     {
       "id": "usb.logitech.receiver.c534",
@@ -97,7 +97,7 @@
       "support": {
         "kernelModules": ["nvidia"],
         "firmware": [],
-        "packages": ["nvidia-driver"]
+        "packages": ["nvidia-driver", "nvidia-open"]
       },
       "sources": [
         {
@@ -107,8 +107,8 @@
         },
         {
           "class": "vendor-official-repository",
-          "ref": "vendor:nvidia-linux-driver-repository",
-          "repositoryId": "nvidia-official-linux-driver",
+          "ref": "vendor:nvidia-cuda-debian13-x86_64",
+          "repositoryId": "nvidia-cuda-debian13-x86_64",
           "rollback": true
         }
       ]
