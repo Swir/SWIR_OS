@@ -29,6 +29,8 @@ internal sealed class DesktopAppPackageInstaller
         provider = "desktop-native",
         format = ".swirapp",
         integrity = "sha256-required",
+        trustProvenance = "deployment-recorded",
+        signedCatalogProvenance = true,
         manifestSchema = "swir.app/1.0",
         stagedHealthVerification = true,
         startupRecovery = true,
@@ -39,8 +41,12 @@ internal sealed class DesktopAppPackageInstaller
         maxExpandedBytes = MaxExpandedBytes
     };
 
-    public object Install(string bundlePath, string expectedSha256)
+    public object Install(string bundlePath, string expectedSha256) =>
+        Install(bundlePath, expectedSha256, DesktopPackageTrustProof.DirectSha256());
+
+    internal object Install(string bundlePath, string expectedSha256, DesktopPackageTrustProof trustProof)
     {
+        var trust = ValidateTrustProof(trustProof);
         if (!File.Exists(bundlePath)) throw new DesktopPackageException("PACKAGE_NOT_FOUND", "SWIR package bundle does not exist.");
         if (!string.Equals(Path.GetExtension(bundlePath), ".swirapp", StringComparison.OrdinalIgnoreCase))
             throw new DesktopPackageException("PACKAGE_FORMAT_INVALID", "Desktop payload installer accepts only .swirapp bundles.");
@@ -93,7 +99,13 @@ internal sealed class DesktopAppPackageInstaller
                 hadCurrent,
                 Directory.Exists(previous),
                 health.Type,
-                health.Entry);
+                health.Entry,
+                trust.Mode,
+                trust.SignatureVerified,
+                trust.KeyId,
+                trust.CatalogSequence,
+                trust.CatalogVersion,
+                trust.ExpiresAt);
             WriteDeployment(current, deployment);
             return new
             {
@@ -106,6 +118,12 @@ internal sealed class DesktopAppPackageInstaller
                 bundleSha256 = actual,
                 state = hadCurrent ? "UPDATED" : "INSTALLED",
                 health = "VERIFIED",
+                trustMode = trust.Mode,
+                signatureVerified = trust.SignatureVerified,
+                signerKeyId = trust.KeyId,
+                catalogSequence = trust.CatalogSequence,
+                catalogVersion = trust.CatalogVersion,
+                trustExpiresAt = trust.ExpiresAt,
                 rollbackAvailable = Directory.Exists(previous)
             };
         }
@@ -133,7 +151,24 @@ internal sealed class DesktopAppPackageInstaller
             Directory.Move(previous, current);
             if (Directory.Exists(swap)) Directory.Move(swap, previous);
             var deployment = ReadDeployment(current);
-            return new { ok = true, schema = Contract, packageId, version = deployment?.Version, type = deployment?.Type, entry = deployment?.Entry, state = "ROLLED_BACK", health = deployment is null ? "UNKNOWN" : "VERIFIED", rollbackAvailable = Directory.Exists(previous) };
+            return new
+            {
+                ok = true,
+                schema = Contract,
+                packageId,
+                version = deployment?.Version,
+                type = deployment?.Type,
+                entry = deployment?.Entry,
+                state = "ROLLED_BACK",
+                health = deployment is null ? "UNKNOWN" : "VERIFIED",
+                trustMode = deployment?.TrustMode,
+                signatureVerified = deployment?.SignatureVerified ?? false,
+                signerKeyId = deployment?.SignerKeyId,
+                catalogSequence = deployment?.CatalogSequence,
+                catalogVersion = deployment?.CatalogVersion,
+                trustExpiresAt = deployment?.TrustExpiresAt,
+                rollbackAvailable = Directory.Exists(previous)
+            };
         }
         catch (Exception ex)
         {
@@ -160,6 +195,12 @@ internal sealed class DesktopAppPackageInstaller
             entry = deployment?.Entry,
             health = deployment is null ? "UNKNOWN" : "VERIFIED",
             bundleSha256 = deployment?.BundleSha256,
+            trustMode = deployment?.TrustMode,
+            signatureVerified = deployment?.SignatureVerified ?? false,
+            signerKeyId = deployment?.SignerKeyId,
+            catalogSequence = deployment?.CatalogSequence,
+            catalogVersion = deployment?.CatalogVersion,
+            trustExpiresAt = deployment?.TrustExpiresAt,
             rollbackAvailable = Directory.Exists(previous)
         };
     }
@@ -200,6 +241,42 @@ internal sealed class DesktopAppPackageInstaller
                 try { Directory.Move(previousSlot, currentSlot); } catch { }
             }
         }
+    }
+
+    private static DesktopPackageTrustProof ValidateTrustProof(DesktopPackageTrustProof? trust)
+    {
+        if (trust is null)
+            throw new DesktopPackageException("PACKAGE_TRUST_PROOF_INVALID", "Package trust provenance is required.");
+
+        var mode = (trust.Mode ?? string.Empty).Trim();
+        if (mode is "DIRECT_SHA256" or "LEGACY_SHA_UNTIL_ROOT_PROVISIONED")
+        {
+            if (trust.SignatureVerified || trust.KeyId is not null || trust.CatalogSequence is not null || trust.CatalogVersion is not null || trust.ExpiresAt is not null)
+                throw new DesktopPackageException("PACKAGE_TRUST_PROOF_INVALID", "Unsigned package trust modes cannot carry signed catalog provenance.");
+            return trust with { Mode = mode };
+        }
+
+        if (!string.Equals(mode, "SIGNED_CATALOG", StringComparison.Ordinal))
+            throw new DesktopPackageException("PACKAGE_TRUST_PROOF_INVALID", "Unsupported package trust provenance mode.");
+        if (!trust.SignatureVerified)
+            throw new DesktopPackageException("PACKAGE_TRUST_PROOF_INVALID", "Signed catalog provenance must be signature verified.");
+        var keyId = ValidateTrustToken(trust.KeyId, "signer key ID", 128);
+        var catalogVersion = ValidateTrustToken(trust.CatalogVersion, "catalog version", 128);
+        if (trust.CatalogSequence is null or <= 0)
+            throw new DesktopPackageException("PACKAGE_TRUST_PROOF_INVALID", "Signed catalog provenance requires a positive catalog sequence.");
+        if (trust.ExpiresAt is null)
+            throw new DesktopPackageException("PACKAGE_TRUST_PROOF_INVALID", "Signed catalog provenance requires an expiry timestamp.");
+        if (trust.ExpiresAt <= DateTimeOffset.UtcNow)
+            throw new DesktopPackageException("PACKAGE_TRUST_EXPIRED", "Signed catalog authorization expired before package installation completed.");
+        return trust with { Mode = mode, KeyId = keyId, CatalogVersion = catalogVersion };
+    }
+
+    private static string ValidateTrustToken(string? value, string label, int maxLength)
+    {
+        var token = (value ?? string.Empty).Trim();
+        if (token.Length is < 1 || token.Length > maxLength || token.Any(char.IsControl))
+            throw new DesktopPackageException("PACKAGE_TRUST_PROOF_INVALID", $"Signed catalog provenance requires a valid {label}.");
+        return token;
     }
 
     private static StagedPackageHealth ValidateStagedPackage(string stage, PackageManifest manifest)
@@ -365,8 +442,37 @@ internal sealed class DesktopAppPackageInstaller
 
     private sealed record PackageManifest(string? Schema, string? Id, string? PackageId, string? Name, string? Version, string? Author, string? Type, string? Entry);
     private sealed record StagedPackageHealth(string PackageId, string Version, string Type, string Entry);
-    private sealed record DeploymentRecord(string Schema, string PackageId, string Version, string BundleSha256, DateTimeOffset InstalledAt, bool Updated, bool RollbackAvailable, string Type, string Entry);
+    private sealed record DeploymentRecord(
+        string Schema,
+        string PackageId,
+        string Version,
+        string BundleSha256,
+        DateTimeOffset InstalledAt,
+        bool Updated,
+        bool RollbackAvailable,
+        string Type,
+        string Entry,
+        string TrustMode,
+        bool SignatureVerified,
+        string? SignerKeyId,
+        long? CatalogSequence,
+        string? CatalogVersion,
+        DateTimeOffset? TrustExpiresAt);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { PropertyNameCaseInsensitive = true, WriteIndented = true };
+}
+
+internal sealed record DesktopPackageTrustProof(
+    string Mode,
+    bool SignatureVerified,
+    string? KeyId,
+    long? CatalogSequence,
+    string? CatalogVersion,
+    DateTimeOffset? ExpiresAt)
+{
+    public static DesktopPackageTrustProof DirectSha256() => new("DIRECT_SHA256", false, null, null, null, null);
+    public static DesktopPackageTrustProof LegacySha() => new("LEGACY_SHA_UNTIL_ROOT_PROVISIONED", false, null, null, null, null);
+    public static DesktopPackageTrustProof SignedCatalog(string keyId, long sequence, string catalogVersion, DateTimeOffset expiresAt) =>
+        new("SIGNED_CATALOG", true, keyId, sequence, catalogVersion, expiresAt);
 }
 
 internal sealed class DesktopPackageException(string code, string message) : Exception(message)

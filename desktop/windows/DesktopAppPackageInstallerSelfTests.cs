@@ -32,6 +32,18 @@ internal static class DesktopAppPackageInstallerSelfTests
             AssertPayload(dataRoot, "swir.test.demo", "hello-v1");
 
             ExpectCode("PACKAGE_HASH_MISMATCH", () => installer.Install(v2, new string('0', 64)));
+            ExpectCode("PACKAGE_TRUST_PROOF_INVALID", () => installer.Install(
+                v2,
+                Sha256(v2),
+                new DesktopPackageTrustProof("SIGNED_CATALOG", false, "root", 1, "catalog-1", DateTimeOffset.UtcNow.AddHours(1))));
+            ExpectCode("PACKAGE_TRUST_PROOF_INVALID", () => installer.Install(
+                v2,
+                Sha256(v2),
+                new DesktopPackageTrustProof("LEGACY_SHA_UNTIL_ROOT_PROVISIONED", false, "spoofed-root", null, null, null)));
+            ExpectCode("PACKAGE_TRUST_EXPIRED", () => installer.Install(
+                v2,
+                Sha256(v2),
+                DesktopPackageTrustProof.SignedCatalog("root", 1, "catalog-1", DateTimeOffset.UtcNow.AddMinutes(-1))));
 
             var traversal = Path.Combine(root, "bad-traversal.swirapp");
             using (var zip = ZipFile.Open(traversal, ZipArchiveMode.Create))
@@ -158,6 +170,8 @@ internal static class DesktopAppPackageInstallerSelfTests
         if (root.GetProperty("rollbackAvailable").GetBoolean() != rollback) throw new Exception("Unexpected rollback state.");
         if (root.GetProperty("entry").GetString() != entry) throw new Exception("Unexpected package entry.");
         if (root.GetProperty("health").GetString() != "VERIFIED") throw new Exception("Package health was not persisted.");
+        if (root.GetProperty("trustMode").GetString() != "DIRECT_SHA256") throw new Exception("Direct installer trust provenance was not persisted.");
+        if (root.GetProperty("signatureVerified").GetBoolean()) throw new Exception("Direct SHA-256 install must not claim a verified signature.");
     }
 
     private static void AssertNotInstalled(DesktopAppPackageInstaller installer, string id)

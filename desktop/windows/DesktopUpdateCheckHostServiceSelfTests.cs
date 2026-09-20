@@ -19,10 +19,10 @@ internal static class DesktopUpdateCheckHostServiceSelfTests
 
     private static void SignedNewerManifestDiscovered()
     {
-        using var f = new Fixture("0.5.2");
+        using var f = new Fixture("0.5.8");
         var result = Json(f.Service.CheckAsync(true).GetAwaiter().GetResult());
         Expect(result.GetProperty("updateAvailable").GetBoolean(), "newer signed release must be available");
-        Expect(result.GetProperty("targetVersion").GetString() == "0.5.2", "target version must come from signed payload");
+        Expect(result.GetProperty("targetVersion").GetString() == "0.5.8", "target version must come from signed payload");
         Expect(result.GetProperty("verified").GetBoolean(), "check result must be signature verified");
         var describe = Json(f.Service.Describe());
         Expect(describe.GetProperty("feedConfigured").GetBoolean(), "release feed can be configured independently of packaged activation environment");
@@ -31,7 +31,7 @@ internal static class DesktopUpdateCheckHostServiceSelfTests
 
     private static void SameVersionReportsCurrent()
     {
-        using var f = new Fixture("0.5.1");
+        using var f = new Fixture("0.5.7");
         var result = Json(f.Service.CheckAsync(true).GetAwaiter().GetResult());
         Expect(!result.GetProperty("updateAvailable").GetBoolean(), "same signed version should report current");
         Expect(result.GetProperty("status").GetString() == "current", "same version should have current status");
@@ -39,7 +39,7 @@ internal static class DesktopUpdateCheckHostServiceSelfTests
 
     private static void SignedDowngradeBlocked()
     {
-        using var f = new Fixture("0.4.9");
+        using var f = new Fixture("0.5.6");
         try { _ = f.Service.CheckAsync(true).GetAwaiter().GetResult(); }
         catch (UpdateSecurityException ex) when (ex.Code == "UPDATE_DOWNGRADE_BLOCKED") { return; }
         throw new InvalidOperationException("Expected UPDATE_DOWNGRADE_BLOCKED.");
@@ -47,7 +47,7 @@ internal static class DesktopUpdateCheckHostServiceSelfTests
 
     private static void UntrustedCallerRejected()
     {
-        using var f = new Fixture("0.5.2");
+        using var f = new Fixture("0.5.8");
         try { _ = f.Service.CheckAsync(false).GetAwaiter().GetResult(); }
         catch (DesktopUpdateBridgeCommandException ex) when (ex.Code == "UPDATE_BRIDGE_TRUST_REQUIRED") { return; }
         throw new InvalidOperationException("Expected UPDATE_BRIDGE_TRUST_REQUIRED.");

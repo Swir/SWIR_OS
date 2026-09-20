@@ -53,6 +53,7 @@ internal sealed class DesktopPackageBridge
         catalogAuthorizationSchema = AuthorizationSchema,
         signedIdentityBinding = true,
         signedReleaseArtifactRouting = true,
+        persistedTrustProvenance = true,
         releaseArtifactRoot = "packages/",
         legacySha256Fallback = _catalogTrust is null,
         trustMode = _catalogTrust is null ? "LEGACY_SHA_UNTIL_ROOT_PROVISIONED" : "SIGNED_CATALOG_REQUIRED"
@@ -87,7 +88,7 @@ internal sealed class DesktopPackageBridge
         BindAuthorizationToBundle(trust, plan);
         if (!plan.Ok)
             throw new DesktopPackageException("PACKAGE_DEPENDENCY_UNSATISFIED", string.Join("; ", plan.Errors));
-        return _installer.Install(path, trust.Sha256);
+        return _installer.Install(path, trust.Sha256, ToTrustProof(trust));
     }
 
     public object Status(string packageId, string ownerAppId)
@@ -141,6 +142,24 @@ internal sealed class DesktopPackageBridge
         if (_catalogTrust is not null)
             throw new DesktopPackageException("CATALOG_AUTHORIZATION_REQUIRED", "Provisioned catalog trust roots require signed catalog authorization; arbitrary UI/runtime SHA-256 input is disabled.");
         return new TrustedInstallAuthorization(input, null, null, null, "LEGACY_SHA");
+    }
+
+    private static DesktopPackageTrustProof ToTrustProof(TrustedInstallAuthorization trust)
+    {
+        if (!string.Equals(trust.Mode, "SIGNED_CATALOG", StringComparison.Ordinal))
+            return DesktopPackageTrustProof.LegacySha();
+
+        if (string.IsNullOrWhiteSpace(trust.KeyId) || trust.CatalogSequence is null or <= 0 ||
+            string.IsNullOrWhiteSpace(trust.CatalogVersion) || trust.ExpiresAt is null)
+        {
+            throw new DesktopPackageException("CATALOG_AUTHORIZATION_INVALID", "Verified signed catalog authorization is missing trust provenance required for deployment.");
+        }
+
+        return DesktopPackageTrustProof.SignedCatalog(
+            trust.KeyId,
+            trust.CatalogSequence.Value,
+            trust.CatalogVersion,
+            trust.ExpiresAt.Value);
     }
 
     private string ResolveReleaseArtifactPath(TrustedInstallAuthorization trust)
