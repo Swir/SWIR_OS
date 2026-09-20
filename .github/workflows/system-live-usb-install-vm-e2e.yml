@@ -90,7 +90,7 @@ jobs:
           grep -F 'target must use a stable /dev/disk/by-id/* path' system/installer/swir-install-engine.sh >/dev/null
           grep -F 'refusing to install onto the currently booted source media' system/installer/swir-install-engine.sh >/dev/null
           grep -F 'confirmation token does not match the current target identity' system/installer/swir-install-engine.sh >/dev/null
-          grep -F 'destructiveWritePerformed\": False' system/installer/swir-install-engine.sh >/dev/null
+          grep -F 'destructiveWritePerformed": False' system/installer/swir-install-engine.sh >/dev/null
           grep -F 'usb-storage,drive=liveusb,bootindex=1,serial=SWIR_LIVE_E2E' system/e2e/debian13-live-usb-install-vm-e2e.sh >/dev/null
           grep -F 'sourceUsbDetachedBeforeInstalledBoot' system/e2e/debian13-live-usb-install-vm-e2e.sh >/dev/null
           grep -F 'graphicalInstallerUiSmokePassed' system/e2e/debian13-live-usb-install-vm-e2e.sh >/dev/null
