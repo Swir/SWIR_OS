@@ -66,7 +66,7 @@ const recent = new Date().toISOString();
     ]
   });
   assert.equal(result.actions.length, 3);
-  assert.deepEqual(result.actions.map(a => a.id), ['review', 'open-settings', 'fourth']);
+  assert.equal(Array.from(result.actions, a => a.id).join(','), 'review,open-settings,fourth');
   assert.equal(h.nativeCalls[0][0], 'show');
   assert.equal(h.nativeCalls[0][5].length, 3);
   const persisted = JSON.parse(h.store.get(HISTORY_KEY));
@@ -103,7 +103,7 @@ const recent = new Date().toISOString();
     { id: 'good', appId: 'system', title: 'good', message: 'good', time: recent }
   ];
   const h = createHarness({ [HISTORY_KEY]: JSON.stringify({ version: 2, notifications: rows }) });
-  assert.deepEqual(h.api.list().map(x => x.id), ['good']);
+  assert.equal(Array.from(h.api.list(), x => x.id).join(','), 'good');
 }
 
 // A native/desktop persistence bridge can replace localStorage without changing the public API.
