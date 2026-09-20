@@ -5,6 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <DefineConstants>$(DefineConstants);SWIR_PACKAGE_SIGNATURE_TOOL</DefineConstants>
     <StartupObject>Swir.Desktop.Host.DesktopPackageSignatureSelfTests</StartupObject>
   </PropertyGroup>
   <ItemGroup>
