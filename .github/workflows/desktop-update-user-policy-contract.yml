@@ -42,7 +42,7 @@ jobs:
       - name: Parse trusted Update Center frame controller
         run: node --check swir-update-policy-frame.js
       - name: Parse policy contract validator
-        run: node --check scripts/validate-update-user-policy.mjs
+        run: node scripts/validate-update-user-policy.mjs
       - name: Verify Automatic Notify Manual policy semantics
         run: node scripts/validate-update-user-policy.mjs
 
@@ -59,4 +59,4 @@ jobs:
         run: dotnet run --configuration Release --project desktop/tests/update-user-policy/DesktopUpdateUserPolicySelfTests.csproj
       - name: Build shipping Desktop Host with native policy
         shell: pwsh
-        run: dotnet build desktop/windows/SWIR.Desktop.Host.csproj --configuration Release --no-restore
+        run: dotnet build desktop/windows/SWIR.Desktop.Host.csproj --configuration Release
