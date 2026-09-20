@@ -6,6 +6,7 @@ on:
       - 'system/hardware/vendor-repository-activation-transaction-service.mjs'
       - 'system/hardware/vendor-repository-activation-transaction.selftest.mjs'
       - 'system/hardware/vendor-repository-transaction-binding.mjs'
+      - 'system/hardware/vendor-repository-transaction-binding.selftest.mjs'
       - 'system/SWIR-VENDOR-REPOSITORY-ACTIVATION-0.1.md'
       - '.github/workflows/system-vendor-repository-activation.yml'
   pull_request:
@@ -13,6 +14,7 @@ on:
       - 'system/hardware/vendor-repository-activation-transaction-service.mjs'
       - 'system/hardware/vendor-repository-activation-transaction.selftest.mjs'
       - 'system/hardware/vendor-repository-transaction-binding.mjs'
+      - 'system/hardware/vendor-repository-transaction-binding.selftest.mjs'
       - 'system/SWIR-VENDOR-REPOSITORY-ACTIVATION-0.1.md'
       - '.github/workflows/system-vendor-repository-activation.yml'
   workflow_dispatch:
@@ -34,11 +36,16 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Syntax-check activation boundary
+      - name: Syntax-check activation and binding boundaries
         run: |
           set -euo pipefail
           node --check system/hardware/vendor-repository-activation-transaction-service.mjs
           node --check system/hardware/vendor-repository-activation-transaction.selftest.mjs
+          node --check system/hardware/vendor-repository-transaction-binding.mjs
+          node --check system/hardware/vendor-repository-transaction-binding.selftest.mjs
+
+      - name: Run vendor binding self-test
+        run: node system/hardware/vendor-repository-transaction-binding.selftest.mjs
 
       - name: Run activation transaction self-test
         run: node system/hardware/vendor-repository-activation-transaction.selftest.mjs
@@ -48,6 +55,7 @@ jobs:
         run: |
           set -euo pipefail
           SERVICE=system/hardware/vendor-repository-activation-transaction-service.mjs
+          BINDING=system/hardware/vendor-repository-transaction-binding.mjs
           grep -F "existingPrivilegeBrokerRequired: true" "$SERVICE" >/dev/null
           grep -F "exactActivationDigestConfirmationRequired: true" "$SERVICE" >/dev/null
           grep -F "rootOwnedPinnedKeyringRequired: true" "$SERVICE" >/dev/null
@@ -61,4 +69,7 @@ jobs:
           grep -F "shellExecution: false" "$SERVICE" >/dev/null
           grep -F "Dir::Etc::sourcelist=" "$SERVICE" >/dev/null
           grep -F "Dir::Etc::sourceparts=-" "$SERVICE" >/dev/null
+          grep -F "aptDeb822TokensValidatedBeforeBinding: true" "$BINDING" >/dev/null
+          grep -F "exactSourceReferenceBindingRequired: true" "$BINDING" >/dev/null
+          grep -F "pinnedKeyringPathValidatedBeforeBinding: true" "$BINDING" >/dev/null
           ! grep -RE "execSync|exec\(|sudo|pkexec|curl|wget" "$SERVICE"
