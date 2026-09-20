@@ -28,7 +28,7 @@ internal static class DesktopReleaseToCandidateSelfTests
         try
         {
             Run(workerExe, bundleDir, File.ReadAllText(publicKeyPath));
-            Console.WriteLine($"SWIR signed release -> Candidate E2E contract passed: {_passed}");
+            Console.WriteLine($"SWIR signed release -> Candidate E2E passed: {_passed}");
             return 0;
         }
         catch (Exception ex)
@@ -44,7 +44,7 @@ internal static class DesktopReleaseToCandidateSelfTests
         var targetVersion = new Version(0, 5, 2);
         const string channel = "preview";
         var verified = DesktopReleaseBundleVerifier.Verify(bundleDir, targetVersion, channel, publicKeyPem, new[] { "github.com" });
-        Expect(verified.Schema == DesktopReleaseBundleVerifier.VerifierSchema, "release bundle passes independent signature/hash verification");
+        Expect(verified.Version == "0.5.2" && verified.Channel == channel, "release bundle passes independent signature/hash verification");
         Expect(verified.Version == targetVersion.ToString(), "verified release targets Desktop 0.5.2");
         Expect(verified.Channel == channel, "verified release remains bound to preview channel");
 
@@ -58,8 +58,9 @@ internal static class DesktopReleaseToCandidateSelfTests
         try
         {
             var packagePath = Path.Combine(bundleDir, verified.PackageFile);
-            var transactionId = "0.5.2-preview-e2e-" + Guid.NewGuid().ToString("N");
-            var handoff = new UpdateHandoffBroker.HandoffPlan(
+            var transactionId = "0.5.2-preview-" + Guid.NewGuid().ToString("N");
+            var journal = new UpdateTransactionJournal(transactionsRoot);
+            var state = journal.Begin(new UpdateHandoffBroker.HandoffPlan(
                 transactionId,
                 new Version(0, 5, 1),
                 targetVersion,
@@ -71,13 +72,10 @@ internal static class DesktopReleaseToCandidateSelfTests
                 currentRoot,
                 Path.Combine(root, transactionId + "-handoff.json"),
                 DateTimeOffset.UtcNow,
-                "prepared");
+                "prepared"));
 
-            var journal = new UpdateTransactionJournal(transactionsRoot);
-            var state = journal.Begin(handoff);
             Expect(state.TargetVersion == targetVersion, "transaction binds signed release target version");
             Expect(state.CurrentVersion == new Version(0, 5, 1), "transaction preserves known-good current version");
-
             var plan = RunWorker(workerExe, "plan", state.JournalPath, transactionsRoot, deploymentRoot);
             Expect(plan.ExitCode == 0, "standalone updater worker accepts signed release transaction");
 
@@ -88,14 +86,17 @@ internal static class DesktopReleaseToCandidateSelfTests
             var prepare = RunWorker(workerExe, "prepare-candidate", state.JournalPath, transactionsRoot, deploymentRoot, candidateTimeoutMs);
             Expect(prepare.ExitCode == 0, "standalone updater worker prepares Candidate from release ZIP");
 
-            var candidateRoot = Path.Combine(deploymentRoot, "Candidate", transactionId);
-            var payloadRoot = Path.Combine(candidateRoot, "Payload");
+            var transactionDirectory = Path.GetDirectoryName(state.JournalPath)
+                ?? throw new InvalidOperationException("Transaction directory is missing.");
+            var candidateRoot = Path.Combine(transactionDirectory, "Candidate");
+            var payloadRoot = Path.Combine(candidateRoot, "payload");
             var candidateStatePath = Path.Combine(candidateRoot, "candidate-state.json");
             var hostBuildManifestPath = Path.Combine(payloadRoot, "desktop-host-build.json");
+
             Expect(Directory.Exists(candidateRoot), "Candidate slot is created inside deployment sandbox");
             Expect(File.Exists(Path.Combine(payloadRoot, "SWIR.Desktop.Host.exe")), "shipping Desktop Host entry point is present in Candidate payload");
             Expect(File.Exists(Path.Combine(payloadRoot, "SWIR.Desktop.UpdaterWorker.exe")), "standalone Updater Worker ships beside the Desktop Host");
-            Expect(File.Exists(Path.Combine(payloadRoot, "desktop-update-policy.json")), "fail-closed Desktop update policy ships inside Candidate");
+            Expect(File.Exists(Path.Combine(payloadRoot, "desktop-update-policy.json")), "signed Desktop update policy ships inside Candidate");
             Expect(File.Exists(Path.Combine(payloadRoot, "index.html")), "Web Edition shell ships inside the standalone Candidate");
             Expect(File.Exists(Path.Combine(payloadRoot, "swir-os.js")), "Web Edition OS runtime ships inside the standalone Candidate");
             Expect(File.Exists(Path.Combine(payloadRoot, "swir-runtime.js")), "portable Runtime Adapter ships inside the standalone Candidate");
@@ -128,8 +129,20 @@ internal static class DesktopReleaseToCandidateSelfTests
 
             using (var updatePolicy = JsonDocument.Parse(File.ReadAllText(Path.Combine(payloadRoot, "desktop-update-policy.json"))))
             {
-                Expect(updatePolicy.RootElement.GetProperty("Schema").GetString() == "swir.desktop-update-policy/0.1", "packaged update policy keeps canonical schema");
-                Expect(!updatePolicy.RootElement.GetProperty("Enabled").GetBoolean(), "packaged default update policy fails closed until a signed channel is configured");
+                var policy = updatePolicy.RootElement;
+                Expect(policy.GetProperty("Schema").GetString() == DesktopGitHubUpdatePolicy.PolicySchema, "packaged update policy keeps canonical schema");
+                Expect(policy.GetProperty("Enabled").GetBoolean(), "official signed release provisions the exact GitHub update policy");
+                Expect(policy.GetProperty("Channel").GetString() == channel, "packaged update policy stays bound to the signed preview channel");
+                Expect(policy.GetProperty("ManifestUrl").GetString() == "https://raw.githubusercontent.com/Swir/SWIR_OS/main/updates/preview/desktop-update-preview.json",
+                    "packaged update policy pins the canonical preview manifest URL");
+                var manifestHosts = policy.GetProperty("ManifestHosts").EnumerateArray().Select(value => value.GetString()).ToArray();
+                var packageHosts = policy.GetProperty("PackageHosts").EnumerateArray().Select(value => value.GetString()).ToArray();
+                Expect(manifestHosts.Length == 1 && manifestHosts[0] == "raw.githubusercontent.com",
+                    "packaged update policy restricts manifest downloads to raw.githubusercontent.com");
+                Expect(packageHosts.Length == 1 && packageHosts[0] == "github.com",
+                    "packaged update policy restricts package downloads to github.com");
+                Expect(string.Equals(policy.GetProperty("PublicKeyPem").GetString()?.Trim(), publicKeyPem.Trim(), StringComparison.Ordinal),
+                    "packaged update policy pins the release signing public key");
             }
 
             using var candidateState = JsonDocument.Parse(File.ReadAllText(candidateStatePath));
@@ -158,16 +171,15 @@ internal static class DesktopReleaseToCandidateSelfTests
             start.ArgumentList.Add(arg);
 
         using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start standalone updater worker.");
-        var stdout = process.StandardOutput.ReadToEndAsync();
-        var stderr = process.StandardError.ReadToEndAsync();
+        Task<string> stdout = process.StandardOutput.ReadToEndAsync();
+        Task<string> stderr = process.StandardError.ReadToEndAsync();
         if (!process.WaitForExit(timeoutMs))
         {
             try { process.Kill(true); } catch { }
             throw new TimeoutException($"Updater worker exceeded {timeoutMs}ms timeout during {command}.");
         }
         Task.WaitAll(stdout, stderr);
-        if (process.ExitCode != 0)
-            Console.Error.WriteLine(stderr.Result);
+        if (process.ExitCode != 0) Console.Error.WriteLine(stderr.Result);
         return new ProcessResult(process.ExitCode, stdout.Result.Trim(), stderr.Result.Trim());
     }
 
