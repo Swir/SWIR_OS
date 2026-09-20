@@ -44,10 +44,11 @@ jobs:
           $ErrorActionPreference = 'Stop'
           Set-StrictMode -Version Latest
 
-          # Generate the short-lived identity fully in memory. Importing a
-          # self-signed root through provider APIs can trigger an interactive
-          # trust prompt on hosted Windows runners, so the public certificate is
-          # added with certutil -f instead.
+          # Generate the short-lived identity fully in memory. Do not modify a
+          # root-CA store in CI: Windows can surface an interactive root-trust
+          # confirmation even when certutil is invoked non-interactively. A
+          # self-signed end-entity test certificate is instead pinned directly
+          # in the current user's TrustedPeople store for this job only.
           $subject = 'CN=SWIR OS CI Authenticode Contract'
           $rsa = [System.Security.Cryptography.RSA]::Create(2048)
           try {
@@ -80,12 +81,43 @@ jobs:
               if (-not $cert.HasPrivateKey) { throw 'CI code-signing certificate has no private key.' }
               $passwordText = 'SWIR-CI-Authenticode-Contract-Only!2026'
               $pfx = Join-Path $env:RUNNER_TEMP 'swir-ci-authenticode.pfx'
-              $cer = Join-Path $env:RUNNER_TEMP 'swir-ci-authenticode.cer'
               [IO.File]::WriteAllBytes($pfx, $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Pfx, $passwordText))
-              [IO.File]::WriteAllBytes($cer, $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert))
 
-              & "$env:SystemRoot\System32\certutil.exe" -user -f -addstore Root $cer | Out-Host
-              if ($LASTEXITCODE -ne 0) { throw "certutil failed to trust the CI certificate (exit $LASTEXITCODE)." }
+              $publicOnly = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
+                $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
+              )
+              try {
+                $trustedPeople = [System.Security.Cryptography.X509Certificates.X509Store]::new(
+                  [System.Security.Cryptography.X509Certificates.StoreName]::TrustedPeople,
+                  [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
+                )
+                try {
+                  $trustedPeople.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+                  $trustedPeople.Add($publicOnly)
+                } finally {
+                  $trustedPeople.Close()
+                  $trustedPeople.Dispose()
+                }
+              } finally {
+                $publicOnly.Dispose()
+              }
+
+              $verifyStore = [System.Security.Cryptography.X509Certificates.X509Store]::new(
+                [System.Security.Cryptography.X509Certificates.StoreName]::TrustedPeople,
+                [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
+              )
+              try {
+                $verifyStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadOnly)
+                $matches = $verifyStore.Certificates.Find(
+                  [System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
+                  $cert.Thumbprint,
+                  $false
+                )
+                if ($matches.Count -ne 1) { throw 'CI code-signing certificate was not pinned exactly once in CurrentUser\\TrustedPeople.' }
+              } finally {
+                $verifyStore.Close()
+                $verifyStore.Dispose()
+              }
 
               "SWIR_AUTHENTICODE_PFX_PATH=$pfx" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
               "SWIR_AUTHENTICODE_PFX_PASSWORD=$passwordText" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
@@ -176,6 +208,20 @@ jobs:
         run: |
           $thumb = ($env:SWIR_AUTHENTICODE_CERT_THUMBPRINT -replace '[^A-Fa-f0-9]', '').ToUpperInvariant()
           if ($thumb) {
-            & "$env:SystemRoot\System32\certutil.exe" -user -f -delstore Root $thumb | Out-Host
-            if ($LASTEXITCODE -ne 0) { Write-Warning "certutil cleanup returned exit $LASTEXITCODE." }
+            $store = [System.Security.Cryptography.X509Certificates.X509Store]::new(
+              [System.Security.Cryptography.X509Certificates.StoreName]::TrustedPeople,
+              [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
+            )
+            try {
+              $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+              $matches = $store.Certificates.Find(
+                [System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
+                $thumb,
+                $false
+              )
+              foreach ($match in $matches) { $store.Remove($match) }
+            } finally {
+              $store.Close()
+              $store.Dispose()
+            }
           }
