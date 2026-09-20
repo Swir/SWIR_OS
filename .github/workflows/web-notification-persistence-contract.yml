@@ -1,0 +1,59 @@
+name: Web Notification Persistence Contract
+
+on:
+  push:
+    branches:
+      - main
+      - 'web/notification-actions-persistence'
+    paths:
+      - 'swir-notifications.js'
+      - 'scripts/test-web-notifications.mjs'
+      - 'SWIR-OS-ARCHITECTURE.md'
+      - 'README.md'
+      - 'assets/readme/progress-card.svg'
+      - 'assets/readme/progress-mini.svg'
+      - 'scripts/generate-readme-progress.mjs'
+      - '.github/workflows/web-notification-persistence-contract.yml'
+  pull_request:
+    paths:
+      - 'swir-notifications.js'
+      - 'scripts/test-web-notifications.mjs'
+      - 'SWIR-OS-ARCHITECTURE.md'
+      - 'README.md'
+      - 'assets/readme/progress-card.svg'
+      - 'assets/readme/progress-mini.svg'
+      - 'scripts/generate-readme-progress.mjs'
+      - '.github/workflows/web-notification-persistence-contract.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  notification-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax check notification service
+        run: node --check swir-notifications.js
+      - name: Verify actions and persistence behavior
+        run: node scripts/test-web-notifications.mjs
+      - name: Verify fail-closed source invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F "const SCHEMA_VERSION = 2" swir-notifications.js
+          grep -F "const MAX_HISTORY = 50" swir-notifications.js
+          grep -F "const MAX_ACTIONS = 3" swir-notifications.js
+          grep -F "setPersistenceAdapter" swir-notifications.js
+          grep -F "invokeAction" swir-notifications.js
+          grep -F "swir:notification-action" swir-notifications.js
+          if grep -Eq 'eval\(|new Function\(' swir-notifications.js; then
+            echo 'Executable notification action payloads are forbidden.' >&2
+            exit 1
+          fi
+      - name: Verify deterministic roadmap presentation
+        run: node scripts/generate-readme-progress.mjs --check

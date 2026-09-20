@@ -95,7 +95,7 @@ internal static class DesktopReleaseToCandidateSelfTests
             Expect(Directory.Exists(candidateRoot), "Candidate slot is created inside deployment sandbox");
             Expect(File.Exists(Path.Combine(payloadRoot, "SWIR.Desktop.Host.exe")), "shipping Desktop Host entry point is present in Candidate payload");
             Expect(File.Exists(Path.Combine(payloadRoot, "SWIR.Desktop.UpdaterWorker.exe")), "standalone Updater Worker ships beside the Desktop Host");
-            Expect(File.Exists(Path.Combine(payloadRoot, "desktop-update-policy.json")), "fail-closed Desktop update policy ships inside Candidate");
+            Expect(File.Exists(Path.Combine(payloadRoot, "desktop-update-policy.json")), "signed Desktop update policy ships inside Candidate");
             Expect(File.Exists(Path.Combine(payloadRoot, "index.html")), "Web Edition shell ships inside the standalone Candidate");
             Expect(File.Exists(Path.Combine(payloadRoot, "swir-os.js")), "Web Edition OS runtime ships inside the standalone Candidate");
             Expect(File.Exists(Path.Combine(payloadRoot, "swir-runtime.js")), "portable Runtime Adapter ships inside the standalone Candidate");
@@ -128,8 +128,20 @@ internal static class DesktopReleaseToCandidateSelfTests
 
             using (var updatePolicy = JsonDocument.Parse(File.ReadAllText(Path.Combine(payloadRoot, "desktop-update-policy.json"))))
             {
-                Expect(updatePolicy.RootElement.GetProperty("Schema").GetString() == "swir.desktop-update-policy/0.1", "packaged update policy keeps canonical schema");
-                Expect(!updatePolicy.RootElement.GetProperty("Enabled").GetBoolean(), "packaged default update policy fails closed until a signed channel is configured");
+                var policy = updatePolicy.RootElement;
+                Expect(policy.GetProperty("Schema").GetString() == DesktopGitHubUpdatePolicy.PolicySchema, "packaged update policy keeps canonical schema");
+                Expect(policy.GetProperty("Enabled").GetBoolean(), "official signed release provisions the exact GitHub update policy");
+                Expect(policy.GetProperty("Channel").GetString() == channel, "packaged update policy stays bound to the signed preview channel");
+                Expect(policy.GetProperty("ManifestUrl").GetString() == "https://raw.githubusercontent.com/Swir/SWIR_OS/main/updates/preview/desktop-update-preview.json",
+                    "packaged update policy pins the canonical preview manifest URL");
+                var manifestHosts = policy.GetProperty("ManifestHosts").EnumerateArray().Select(value => value.GetString()).ToArray();
+                var packageHosts = policy.GetProperty("PackageHosts").EnumerateArray().Select(value => value.GetString()).ToArray();
+                Expect(manifestHosts.Length == 1 && manifestHosts[0] == "raw.githubusercontent.com",
+                    "packaged update policy restricts manifest downloads to raw.githubusercontent.com");
+                Expect(packageHosts.Length == 1 && packageHosts[0] == "github.com",
+                    "packaged update policy restricts package downloads to github.com");
+                Expect(string.Equals(policy.GetProperty("PublicKeyPem").GetString()?.Trim(), publicKeyPem.Trim(), StringComparison.Ordinal),
+                    "packaged update policy pins the release signing public key");
             }
 
             using var candidateState = JsonDocument.Parse(File.ReadAllText(candidateStatePath));
