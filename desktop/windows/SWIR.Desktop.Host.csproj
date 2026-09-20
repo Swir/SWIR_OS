@@ -24,7 +24,6 @@
     <Compile Remove="DesktopUpdateReleaseTool.cs" />
     <Compile Remove="DesktopPackageBuilder.cs" />
     <Compile Remove="DesktopPackageTool.cs" />
-    <Compile Remove="DesktopPackageSignatureTool.cs" />
     <Compile Remove="DesktopReleaseBundleBuilder.cs" />
     <Compile Remove="DesktopReleaseBundleTool.cs" />
     <Compile Remove="DesktopReleaseBundleVerifier.cs" />
@@ -50,7 +49,6 @@
 
   <ItemGroup>
     <None Include="catalog-trust-roots.json" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="package-trust-roots.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
