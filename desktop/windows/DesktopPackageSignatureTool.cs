@@ -47,13 +47,13 @@ internal static class DesktopPackageSignatureTool
         if (keyId.Length is < 1 or > 128 || keyId.Any(char.IsControl))
             throw new DesktopPackageException("PACKAGE_SIGNATURE_INVALID", "Package signer key ID is invalid.");
 
-        using var archive = ZipFile.Open(bundlePath, ZipArchiveMode.Update);
-        var existing = archive.Entries
-            .Where(entry => string.Equals(DesktopPackageSignatureVerifier.NormalizeEntryPath(entry.FullName), DesktopPackageSignatureVerifier.SignatureEntryName, StringComparison.Ordinal))
-            .ToArray();
-        foreach (var entry in existing) entry.Delete();
+        // Compute the signed content from a read-only archive. ZipArchive Update mode
+        // may make Length unavailable after write-capable entry access, which weakens
+        // bounded hashing and caused the signer self-test to fail on hosted Windows.
+        DesktopPackageSignatureVerifier.PackageContent content;
+        using (var source = ZipFile.OpenRead(bundlePath))
+            content = DesktopPackageSignatureVerifier.ComputeContent(source);
 
-        var content = DesktopPackageSignatureVerifier.ComputeContent(archive);
         var payload = DesktopPackageSignatureVerifier.CanonicalSignedPayload(keyId, content.PackageId, content.Version, content.ContentSha256);
         var signature = SignatureAlgorithm.Ed25519.Sign(key, Encoding.UTF8.GetBytes(payload));
         var envelope = JsonSerializer.SerializeToUtf8Bytes(new
@@ -66,6 +66,12 @@ internal static class DesktopPackageSignatureTool
             contentSha256 = content.ContentSha256,
             signature = Convert.ToBase64String(signature)
         }, new JsonSerializerOptions { WriteIndented = true });
+
+        using var archive = ZipFile.Open(bundlePath, ZipArchiveMode.Update);
+        var existing = archive.Entries
+            .Where(entry => string.Equals(DesktopPackageSignatureVerifier.NormalizeEntryPath(entry.FullName), DesktopPackageSignatureVerifier.SignatureEntryName, StringComparison.Ordinal))
+            .ToArray();
+        foreach (var entry in existing) entry.Delete();
 
         var signatureEntry = archive.CreateEntry(DesktopPackageSignatureVerifier.SignatureEntryName, CompressionLevel.NoCompression);
         signatureEntry.LastWriteTime = DeterministicTimestamp;
