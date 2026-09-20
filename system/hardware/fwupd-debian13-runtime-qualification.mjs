@@ -50,6 +50,31 @@ function rootPath(root, absolutePath) {
   return target;
 }
 
+function assertOwnedSafeRegularFile(target, label, expectedOwnerUid) {
+  const stat = fs.lstatSync(target);
+  assert(stat.isFile() && !stat.isSymbolicLink(), 'TRUSTED_FILE_INVALID', `${label} must resolve to a regular file`);
+  assert(typeof stat.uid !== 'number' || stat.uid === expectedOwnerUid, 'TRUSTED_FILE_OWNER_INVALID', `${label} owner uid does not match the qualification authority`);
+  assert((stat.mode & 0o022) === 0, 'TRUSTED_FILE_WRITABLE', `${label} must not be group/world writable`);
+  assert(stat.size <= MAX_TEXT_BYTES, 'TRUSTED_FILE_TOO_LARGE', `${label} is unexpectedly large`);
+  return stat;
+}
+
+function readTrustedOsRelease(root, expectedOwnerUid) {
+  const etcPath = rootPath(root, '/etc/os-release');
+  const etcStat = fs.lstatSync(etcPath);
+  let trustedPath = etcPath;
+  if (etcStat.isSymbolicLink()) {
+    const linkTarget = fs.readlinkSync(etcPath);
+    trustedPath = path.resolve(path.dirname(etcPath), linkTarget);
+    const canonicalPath = rootPath(root, '/usr/lib/os-release');
+    assert(trustedPath === canonicalPath, 'OS_RELEASE_SYMLINK_UNSAFE', '/etc/os-release may only link to /usr/lib/os-release');
+  } else {
+    assert(etcStat.isFile(), 'OS_RELEASE_UNSAFE', '/etc/os-release must be a regular file or the canonical Debian symlink');
+  }
+  assertOwnedSafeRegularFile(trustedPath, 'os-release', expectedOwnerUid);
+  return fs.readFileSync(trustedPath, 'utf8');
+}
+
 function sha256File(file) {
   const stat = fs.statSync(file);
   assert(stat.size <= 64 * 1024 * 1024, 'TRUSTED_FILE_TOO_LARGE', `trusted file unexpectedly large: ${file}`);
@@ -100,10 +125,7 @@ function qualifyFwupdDebian13RuntimeImpl({ root, commandRunner, expectedOwnerUid
   assert(typeof commandRunner === 'function', 'COMMAND_RUNNER_REQUIRED', 'command runner is required');
   assert(Number.isInteger(expectedOwnerUid) && expectedOwnerUid >= 0, 'OWNER_UID_INVALID', 'expected owner uid must be a non-negative integer');
   const resolvedRoot = path.resolve(root);
-  const osReleasePath = rootPath(resolvedRoot, '/etc/os-release');
-  const osReleaseStat = fs.lstatSync(osReleasePath);
-  assert(osReleaseStat.isFile() && !osReleaseStat.isSymbolicLink(), 'OS_RELEASE_UNSAFE', '/etc/os-release must be a regular non-symlink file in the qualified image');
-  const release = parseOsRelease(fs.readFileSync(osReleasePath, 'utf8'));
+  const release = parseOsRelease(readTrustedOsRelease(resolvedRoot, expectedOwnerUid));
   assert(release.ID === 'debian', 'DISTRO_UNSUPPORTED', 'fwupd runtime qualification is pinned to Debian');
   assert(release.VERSION_ID === '13', 'DISTRO_VERSION_UNSUPPORTED', 'fwupd runtime qualification is pinned to Debian 13');
 
@@ -182,6 +204,18 @@ function selfTest() {
     blocked = false;
     try { qualifyFwupdDebian13RuntimeImpl(options); } catch (error) { blocked = error?.code === 'DISTRO_UNSUPPORTED'; }
     assert(blocked, 'SELFTEST_DISTRO_NOT_BLOCKED', 'unexpected distro was not rejected');
+
+    makeFile(root, '/usr/lib/os-release', 'ID=debian\nVERSION_ID="13"\nVERSION_CODENAME=trixie\n');
+    fs.rmSync(rootPath(root, '/etc/os-release'));
+    fs.symlinkSync('../usr/lib/os-release', rootPath(root, '/etc/os-release'));
+    const symlinkResult = qualifyFwupdDebian13RuntimeImpl(options);
+    assert(symlinkResult.passed === true, 'SELFTEST_CANONICAL_SYMLINK_REJECTED', 'canonical os-release symlink was rejected');
+    fs.rmSync(rootPath(root, '/etc/os-release'));
+    fs.symlinkSync('../tmp/evil-os-release', rootPath(root, '/etc/os-release'));
+    blocked = false;
+    try { qualifyFwupdDebian13RuntimeImpl(options); } catch (error) { blocked = error?.code === 'OS_RELEASE_SYMLINK_UNSAFE'; }
+    assert(blocked, 'SELFTEST_OS_RELEASE_SYMLINK_NOT_BLOCKED', 'unexpected os-release symlink was not rejected');
+
     console.log('SWIR Debian 13 fwupd runtime qualification self-test: OK');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
