@@ -16,13 +16,13 @@ The mandatory end-user application and experience scope is defined in [`SWIR-PRO
 <!-- ROADMAP-PROGRESS:START -->
 <p align="center">
   <a href="https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml"><img alt="CI" src="https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml/badge.svg"></a>
-  <img alt="Roadmap progress" src="https://img.shields.io/badge/ROADMAP-86.2%25-2ea043?style=for-the-badge">
-  <img alt="Completed" src="https://img.shields.io/badge/DONE-56%2F65-1f6feb?style=for-the-badge">
+  <img alt="Roadmap progress" src="https://img.shields.io/badge/ROADMAP-87.7%25-2ea043?style=for-the-badge">
+  <img alt="Completed" src="https://img.shields.io/badge/DONE-57%2F65-1f6feb?style=for-the-badge">
   <img alt="Status" src="https://img.shields.io/badge/STATUS-IN%20PROGRESS-7c3aed?style=for-the-badge">
 </p>
 
 <p align="center">
-  <img width="900" src="assets/readme/progress-mini.svg" alt="SWIR OS roadmap progress — 86.2%, 56 of 65 verified deliverables" />
+  <img width="900" src="assets/readme/progress-mini.svg" alt="SWIR OS roadmap progress — 87.7%, 57 of 65 verified deliverables" />
 </p>
 
 ## 📊 Overall progress
@@ -30,7 +30,7 @@ The mandatory end-user application and experience scope is defined in [`SWIR-PRO
 
 | ✅ Completed | ⏳ Remaining | 📦 Total | 🎯 Progress |
 |---:|---:|---:|---:|
-| **56** | **9** | **65** | **86.2%** |
+| **57** | **8** | **65** | **87.7%** |
 
 > **Progress rule:** the explicit `[x]/[ ]` deliverables in **Version roadmap** are the source of truth for the full Web → Desktop → System plan. Update the checklist first, then badges, numbers, percentage and deterministic SVG outputs. A prototype does not count as complete until the described deliverable is actually implemented and verified.
 <!-- ROADMAP-PROGRESS:END -->
@@ -431,7 +431,7 @@ The detailed foundation and machine-readable contract schemas live under `system
 - [ ] application developer template / SDK examples
 - [ ] larger binary/file storage on IndexedDB instead of localStorage mirror
 - [x] package update transactions / rollback metadata
-- [ ] native-ready notification actions and persistence adapter
+- [x] native-ready notification actions and persistence adapter
 
 ### Desktop Edition 2.x
 
