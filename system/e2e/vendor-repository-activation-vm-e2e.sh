@@ -32,7 +32,7 @@ mmdebstrap \
   --variant=minbase \
   --architectures=amd64 \
   --components='main' \
-  --include='linux-image-amd64,systemd-sysv,nodejs,ca-certificates,gnupg,apt' \
+  --include='linux-image-amd64,systemd-sysv,nodejs,ca-certificates,gnupg,gpgv,apt' \
   trixie "$ROOTFS" https://deb.debian.org/debian
 
 install -d -m 0755 \
