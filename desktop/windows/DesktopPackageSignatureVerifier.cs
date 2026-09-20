@@ -125,9 +125,11 @@ internal sealed class DesktopPackageSignatureVerifier
                 if (!seen.Add(path))
                     throw new DesktopPackageException("PACKAGE_DUPLICATE_PATH", $"Duplicate package path: {entry.FullName}");
                 if (entry.FullName.EndsWith('/')) continue;
-                if (entry.Length < 0 || entry.Length > MaxEntryBytes)
+
+                var length = entry.Length;
+                if (length < 0 || length > MaxEntryBytes)
                     throw new DesktopPackageException("PACKAGE_ENTRY_TOO_LARGE", $"Package entry exceeds {MaxEntryBytes} bytes: {entry.FullName}");
-                total = checked(total + entry.Length);
+                total = checked(total + length);
                 if (total > MaxExpandedBytes)
                     throw new DesktopPackageException("PACKAGE_EXPANDED_TOO_LARGE", $"Expanded package exceeds {MaxExpandedBytes} bytes.");
 
@@ -135,22 +137,28 @@ internal sealed class DesktopPackageSignatureVerifier
                     continue;
 
                 string digest;
-                using (var stream = entry.Open())
-                    digest = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
-                entries.Add(new ContentEntry(path, entry.Length, digest));
-
                 if (string.Equals(path, ManifestEntryName, StringComparison.Ordinal))
                 {
                     try
                     {
                         using var stream = entry.Open();
-                        manifest = JsonDocument.Parse(stream);
+                        using var buffer = new MemoryStream();
+                        stream.CopyTo(buffer);
+                        var bytes = buffer.ToArray();
+                        digest = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+                        manifest = JsonDocument.Parse(bytes);
                     }
                     catch (JsonException ex)
                     {
                         throw new DesktopPackageException("PACKAGE_MANIFEST_INVALID", ex.Message);
                     }
                 }
+                else
+                {
+                    using var stream = entry.Open();
+                    digest = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+                }
+                entries.Add(new ContentEntry(path, length, digest));
             }
 
             if (manifest is null || manifest.RootElement.ValueKind != JsonValueKind.Object)
