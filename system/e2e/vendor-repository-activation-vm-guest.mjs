@@ -38,6 +38,16 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+async function expectReject(factory, message = 'expected operation to reject') {
+  let rejected = false;
+  try {
+    await factory();
+  } catch {
+    rejected = true;
+  }
+  assert(rejected, message);
+}
+
 function sha256(bytes) {
   return crypto.createHash('sha256').update(bytes).digest('hex');
 }
@@ -275,9 +285,9 @@ async function run() {
     id: 'vendor-vm-interrupted-0001', journal, sourceStore: interruptedSourceStore, keyringVerifier, authorizationBroker: broker, executor: failingExecutor
   });
   const interruptedCoordinator = new DriverCenterVendorRepositoryCoordinator({ activationService: interruptedService });
-  await assert.rejects(() => interruptedCoordinator.activate(driverReview, {
+  await expectReject(() => interruptedCoordinator.activate(driverReview, {
     actorId: 'swir-vendor-vm-e2e', confirmationDigest: driverReview.activationPlan.activationDigest, sourceRoot: SOURCE_ROOT, now: new Date()
-  }));
+  }), 'fault-injected vendor activation was expected to reject');
   const interruptedRecord = journal.read('vendor-vm-interrupted-0001');
   assert(interruptedRecord.state === 'failed-needs-recovery', 'fault injection did not leave durable failed-needs-recovery state');
   assert(sourceStore.inspect(driverReview.activationPlan.source.path).sha256 === driverReview.activationPlan.source.sha256, 'interrupted source state is not bound to activation plan');
