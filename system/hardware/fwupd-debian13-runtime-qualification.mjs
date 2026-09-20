@@ -33,9 +33,7 @@ function parseOsRelease(text) {
     const match = /^([A-Z0-9_]+)=(.*)$/.exec(line);
     if (!match) continue;
     let value = match[2];
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1);
-    }
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
     out[match[1]] = value.replace(/\\([\\"'$`])/g, '$1');
   }
   return out;
@@ -56,14 +54,14 @@ function sha256File(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
 
-function inspectTrustedFile(root, spec) {
+function inspectTrustedFile(root, spec, expectedOwnerUid) {
   const target = rootPath(root, spec.path);
   const lstat = fs.lstatSync(target);
   assert(!lstat.isSymbolicLink(), 'TRUSTED_FILE_SYMLINKED', `${spec.path} must not be a symlink`);
   assert(lstat.isFile(), 'TRUSTED_FILE_INVALID', `${spec.path} must be a regular file`);
   const real = fs.realpathSync(target);
   assert(real === target, 'TRUSTED_FILE_REDIRECTED', `${spec.path} must resolve exactly inside the qualified root`);
-  assert(typeof lstat.uid !== 'number' || lstat.uid === 0, 'TRUSTED_FILE_OWNER_INVALID', `${spec.path} must be root-owned`);
+  assert(typeof lstat.uid !== 'number' || lstat.uid === expectedOwnerUid, 'TRUSTED_FILE_OWNER_INVALID', `${spec.path} owner uid does not match the qualification authority`);
   assert((lstat.mode & 0o022) === 0, 'TRUSTED_FILE_WRITABLE', `${spec.path} must not be group/world writable`);
   if (spec.executable) assert((lstat.mode & 0o111) !== 0, 'TRUSTED_FILE_NOT_EXECUTABLE', `${spec.path} must be executable`);
   return Object.freeze({
@@ -96,8 +94,9 @@ function parseDpkgStatus(output) {
   return match[2];
 }
 
-export function qualifyFwupdDebian13Runtime({ root = '/', commandRunner = defaultCommandRunner } = {}) {
+export function qualifyFwupdDebian13Runtime({ root = '/', commandRunner = defaultCommandRunner, expectedOwnerUid = 0 } = {}) {
   assert(typeof commandRunner === 'function', 'COMMAND_RUNNER_REQUIRED', 'command runner is required');
+  assert(Number.isInteger(expectedOwnerUid) && expectedOwnerUid >= 0, 'OWNER_UID_INVALID', 'expected owner uid must be a non-negative integer');
   const resolvedRoot = path.resolve(root);
   const osReleasePath = rootPath(resolvedRoot, '/etc/os-release');
   const osReleaseStat = fs.lstatSync(osReleasePath);
@@ -106,11 +105,11 @@ export function qualifyFwupdDebian13Runtime({ root = '/', commandRunner = defaul
   assert(release.ID === 'debian', 'DISTRO_UNSUPPORTED', 'fwupd runtime qualification is pinned to Debian');
   assert(release.VERSION_ID === '13', 'DISTRO_VERSION_UNSUPPORTED', 'fwupd runtime qualification is pinned to Debian 13');
 
-  const files = REQUIRED_FILES.map(spec => inspectTrustedFile(resolvedRoot, spec));
+  const files = REQUIRED_FILES.map(spec => inspectTrustedFile(resolvedRoot, spec, expectedOwnerUid));
   const packageQuery = rootPath(resolvedRoot, '/usr/bin/dpkg-query');
   const dpkgStat = fs.lstatSync(packageQuery);
   assert(dpkgStat.isFile() && !dpkgStat.isSymbolicLink() && (dpkgStat.mode & 0o111) !== 0, 'DPKG_QUERY_UNTRUSTED', 'dpkg-query must be a regular executable file');
-  assert(typeof dpkgStat.uid !== 'number' || dpkgStat.uid === 0, 'DPKG_QUERY_OWNER_INVALID', 'dpkg-query must be root-owned');
+  assert(typeof dpkgStat.uid !== 'number' || dpkgStat.uid === expectedOwnerUid, 'DPKG_QUERY_OWNER_INVALID', 'dpkg-query owner uid does not match the qualification authority');
   assert((dpkgStat.mode & 0o022) === 0, 'DPKG_QUERY_WRITABLE', 'dpkg-query must not be group/world writable');
 
   const packageVersion = parseDpkgStatus(commandRunner(packageQuery, ['-W', '-f=${db:Status-Abbrev}\t${Version}\n', 'fwupd']));
@@ -146,6 +145,7 @@ function makeFile(root, rel, content, mode = 0o644) {
 
 function selfTest() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'swir-fwupd-runtime-'));
+  const expectedOwnerUid = os.getuid();
   try {
     makeFile(root, '/etc/os-release', 'ID=debian\nVERSION_ID="13"\nVERSION_CODENAME=trixie\n');
     makeFile(root, '/usr/bin/fwupdmgr', '#!/bin/sh\necho fwupdmgr\n', 0o755);
@@ -160,20 +160,21 @@ function selfTest() {
       assert(binary.endsWith('/fwupdmgr') && args.length === 1 && args[0] === '--help', 'SELFTEST_FWUPDMGR_ARGS', 'unexpected fwupdmgr args');
       return 'Usage: fwupdmgr [OPTION…]\n';
     };
-    const result = qualifyFwupdDebian13Runtime({ root, commandRunner: fakeRunner });
+    const options = { root, commandRunner: fakeRunner, expectedOwnerUid };
+    const result = qualifyFwupdDebian13Runtime(options);
     assert(result.passed && result.files.length === 3, 'SELFTEST_RESULT_INVALID', 'qualification result failed');
     assert(result.package.version === '2.0.20-1~deb13u1', 'SELFTEST_VERSION_INVALID', 'package version was not preserved');
     assert(result.policy.firmwareMutationAllowed === false && result.policy.physicalHardwareQualification === false, 'SELFTEST_POLICY_INVALID', 'safety policy weakened');
 
     fs.chmodSync(rootPath(root, '/etc/fwupd/remotes.d/lvfs.conf'), 0o666);
     let blocked = false;
-    try { qualifyFwupdDebian13Runtime({ root, commandRunner: fakeRunner }); } catch (error) { blocked = error?.code === 'TRUSTED_FILE_WRITABLE'; }
+    try { qualifyFwupdDebian13Runtime(options); } catch (error) { blocked = error?.code === 'TRUSTED_FILE_WRITABLE'; }
     assert(blocked, 'SELFTEST_WRITABLE_NOT_BLOCKED', 'writable LVFS config was not rejected');
 
     fs.chmodSync(rootPath(root, '/etc/fwupd/remotes.d/lvfs.conf'), 0o644);
     fs.writeFileSync(rootPath(root, '/etc/os-release'), 'ID=ubuntu\nVERSION_ID="24.04"\n');
     blocked = false;
-    try { qualifyFwupdDebian13Runtime({ root, commandRunner: fakeRunner }); } catch (error) { blocked = error?.code === 'DISTRO_UNSUPPORTED'; }
+    try { qualifyFwupdDebian13Runtime(options); } catch (error) { blocked = error?.code === 'DISTRO_UNSUPPORTED'; }
     assert(blocked, 'SELFTEST_DISTRO_NOT_BLOCKED', 'unexpected distro was not rejected');
     console.log('SWIR Debian 13 fwupd runtime qualification self-test: OK');
   } finally {
