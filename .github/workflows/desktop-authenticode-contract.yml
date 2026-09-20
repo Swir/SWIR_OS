@@ -106,7 +106,7 @@ jobs:
               $serial[0] = $serial[0] -bor 1
               $leafPublic = $leafRequest.Create($rootCert, $notBefore, $leafNotAfter, $serial)
               try {
-                $leafCert = $leafPublic.CopyWithPrivateKey($leafRsa)
+                $leafCert = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::CopyWithPrivateKey($leafPublic, $leafRsa)
                 try {
                   if (-not $leafCert.HasPrivateKey) { throw 'CI code-signing certificate has no private key.' }
                   $passwordText = 'SWIR-CI-Authenticode-Contract-Only!2026'
