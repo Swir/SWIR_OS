@@ -28,7 +28,7 @@ internal static class DesktopReleaseToCandidateSelfTests
         try
         {
             Run(workerExe, bundleDir, File.ReadAllText(publicKeyPath));
-            Console.WriteLine($"SWIR signed release -> Candidate E2E passed: {_passed}");
+            Console.WriteLine($"SWIR signed release -> Candidate E2E contract passed: {_passed}");
             return 0;
         }
         catch (Exception ex)
@@ -44,7 +44,7 @@ internal static class DesktopReleaseToCandidateSelfTests
         var targetVersion = new Version(0, 5, 2);
         const string channel = "preview";
         var verified = DesktopReleaseBundleVerifier.Verify(bundleDir, targetVersion, channel, publicKeyPem, new[] { "github.com" });
-        Expect(verified.Version == "0.5.2" && verified.Channel == channel, "release bundle passes independent signature/hash verification");
+        Expect(verified.Schema == DesktopReleaseBundleVerifier.VerifierSchema, "release bundle passes independent signature/hash verification");
         Expect(verified.Version == targetVersion.ToString(), "verified release targets Desktop 0.5.2");
         Expect(verified.Channel == channel, "verified release remains bound to preview channel");
 
@@ -58,9 +58,8 @@ internal static class DesktopReleaseToCandidateSelfTests
         try
         {
             var packagePath = Path.Combine(bundleDir, verified.PackageFile);
-            var transactionId = "0.5.2-preview-" + Guid.NewGuid().ToString("N");
-            var journal = new UpdateTransactionJournal(transactionsRoot);
-            var state = journal.Begin(new UpdateHandoffBroker.HandoffPlan(
+            var transactionId = "0.5.2-preview-e2e-" + Guid.NewGuid().ToString("N");
+            var handoff = new UpdateHandoffBroker.HandoffPlan(
                 transactionId,
                 new Version(0, 5, 1),
                 targetVersion,
@@ -72,10 +71,13 @@ internal static class DesktopReleaseToCandidateSelfTests
                 currentRoot,
                 Path.Combine(root, transactionId + "-handoff.json"),
                 DateTimeOffset.UtcNow,
-                "prepared"));
+                "prepared");
 
+            var journal = new UpdateTransactionJournal(transactionsRoot);
+            var state = journal.Begin(handoff);
             Expect(state.TargetVersion == targetVersion, "transaction binds signed release target version");
             Expect(state.CurrentVersion == new Version(0, 5, 1), "transaction preserves known-good current version");
+
             var plan = RunWorker(workerExe, "plan", state.JournalPath, transactionsRoot, deploymentRoot);
             Expect(plan.ExitCode == 0, "standalone updater worker accepts signed release transaction");
 
@@ -86,13 +88,10 @@ internal static class DesktopReleaseToCandidateSelfTests
             var prepare = RunWorker(workerExe, "prepare-candidate", state.JournalPath, transactionsRoot, deploymentRoot, candidateTimeoutMs);
             Expect(prepare.ExitCode == 0, "standalone updater worker prepares Candidate from release ZIP");
 
-            var transactionDirectory = Path.GetDirectoryName(state.JournalPath)
-                ?? throw new InvalidOperationException("Transaction directory is missing.");
-            var candidateRoot = Path.Combine(transactionDirectory, "Candidate");
-            var payloadRoot = Path.Combine(candidateRoot, "payload");
+            var candidateRoot = Path.Combine(deploymentRoot, "Candidate", transactionId);
+            var payloadRoot = Path.Combine(candidateRoot, "Payload");
             var candidateStatePath = Path.Combine(candidateRoot, "candidate-state.json");
             var hostBuildManifestPath = Path.Combine(payloadRoot, "desktop-host-build.json");
-
             Expect(Directory.Exists(candidateRoot), "Candidate slot is created inside deployment sandbox");
             Expect(File.Exists(Path.Combine(payloadRoot, "SWIR.Desktop.Host.exe")), "shipping Desktop Host entry point is present in Candidate payload");
             Expect(File.Exists(Path.Combine(payloadRoot, "SWIR.Desktop.UpdaterWorker.exe")), "standalone Updater Worker ships beside the Desktop Host");
@@ -171,15 +170,16 @@ internal static class DesktopReleaseToCandidateSelfTests
             start.ArgumentList.Add(arg);
 
         using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start standalone updater worker.");
-        Task<string> stdout = process.StandardOutput.ReadToEndAsync();
-        Task<string> stderr = process.StandardError.ReadToEndAsync();
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
         if (!process.WaitForExit(timeoutMs))
         {
             try { process.Kill(true); } catch { }
             throw new TimeoutException($"Updater worker exceeded {timeoutMs}ms timeout during {command}.");
         }
         Task.WaitAll(stdout, stderr);
-        if (process.ExitCode != 0) Console.Error.WriteLine(stderr.Result);
+        if (process.ExitCode != 0)
+            Console.Error.WriteLine(stderr.Result);
         return new ProcessResult(process.ExitCode, stdout.Result.Trim(), stderr.Result.Trim());
     }
 
