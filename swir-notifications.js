@@ -179,12 +179,15 @@
   }
 
   async function deliverNative(item) {
-    const show=window.SWIR_NATIVE_HOST?.notifications?.show;
+    const notifications=window.SWIR_NATIVE_HOST?.notifications;
+    const show=notifications?.show;
     if(typeof show!=='function')return null;
     const actions = item.actions.map(({ id, label, type, targetApp }) => ({ id, label, type, targetApp }));
-    return actions.length
-      ? show(item.title,item.message,item.packageId,item.silent,actions)
-      : show(item.title,item.message,item.packageId,item.silent);
+    const showWithActions = notifications?.showWithActions;
+    if (actions.length && typeof showWithActions === 'function') {
+      return showWithActions(item.title, item.message, item.packageId, item.silent, actions);
+    }
+    return show(item.title,item.message,item.packageId,item.silent);
   }
 
   async function send(appId, options = {}) {
