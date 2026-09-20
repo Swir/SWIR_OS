@@ -45,11 +45,12 @@ jobs:
           Set-StrictMode -Version Latest
 
           # Build an ephemeral two-certificate hierarchy entirely in memory.
-          # The test leaf is issued by a short-lived CA that exists only in the
-          # hosted runner's CurrentUser Root store and is removed in the always
-          # cleanup step. This lets Get-AuthenticodeSignature exercise the same
-          # Windows trust-chain policy as a real release without storing any
-          # production signing material in the repository.
+          # The disposable hosted Windows runner is already an isolated admin
+          # environment, so the short-lived CA is trusted in LocalMachine Root
+          # rather than CurrentUser Root. CurrentUser root writes are protected
+          # by Windows and can surface an interactive confirmation that deadlocks
+          # a non-interactive runner. The store mutation itself is isolated in a
+          # child process with a hard timeout and is removed in the always step.
           $notBefore = [DateTimeOffset]::UtcNow.AddMinutes(-5)
           $rootNotAfter = [DateTimeOffset]::UtcNow.AddDays(2)
           $leafNotAfter = [DateTimeOffset]::UtcNow.AddDays(1)
@@ -113,29 +114,47 @@ jobs:
                   $pfx = Join-Path $env:RUNNER_TEMP 'swir-ci-authenticode.pfx'
                   [IO.File]::WriteAllBytes($pfx, $leafCert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Pfx, $passwordText))
 
-                  $rootPublic = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
+                  $rootBytesBase64 = [Convert]::ToBase64String(
                     $rootCert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
                   )
-                  try {
-                    $rootStore = [System.Security.Cryptography.X509Certificates.X509Store]::new(
-                      [System.Security.Cryptography.X509Certificates.StoreName]::Root,
-                      [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
-                    )
+                  $installJob = Start-Job -ScriptBlock {
+                    param([string]$CertificateBase64)
+                    $ErrorActionPreference = 'Stop'
+                    $bytes = [Convert]::FromBase64String($CertificateBase64)
+                    $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($bytes)
                     try {
-                      $rootStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-                      $rootStore.Add($rootPublic)
-                      $matches = $rootStore.Certificates.Find(
-                        [System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
-                        $rootPublic.Thumbprint,
-                        $false
+                      $store = [System.Security.Cryptography.X509Certificates.X509Store]::new(
+                        [System.Security.Cryptography.X509Certificates.StoreName]::Root,
+                        [System.Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine
                       )
-                      if ($matches.Count -ne 1) { throw 'Ephemeral Authenticode CI root was not installed exactly once.' }
+                      try {
+                        $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+                        $store.Add($cert)
+                        $matches = $store.Certificates.Find(
+                          [System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
+                          $cert.Thumbprint,
+                          $false
+                        )
+                        if ($matches.Count -ne 1) { throw 'Ephemeral Authenticode CI root was not installed exactly once.' }
+                      } finally {
+                        $store.Close()
+                        $store.Dispose()
+                      }
                     } finally {
-                      $rootStore.Close()
-                      $rootStore.Dispose()
+                      $cert.Dispose()
+                    }
+                  } -ArgumentList $rootBytesBase64
+                  try {
+                    if (-not (Wait-Job -Job $installJob -Timeout 20)) {
+                      Stop-Job -Job $installJob -ErrorAction SilentlyContinue
+                      throw 'Timed out while installing the ephemeral Authenticode root into LocalMachine\\Root.'
+                    }
+                    Receive-Job -Job $installJob -ErrorAction Stop | Out-Null
+                    if ($installJob.State -ne 'Completed') {
+                      throw "Ephemeral Authenticode root install job ended in state $($installJob.State)."
                     }
                   } finally {
-                    $rootPublic.Dispose()
+                    Remove-Job -Job $installJob -Force -ErrorAction SilentlyContinue
                   }
 
                   "SWIR_AUTHENTICODE_PFX_PATH=$pfx" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
@@ -238,20 +257,33 @@ jobs:
         run: |
           $rootThumb = ($env:SWIR_AUTHENTICODE_ROOT_THUMBPRINT -replace '[^A-Fa-f0-9]', '').ToUpperInvariant()
           if ($rootThumb) {
-            $rootStore = [System.Security.Cryptography.X509Certificates.X509Store]::new(
-              [System.Security.Cryptography.X509Certificates.StoreName]::Root,
-              [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
-            )
-            try {
-              $rootStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-              $matches = $rootStore.Certificates.Find(
-                [System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
-                $rootThumb,
-                $false
+            $cleanupJob = Start-Job -ScriptBlock {
+              param([string]$Thumbprint)
+              $ErrorActionPreference = 'Stop'
+              $store = [System.Security.Cryptography.X509Certificates.X509Store]::new(
+                [System.Security.Cryptography.X509Certificates.StoreName]::Root,
+                [System.Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine
               )
-              foreach ($match in $matches) { $rootStore.Remove($match) }
+              try {
+                $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+                $matches = $store.Certificates.Find(
+                  [System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
+                  $Thumbprint,
+                  $false
+                )
+                foreach ($match in $matches) { $store.Remove($match) }
+              } finally {
+                $store.Close()
+                $store.Dispose()
+              }
+            } -ArgumentList $rootThumb
+            try {
+              if (-not (Wait-Job -Job $cleanupJob -Timeout 20)) {
+                Stop-Job -Job $cleanupJob -ErrorAction SilentlyContinue
+                throw 'Timed out while removing the ephemeral Authenticode CI root.'
+              }
+              Receive-Job -Job $cleanupJob -ErrorAction Stop | Out-Null
             } finally {
-              $rootStore.Close()
-              $rootStore.Dispose()
+              Remove-Job -Job $cleanupJob -Force -ErrorAction SilentlyContinue
             }
           }
