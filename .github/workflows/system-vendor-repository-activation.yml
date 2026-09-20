@@ -1,0 +1,64 @@
+name: System Vendor Repository Activation
+
+on:
+  push:
+    paths:
+      - 'system/hardware/vendor-repository-activation-transaction-service.mjs'
+      - 'system/hardware/vendor-repository-activation-transaction.selftest.mjs'
+      - 'system/hardware/vendor-repository-transaction-binding.mjs'
+      - 'system/SWIR-VENDOR-REPOSITORY-ACTIVATION-0.1.md'
+      - '.github/workflows/system-vendor-repository-activation.yml'
+  pull_request:
+    paths:
+      - 'system/hardware/vendor-repository-activation-transaction-service.mjs'
+      - 'system/hardware/vendor-repository-activation-transaction.selftest.mjs'
+      - 'system/hardware/vendor-repository-transaction-binding.mjs'
+      - 'system/SWIR-VENDOR-REPOSITORY-ACTIVATION-0.1.md'
+      - '.github/workflows/system-vendor-repository-activation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: system-vendor-repository-activation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  activation-transaction:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Syntax-check activation boundary
+        run: |
+          set -euo pipefail
+          node --check system/hardware/vendor-repository-activation-transaction-service.mjs
+          node --check system/hardware/vendor-repository-activation-transaction.selftest.mjs
+
+      - name: Run activation transaction self-test
+        run: node system/hardware/vendor-repository-activation-transaction.selftest.mjs
+
+      - name: Assert privilege, trust and command boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          SERVICE=system/hardware/vendor-repository-activation-transaction-service.mjs
+          grep -F "existingPrivilegeBrokerRequired: true" "$SERVICE" >/dev/null
+          grep -F "exactActivationDigestConfirmationRequired: true" "$SERVICE" >/dev/null
+          grep -F "rootOwnedPinnedKeyringRequired: true" "$SERVICE" >/dev/null
+          grep -F "trustedFlagForcedFalse: true" "$SERVICE" >/dev/null
+          grep -F "targetedMetadataRefreshOnly: true" "$SERVICE" >/dev/null
+          grep -F "journalBeforeMutation: true" "$SERVICE" >/dev/null
+          grep -F "interruptedRecoveryRequiresOperator: true" "$SERVICE" >/dev/null
+          grep -F "directPackageInstall: false" "$SERVICE" >/dev/null
+          grep -F "arbitraryRepositoryUrl: false" "$SERVICE" >/dev/null
+          grep -F "arbitraryKeyDownload: false" "$SERVICE" >/dev/null
+          grep -F "shellExecution: false" "$SERVICE" >/dev/null
+          grep -F "Dir::Etc::sourcelist=" "$SERVICE" >/dev/null
+          grep -F "Dir::Etc::sourceparts=-" "$SERVICE" >/dev/null
+          ! grep -RE "execSync|exec\(|sudo|pkexec|curl|wget" "$SERVICE"
