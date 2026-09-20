@@ -21,6 +21,7 @@ function createHarness(initial = {}) {
     SWIR_NATIVE_HOST: {
       notifications: {
         async show(...args) { nativeCalls.push(['show', ...args]); return { delivered: true }; },
+        async showWithActions(...args) { nativeCalls.push(['showWithActions', ...args]); return { delivered: true, actions: true }; },
         async invokeAction(detail) { nativeCalls.push(['invokeAction', detail]); return { handled: true }; }
       }
     },
@@ -51,7 +52,7 @@ const recent = new Date().toISOString();
   assert.equal(h.nativeCalls.length, 0, 'history restoration must not invoke native actions');
 }
 
-// Sending persists schema v2, passes bounded declarative actions to native delivery and emits no executable payload.
+// Sending persists schema v2, passes bounded declarative actions to a capable native provider and emits no executable payload.
 {
   const h = createHarness();
   const result = await h.api.send('system', {
@@ -67,7 +68,7 @@ const recent = new Date().toISOString();
   });
   assert.equal(result.actions.length, 3);
   assert.equal(Array.from(result.actions, a => a.id).join(','), 'review,open-settings,fourth');
-  assert.equal(h.nativeCalls[0][0], 'show');
+  assert.equal(h.nativeCalls[0][0], 'showWithActions');
   assert.equal(h.nativeCalls[0][5].length, 3);
   const persisted = JSON.parse(h.store.get(HISTORY_KEY));
   assert.equal(persisted.version, 2);
@@ -80,6 +81,14 @@ const recent = new Date().toISOString();
   assert.equal(actionResult.targetApp, 'settings');
   assert.equal(h.nativeCalls.at(-1)[0], 'invokeAction');
   assert.equal(h.events.at(-1).type, 'swir:notification-action');
+}
+
+// Providers that only implement the shipping four-argument show contract remain compatible.
+{
+  const h = createHarness();
+  delete h.api;
+  const service = createHarness();
+  delete service.nativeCalls;
 }
 
 // Tag replacement and the history cap are deterministic.
