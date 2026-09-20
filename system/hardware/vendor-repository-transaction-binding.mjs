@@ -5,6 +5,11 @@ const REVIEW_SCHEMA = 'swir.vendor-official-repository-review/0.1';
 const EVIDENCE_SCHEMA = 'swir.vendor-repository-evidence/0.1';
 const SYSTEM_PACKAGE_MANIFEST_SCHEMA = 'swir.package-provider/0.2';
 const PACKAGE = /^[a-z0-9][a-z0-9+.-]{0,127}$/;
+const REPOSITORY_ID = /^[A-Za-z0-9][A-Za-z0-9._+:-]{0,127}$/;
+const APT_SUITE = /^(?:\.\/|[A-Za-z0-9][A-Za-z0-9._+~\/-]{0,127})$/;
+const APT_COMPONENT = /^[A-Za-z0-9][A-Za-z0-9._+~-]{0,63}$/;
+const PLATFORM_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._+~-]{0,63}$/;
+const KEYRING_PATH = /^\/usr\/share\/keyrings\/[A-Za-z0-9][A-Za-z0-9._+~-]{0,127}\.gpg$/;
 const HEX40 = /^[A-F0-9]{40}$/;
 const HEX64 = /^[a-f0-9]{64}$/;
 
@@ -50,17 +55,43 @@ function evidenceBaseUrl(evidence) {
   return normalizeBaseUrl(resolved.toString());
 }
 
+function validAptSuite(value) {
+  if (typeof value !== 'string' || !APT_SUITE.test(value)) return false;
+  if (value === './') return true;
+  if (value.includes('//')) return false;
+  return !value.split('/').some(segment => segment === '..' || segment === '');
+}
+
+function validateAptScope(review) {
+  assert(Array.isArray(review.suites) && review.suites.length > 0 && review.suites.length <= 16, 'BINDING_REVIEW_SUITES_INVALID', 'review APT suites must be a bounded non-empty token list');
+  assert(review.suites.every(validAptSuite), 'BINDING_REVIEW_SUITES_INVALID', 'review APT suite contains whitespace, control data or an unsafe path token');
+  assert(new Set(review.suites).size === review.suites.length, 'BINDING_REVIEW_SUITES_INVALID', 'review APT suites must not contain duplicates');
+  assert(Array.isArray(review.components) && review.components.length <= 32, 'BINDING_REVIEW_COMPONENTS_INVALID', 'review APT components must be a bounded token list');
+  assert(review.components.every(value => typeof value === 'string' && APT_COMPONENT.test(value)), 'BINDING_REVIEW_COMPONENTS_INVALID', 'review APT component contains whitespace or control data');
+  assert(new Set(review.components).size === review.components.length, 'BINDING_REVIEW_COMPONENTS_INVALID', 'review APT components must not contain duplicates');
+}
+
+function validatePlatform(platform, code) {
+  assert(object(platform) && PLATFORM_TOKEN.test(String(platform.id || '')) && PLATFORM_TOKEN.test(String(platform.versionId || '')) && PLATFORM_TOKEN.test(String(platform.architecture || '')), code, 'repository platform binding is incomplete or contains unsafe token data');
+}
+
 function validateReview(review) {
   assert(object(review) && review.schema === REVIEW_SCHEMA, 'BINDING_REVIEW_INVALID', 'trusted vendor repository review is required');
   assert(review?.source?.class === 'vendor-official-repository', 'BINDING_REVIEW_SOURCE_INVALID', 'review must retain vendor-official-repository source class');
   assert(review.trustedSource === true, 'BINDING_REVIEW_TRUST_INVALID', 'review must originate from trusted root-owned policy');
   assert(review.directBinaryDownloads === false, 'BINDING_DIRECT_DOWNLOAD_FORBIDDEN', 'review must forbid direct binary downloads');
   assert(review.mutationAuthorized === false && review.automaticEnable === false, 'BINDING_REVIEW_PREAUTHORIZED', 'review must not pre-authorize repository mutation');
-  assert(typeof review.repositoryId === 'string' && review.repositoryId.length > 0, 'BINDING_REPOSITORY_ID_INVALID', 'review repository id is required');
+  assert(typeof review.repositoryId === 'string' && REPOSITORY_ID.test(review.repositoryId), 'BINDING_REPOSITORY_ID_INVALID', 'review repository id is invalid');
+  assert(review?.source?.ref === `vendor-repo:${review.repositoryId}`, 'BINDING_REVIEW_SOURCE_INVALID', 'review source ref must bind exactly to repositoryId');
   assert(review.packageManager === 'apt', 'BINDING_PACKAGE_MANAGER_INVALID', 'initial vendor repository binding supports apt only');
-  assert(Array.isArray(review.packages) && review.packages.length > 0 && review.packages.every(name => PACKAGE.test(name)), 'BINDING_REVIEW_PACKAGES_INVALID', 'review package allowlist is invalid');
+  normalizeBaseUrl(review.baseUrl);
+  validateAptScope(review);
+  assert(Array.isArray(review.packages) && review.packages.length > 0 && review.packages.length <= 256 && review.packages.every(name => PACKAGE.test(name)), 'BINDING_REVIEW_PACKAGES_INVALID', 'review package allowlist is invalid');
+  assert(new Set(review.packages).size === review.packages.length, 'BINDING_REVIEW_PACKAGES_INVALID', 'review package allowlist must not contain duplicates');
+  assert(typeof review?.keyring?.path === 'string' && KEYRING_PATH.test(review.keyring.path), 'BINDING_REVIEW_KEYRING_PATH_INVALID', 'review keyring path must be a pinned root-owned /usr/share/keyrings/*.gpg file');
   assert(HEX40.test(String(review?.keyring?.fingerprint || '').toUpperCase()), 'BINDING_REVIEW_FINGERPRINT_INVALID', 'review must retain a full 40-hex signing-key fingerprint');
-  assert(object(review.distribution) && review.distribution.id && review.distribution.versionId && review.distribution.architecture, 'BINDING_REVIEW_PLATFORM_INVALID', 'review platform binding is incomplete');
+  assert(/^[a-f0-9]{4}$/i.test(String(review.hardwareVendor || '')), 'BINDING_REVIEW_HARDWARE_VENDOR_INVALID', 'review hardware vendor must be a four-hex PCI vendor id');
+  validatePlatform(review.distribution, 'BINDING_REVIEW_PLATFORM_INVALID');
   return review;
 }
 
@@ -68,7 +99,8 @@ function validateEvidence(evidence, now) {
   assert(object(evidence) && evidence.schema === EVIDENCE_SCHEMA, 'BINDING_EVIDENCE_INVALID', 'qualified vendor repository evidence is required');
   assert(evidence.qualificationOnly === true, 'BINDING_EVIDENCE_MODE_INVALID', 'vendor evidence must remain qualification-only');
   assert(evidence.authorizesMutation === false && evidence.authorizesRepositoryEnablement === false, 'BINDING_EVIDENCE_PREAUTHORIZED', 'qualification evidence must never authorize mutation or repository enablement');
-  assert(typeof evidence.repositoryId === 'string' && evidence.repositoryId.length > 0, 'BINDING_EVIDENCE_REPOSITORY_INVALID', 'evidence repository id is required');
+  assert(typeof evidence.repositoryId === 'string' && REPOSITORY_ID.test(evidence.repositoryId), 'BINDING_EVIDENCE_REPOSITORY_INVALID', 'evidence repository id is invalid');
+  assert(/^[a-f0-9]{4}$/i.test(String(evidence.hardwareVendor || '')), 'BINDING_EVIDENCE_HARDWARE_VENDOR_INVALID', 'evidence hardware vendor must be a four-hex PCI vendor id');
   assert(HEX40.test(String(evidence?.key?.fingerprint || '').toUpperCase()), 'BINDING_EVIDENCE_FINGERPRINT_INVALID', 'evidence full signing-key fingerprint is required');
   assert(evidence?.inRelease?.freshnessVerified === true, 'BINDING_EVIDENCE_FRESHNESS_REQUIRED', 'signed repository metadata freshness must be verified');
   const expiry = Date.parse(evidence?.inRelease?.effectiveValidUntil);
@@ -77,8 +109,9 @@ function validateEvidence(evidence, now) {
   assert(HEX64.test(String(evidence?.inRelease?.sha256 || '')), 'BINDING_EVIDENCE_DIGEST_INVALID', 'InRelease SHA-256 evidence is required');
   assert(HEX64.test(String(evidence?.packages?.indexSha256 || '')), 'BINDING_EVIDENCE_DIGEST_INVALID', 'Packages index SHA-256 evidence is required');
   assert(HEX64.test(String(evidence?.key?.sha256 || '')), 'BINDING_EVIDENCE_DIGEST_INVALID', 'signing-key SHA-256 evidence is required');
-  assert(Array.isArray(evidence?.packages?.verified) && evidence.packages.verified.length > 0 && evidence.packages.verified.every(name => PACKAGE.test(name)), 'BINDING_EVIDENCE_PACKAGES_INVALID', 'verified evidence package set is invalid');
-  assert(object(evidence.distribution) && evidence.distribution.id && evidence.distribution.versionId && evidence.distribution.architecture, 'BINDING_EVIDENCE_PLATFORM_INVALID', 'evidence platform binding is incomplete');
+  assert(Array.isArray(evidence?.packages?.verified) && evidence.packages.verified.length > 0 && evidence.packages.verified.length <= 256 && evidence.packages.verified.every(name => PACKAGE.test(name)), 'BINDING_EVIDENCE_PACKAGES_INVALID', 'verified evidence package set is invalid');
+  assert(new Set(evidence.packages.verified).size === evidence.packages.verified.length, 'BINDING_EVIDENCE_PACKAGES_INVALID', 'verified evidence package set must not contain duplicates');
+  validatePlatform(evidence.distribution, 'BINDING_EVIDENCE_PLATFORM_INVALID');
   return evidence;
 }
 
@@ -138,8 +171,8 @@ export function bindVendorRepositoryTransaction({ review, evidence, requestedPac
       sourceClass: 'vendor-official-repository',
       packageManager: 'apt',
       baseUrl: normalizeBaseUrl(review.baseUrl),
-      suites: [...review.suites],
-      components: [...review.components]
+      suites: Object.freeze([...review.suites]),
+      components: Object.freeze([...review.components])
     }),
     platform: Object.freeze({ ...review.distribution, hardwareVendor: review.hardwareVendor }),
     key: Object.freeze({
@@ -205,6 +238,9 @@ export const VendorRepositoryTransactionBindingPolicy = Object.freeze({
   requiresExactRepositoryAndPlatformMatch: true,
   packageIntersectionRequired: true,
   deterministicDigestBinding: true,
+  aptDeb822TokensValidatedBeforeBinding: true,
+  exactSourceReferenceBindingRequired: true,
+  pinnedKeyringPathValidatedBeforeBinding: true,
   existingJournaledPackageBrokerRequired: true,
   repositoryActivationImplementedHere: false,
   directAptMutationAllowed: false,
