@@ -53,6 +53,22 @@ internal static class DesktopPackageSignatureSelfTests
             var unknownContext = NewBridge(Path.Combine(root, "unknown-data"));
             ExpectPackageCode(() => Install(unknownContext, unknown), "PACKAGE_SIGNATURE_UNKNOWN_KEY");
 
+            var absolute = Path.Combine(root, "absolute-entry.swirapp");
+            CreateBundle(absolute, "swir.signature.absolute", "1.0.0", "absolute");
+            AddEntry(absolute, "/absolute.txt", "must-not-normalize-away-root");
+            ExpectPackageCode(() => DesktopPackageSignatureTool.SignPackage(absolute, TrustedKeyId, trustedKey), "PACKAGE_PATH_INVALID");
+
+            var duplicate = Path.Combine(root, "duplicate-entry.swirapp");
+            CreateBundle(duplicate, "swir.signature.duplicate", "1.0.0", "duplicate");
+            AddEntry(duplicate, "APP/INDEX.HTML", "case-insensitive-duplicate");
+            ExpectPackageCode(() => DesktopPackageSignatureTool.SignPackage(duplicate, TrustedKeyId, trustedKey), "PACKAGE_DUPLICATE_PATH");
+
+            var oversizedEnvelope = Path.Combine(root, "oversized-envelope.swirapp");
+            CreateBundle(oversizedEnvelope, "swir.signature.oversized", "1.0.0", "oversized");
+            AddEntry(oversizedEnvelope, DesktopPackageSignatureVerifier.SignatureEntryName, new string('x', 70 * 1024));
+            var oversizedContext = NewBridge(Path.Combine(root, "oversized-data"));
+            ExpectPackageCode(() => Install(oversizedContext, oversizedEnvelope), "PACKAGE_SIGNATURE_INVALID");
+
             var optionalRootsPath = Path.Combine(root, "optional-package-trust-roots.json");
             WriteTrustRoots(optionalRootsPath, trustedKey.PublicKey.Export(KeyBlobFormat.RawPublicKey), requireSigned: false);
             Environment.SetEnvironmentVariable("SWIR_PACKAGE_TRUST_ROOTS", optionalRootsPath);
@@ -111,6 +127,14 @@ internal static class DesktopPackageSignatureSelfTests
         var payload = archive.CreateEntry("app/index.html", CompressionLevel.NoCompression);
         using var payloadWriter = new StreamWriter(payload.Open(), new UTF8Encoding(false));
         payloadWriter.Write($"<!doctype html><title>{payloadText}</title>");
+    }
+
+    private static void AddEntry(string path, string entryName, string payloadText)
+    {
+        using var archive = ZipFile.Open(path, ZipArchiveMode.Update);
+        var entry = archive.CreateEntry(entryName, CompressionLevel.NoCompression);
+        using var writer = new StreamWriter(entry.Open(), new UTF8Encoding(false));
+        writer.Write(payloadText);
     }
 
     private static void ReplacePayload(string path, string payloadText)
