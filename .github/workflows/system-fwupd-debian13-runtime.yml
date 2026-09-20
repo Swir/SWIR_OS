@@ -1,0 +1,87 @@
+name: System fwupd Debian 13 Runtime
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'system/hardware/fwupd-debian13-runtime-qualification.mjs'
+      - 'system/SWIR-FWUPD-DEBIAN13-RUNTIME-0.1.md'
+      - '.github/workflows/system-fwupd-debian13-runtime.yml'
+  pull_request:
+    paths:
+      - 'system/hardware/fwupd-debian13-runtime-qualification.mjs'
+      - 'system/SWIR-FWUPD-DEBIAN13-RUNTIME-0.1.md'
+      - '.github/workflows/system-fwupd-debian13-runtime.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: system-fwupd-debian13-runtime-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  policy:
+    name: Qualification policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax and fail-closed self-test
+        run: |
+          set -euo pipefail
+          node --check system/hardware/fwupd-debian13-runtime-qualification.mjs
+          node system/hardware/fwupd-debian13-runtime-qualification.mjs --self-test
+      - name: Assert observation-only boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F "readOnlyQualification: true" system/hardware/fwupd-debian13-runtime-qualification.mjs >/dev/null
+          grep -F "firmwareMutationAllowed: false" system/hardware/fwupd-debian13-runtime-qualification.mjs >/dev/null
+          grep -F "remoteMutationAllowed: false" system/hardware/fwupd-debian13-runtime-qualification.mjs >/dev/null
+          grep -F "physicalHardwareQualification: false" system/hardware/fwupd-debian13-runtime-qualification.mjs >/dev/null
+          grep -F "secureBootQualification: false" system/hardware/fwupd-debian13-runtime-qualification.mjs >/dev/null
+          ! grep -RE 'https?://|fetch\(|request\(' system/hardware/fwupd-debian13-runtime-qualification.mjs
+          ! grep -RE "\[['\"]?(refresh|update|install|downgrade|reinstall|enable-remote|disable-remote)['\"]?" system/hardware/fwupd-debian13-runtime-qualification.mjs
+          ! grep -F 'shell: true' system/hardware/fwupd-debian13-runtime-qualification.mjs
+
+  debian13-runtime:
+    name: Real Debian 13 fwupd package runtime
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    container:
+      image: debian:trixie-slim
+    steps:
+      - name: Install Debian 13 runtime from distro repositories
+        run: |
+          set -euo pipefail
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nodejs fwupd ca-certificates
+          rm -rf /var/lib/apt/lists/*
+      - uses: actions/checkout@v4
+      - name: Qualify the installed production paths without firmware mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          node system/hardware/fwupd-debian13-runtime-qualification.mjs | tee /tmp/swir-fwupd-runtime.json
+          node - /tmp/swir-fwupd-runtime.json <<'NODE'
+          const fs = require('node:fs');
+          const evidence = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          if (evidence.schema !== 'swir.fwupd-debian13-runtime-qualification/0.1') throw new Error('schema mismatch');
+          if (evidence.passed !== true) throw new Error('qualification did not pass');
+          if (evidence.distribution.id !== 'debian' || evidence.distribution.versionId !== '13') throw new Error('unexpected target distro');
+          if (evidence.package.name !== 'fwupd' || !evidence.package.version) throw new Error('fwupd package evidence missing');
+          if (evidence.runtime.fwupdmgrExecuted !== true || evidence.runtime.command !== '--help') throw new Error('real fwupdmgr execution missing');
+          if (evidence.runtime.daemonMutationAttempted !== false) throw new Error('mutation boundary violated');
+          if (evidence.policy.readOnlyQualification !== true || evidence.policy.networkAccessRequired !== false) throw new Error('qualification policy invalid');
+          if (evidence.policy.firmwareMutationAllowed !== false || evidence.policy.remoteMutationAllowed !== false) throw new Error('mutation policy invalid');
+          if (evidence.policy.physicalHardwareQualification !== false || evidence.policy.secureBootQualification !== false) throw new Error('qualification overclaim');
+          const paths = new Set(evidence.files.map(item => item.path));
+          for (const required of ['/usr/bin/fwupdmgr', '/usr/libexec/fwupd/fwupd', '/etc/fwupd/remotes.d/lvfs.conf']) {
+            if (!paths.has(required)) throw new Error(`missing trusted file evidence: ${required}`);
+          }
+          NODE
