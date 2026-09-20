@@ -14,6 +14,7 @@ const MAX_DISTRIBUTIONS_PER_ENTRY = 16;
 const SAFE_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._+:-]{0,127}$/;
 const SAFE_PACKAGE = /^[a-z0-9][a-z0-9+.-]{0,127}$/;
 const SAFE_HOST = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+const APT_SUITE = /^(?:\.\/|[A-Za-z0-9][A-Za-z0-9._+~\/-]{0,127})$/;
 const KEYRING_ROOT = '/usr/share/keyrings/';
 
 function fail(code, message) {
@@ -40,6 +41,26 @@ function boundedStringList(value, { maxItems, pattern = SAFE_TOKEN, field }) {
     const item = text(raw, 160);
     assert(item && pattern.test(item), 'POLICY_TOKEN_INVALID', `${field} contains an invalid token`);
     if (!normalized.includes(item)) normalized.push(item);
+  }
+  return normalized;
+}
+
+function validAptSuite(value) {
+  if (typeof value !== 'string' || !APT_SUITE.test(value)) return false;
+  if (value === './') return true;
+  if (value.includes('//')) return false;
+  return !value.split('/').some(segment => segment === '..' || segment === '');
+}
+
+function boundedAptSuites(value) {
+  assert(Array.isArray(value), 'POLICY_FIELD_INVALID', 'suites must be an array');
+  assert(value.length > 0 && value.length <= 16, 'POLICY_FIELD_TOO_LARGE', 'suites must be a bounded non-empty array');
+  const normalized = [];
+  for (const raw of value) {
+    const item = text(raw, 160);
+    assert(item && validAptSuite(item), 'POLICY_TOKEN_INVALID', 'suites contains an invalid or unsafe APT suite');
+    assert(!normalized.includes(item), 'POLICY_TOKEN_DUPLICATE', 'suites must not contain duplicates');
+    normalized.push(item);
   }
   return normalized;
 }
@@ -103,7 +124,7 @@ function normalizeEntry(raw) {
   assert(Array.isArray(distributionsRaw) && distributionsRaw.length > 0 && distributionsRaw.length <= MAX_DISTRIBUTIONS_PER_ENTRY,
     'POLICY_DISTRIBUTION_INVALID', 'at least one bounded distribution mapping is required');
   const distributions = distributionsRaw.map(normalizeDistribution);
-  const suites = boundedStringList(raw.suites, { maxItems: 16, pattern: SAFE_TOKEN, field: 'suites' });
+  const suites = boundedAptSuites(raw.suites);
   const components = boundedStringList(raw.components, { maxItems: 16, pattern: SAFE_TOKEN, field: 'components' });
   const packages = boundedStringList(raw.packages, { maxItems: MAX_PACKAGES_PER_ENTRY, pattern: SAFE_PACKAGE, field: 'packages' });
   const hardwareVendors = boundedStringList(raw.hardwareVendors, { maxItems: 64, pattern: /^[A-Fa-f0-9]{4}$/, field: 'hardwareVendors' }).map(value => value.toLowerCase());
@@ -195,7 +216,8 @@ export const VendorOfficialRepositoryPolicy = Object.freeze({
   automaticEnable: false,
   arbitraryPackages: false,
   mutationRequiresExistingJournaledPackageBroker: true,
-  productionNetworkFetchImplemented: false
+  productionNetworkFetchImplemented: false,
+  flatRepositorySuitesValidated: true
 });
 
 async function main() {

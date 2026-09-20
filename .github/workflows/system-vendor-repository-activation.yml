@@ -5,6 +5,8 @@ on:
     paths:
       - 'system/hardware/vendor-repository-activation-transaction-service.mjs'
       - 'system/hardware/vendor-repository-activation-transaction.selftest.mjs'
+      - 'system/hardware/vendor-repository-driver-center-integration.mjs'
+      - 'system/hardware/vendor-repository-driver-center-integration.selftest.mjs'
       - 'system/hardware/vendor-repository-transaction-binding.mjs'
       - 'system/hardware/vendor-repository-transaction-binding.selftest.mjs'
       - 'system/SWIR-VENDOR-REPOSITORY-ACTIVATION-0.1.md'
@@ -13,6 +15,8 @@ on:
     paths:
       - 'system/hardware/vendor-repository-activation-transaction-service.mjs'
       - 'system/hardware/vendor-repository-activation-transaction.selftest.mjs'
+      - 'system/hardware/vendor-repository-driver-center-integration.mjs'
+      - 'system/hardware/vendor-repository-driver-center-integration.selftest.mjs'
       - 'system/hardware/vendor-repository-transaction-binding.mjs'
       - 'system/hardware/vendor-repository-transaction-binding.selftest.mjs'
       - 'system/SWIR-VENDOR-REPOSITORY-ACTIVATION-0.1.md'
@@ -36,11 +40,13 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Syntax-check activation and binding boundaries
+      - name: Syntax-check activation, binding and Driver Center boundaries
         run: |
           set -euo pipefail
           node --check system/hardware/vendor-repository-activation-transaction-service.mjs
           node --check system/hardware/vendor-repository-activation-transaction.selftest.mjs
+          node --check system/hardware/vendor-repository-driver-center-integration.mjs
+          node --check system/hardware/vendor-repository-driver-center-integration.selftest.mjs
           node --check system/hardware/vendor-repository-transaction-binding.mjs
           node --check system/hardware/vendor-repository-transaction-binding.selftest.mjs
 
@@ -50,12 +56,16 @@ jobs:
       - name: Run activation transaction self-test
         run: node system/hardware/vendor-repository-activation-transaction.selftest.mjs
 
+      - name: Run Driver Center vendor lifecycle self-test
+        run: node system/hardware/vendor-repository-driver-center-integration.selftest.mjs
+
       - name: Assert privilege, trust and command boundaries
         shell: bash
         run: |
           set -euo pipefail
           SERVICE=system/hardware/vendor-repository-activation-transaction-service.mjs
           BINDING=system/hardware/vendor-repository-transaction-binding.mjs
+          DRIVER=system/hardware/vendor-repository-driver-center-integration.mjs
           grep -F "existingPrivilegeBrokerRequired: true" "$SERVICE" >/dev/null
           grep -F "exactActivationDigestConfirmationRequired: true" "$SERVICE" >/dev/null
           grep -F "rootOwnedPinnedKeyringRequired: true" "$SERVICE" >/dev/null
@@ -72,4 +82,10 @@ jobs:
           grep -F "aptDeb822TokensValidatedBeforeBinding: true" "$BINDING" >/dev/null
           grep -F "exactSourceReferenceBindingRequired: true" "$BINDING" >/dev/null
           grep -F "pinnedKeyringPathValidatedBeforeBinding: true" "$BINDING" >/dev/null
-          ! grep -RE "execSync|exec\(|sudo|pkexec|curl|wget" "$SERVICE"
+          grep -F "exactDriverOperationRequired: true" "$DRIVER" >/dev/null
+          grep -F "exactFreshBindingRequired: true" "$DRIVER" >/dev/null
+          grep -F "packageScopeIntersectionRequired: true" "$DRIVER" >/dev/null
+          grep -F "existingJournaledActivationServiceRequired: true" "$DRIVER" >/dev/null
+          grep -F "directAptMutationAllowed: false" "$DRIVER" >/dev/null
+          grep -F "automaticEnablement: false" "$DRIVER" >/dev/null
+          ! grep -RE "execSync|exec\(|sudo|pkexec|curl|wget|shell:[[:space:]]*true" "$SERVICE" "$DRIVER"

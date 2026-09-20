@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+VENDOR_TRUST_STAGER="$REPO_ROOT/system/image/stage-vendor-repository-trust.mjs"
+VENDOR_POLICY="$REPO_ROOT/system/hardware/vendor-repositories.debian13.json"
+
 usage() {
   echo "Usage: build-live-usb-img.sh --rootfs <dir> --output <img> [--size <bytes>]" >&2
 }
@@ -22,9 +27,18 @@ done
 [[ "$SIZE_BYTES" =~ ^[0-9]+$ ]] || fail "--size must be an integer byte count"
 [[ "$KERNEL_OPTIONS" != *$'\n'* && "$KERNEL_OPTIONS" != *$'\r'* ]] || fail "kernel options contain a newline"
 (( SIZE_BYTES >= 6 * 1024 * 1024 * 1024 )) || fail "image must be at least 6 GiB"
-for cmd in truncate losetup parted partprobe udevadm mkfs.vfat mkfs.ext4 mount umount rsync install find sort sha256sum stat; do
+for cmd in truncate losetup parted partprobe udevadm mkfs.vfat mkfs.ext4 mount umount rsync install find sort sha256sum stat node gpg gpgv; do
   command -v "$cmd" >/dev/null || fail "missing required command: $cmd"
 done
+[[ -f "$VENDOR_TRUST_STAGER" && ! -L "$VENDOR_TRUST_STAGER" ]] || fail "vendor trust staging service is missing"
+[[ -f "$VENDOR_POLICY" && ! -L "$VENDOR_POLICY" ]] || fail "reviewed vendor repository policy is missing"
+
+# Final media must carry reviewed vendor policy + pinned key material, but the vendor
+# repository itself stays disabled. Staging performs fresh signed-metadata/key checks;
+# offline verification then binds the files and explicitly rejects a pre-enabled source.
+node "$VENDOR_TRUST_STAGER" --stage --rootfs "$ROOTFS" --policy "$VENDOR_POLICY" --profile nvidia-debian13-amd64 >/dev/null
+node "$VENDOR_TRUST_STAGER" --verify --rootfs "$ROOTFS" --profile nvidia-debian13-amd64 >/dev/null
+
 EFI_SOURCE="$ROOTFS/usr/lib/systemd/boot/efi/systemd-bootx64.efi"
 [[ -f "$EFI_SOURCE" && ! -L "$EFI_SOURCE" ]] || fail "rootfs lacks systemd-bootx64.efi"
 KERNEL="$(find "$ROOTFS/boot" -maxdepth 1 -type f -name 'vmlinuz-*' | sort -V | tail -n1)"

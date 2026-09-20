@@ -5,6 +5,8 @@ on:
     paths:
       - 'system/hardware/vendor-official-repository-service.mjs'
       - 'system/hardware/vendor-official-repository-service.selftest.mjs'
+      - 'system/hardware/vendor-repository-production-policy.selftest.mjs'
+      - 'system/hardware/vendor-repositories.debian13.json'
       - 'system/hardware/vendor-repository-trust-evidence.mjs'
       - 'system/hardware/vendor-repository-trust-evidence.selftest.mjs'
       - 'system/hardware/vendor-repository-transaction-binding.mjs'
@@ -21,6 +23,8 @@ on:
     paths:
       - 'system/hardware/vendor-official-repository-service.mjs'
       - 'system/hardware/vendor-official-repository-service.selftest.mjs'
+      - 'system/hardware/vendor-repository-production-policy.selftest.mjs'
+      - 'system/hardware/vendor-repositories.debian13.json'
       - 'system/hardware/vendor-repository-trust-evidence.mjs'
       - 'system/hardware/vendor-repository-trust-evidence.selftest.mjs'
       - 'system/hardware/vendor-repository-transaction-binding.mjs'
@@ -51,6 +55,7 @@ jobs:
         run: |
           node --check system/hardware/vendor-official-repository-service.mjs
           node --check system/hardware/vendor-official-repository-service.selftest.mjs
+          node --check system/hardware/vendor-repository-production-policy.selftest.mjs
           node --check system/hardware/vendor-repository-trust-evidence.mjs
           node --check system/hardware/vendor-repository-trust-evidence.selftest.mjs
           node --check system/hardware/vendor-repository-transaction-binding.mjs
@@ -59,8 +64,11 @@ jobs:
           node --check system/packages/distribution-package-provider.mjs
           node --check system/packages/distribution-package-provider.selftest.mjs
           node --check system/packages/package-transaction-service.mjs
+          python3 -m json.tool system/hardware/vendor-repositories.debian13.json >/dev/null
       - name: Run policy self-test
         run: node system/hardware/vendor-official-repository-service.selftest.mjs
+      - name: Run production policy self-test
+        run: node system/hardware/vendor-repository-production-policy.selftest.mjs
       - name: Run evidence self-test
         run: node system/hardware/vendor-repository-trust-evidence.selftest.mjs
       - name: Run transaction-binding self-test
@@ -73,18 +81,21 @@ jobs:
         run: |
           set -euo pipefail
           POLICY="${RUNNER_TEMP}/vendor-repositories.json"
-          cat > "${POLICY}" <<'JSON'
-          {
-            "schema": "swir.vendor-official-repository-policy/0.1",
-            "failClosed": true,
-            "defaultEnabled": false,
-            "allowDirectBinaryDownloads": false,
-            "entries": []
-          }
-          JSON
-          sudo chown root:root "${POLICY}"
-          sudo chmod 0644 "${POLICY}"
+          sudo install -o root -g root -m 0644 system/hardware/vendor-repositories.debian13.json "${POLICY}"
           node system/hardware/vendor-official-repository-service.mjs --verify "${POLICY}"
+          RESOLVED="${RUNNER_TEMP}/vendor-resolved.json"
+          node system/hardware/vendor-official-repository-service.mjs --resolve "${POLICY}" 10de debian 13 x86_64 > "${RESOLVED}"
+          node - "${RESOLVED}" <<'NODE'
+          const fs = require('node:fs');
+          const result = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          if (result.candidates?.length !== 1) process.exit(2);
+          const candidate = result.candidates[0];
+          if (candidate.repositoryId !== 'nvidia-cuda-debian13-x86_64') process.exit(3);
+          if (candidate.keyring?.fingerprint !== '02182E60104FCDC26EAE1B8597A5D4CB8793F200') process.exit(4);
+          if (candidate.suites?.length !== 1 || candidate.suites[0] !== './') process.exit(5);
+          if (!candidate.packages?.includes('nvidia-open')) process.exit(6);
+          if (candidate.automaticEnable !== false || candidate.mutationAuthorized !== false) process.exit(7);
+          NODE
           sudo chmod 0666 "${POLICY}"
           if node system/hardware/vendor-official-repository-service.mjs --verify "${POLICY}"; then
             echo 'Writable vendor policy was incorrectly accepted' >&2
@@ -134,6 +145,7 @@ jobs:
           set -euo pipefail
           grep -F "mutationRequiresExistingJournaledPackageBroker: true" system/hardware/vendor-official-repository-service.mjs >/dev/null
           grep -F "productionNetworkFetchImplemented: false" system/hardware/vendor-official-repository-service.mjs >/dev/null
+          grep -F "flatRepositorySuitesValidated: true" system/hardware/vendor-official-repository-service.mjs >/dev/null
           grep -F "qualificationOnly: true" system/hardware/vendor-repository-trust-evidence.mjs >/dev/null
           grep -F "authorizesMutation: false" system/hardware/vendor-repository-trust-evidence.mjs >/dev/null
           grep -F "authorizesRepositoryEnablement: false" system/hardware/vendor-repository-trust-evidence.mjs >/dev/null

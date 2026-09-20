@@ -12,8 +12,8 @@
 [![Desktop Windows Build](https://github.com/Swir/SWIR_OS/actions/workflows/desktop-windows-build.yml/badge.svg)](https://github.com/Swir/SWIR_OS/actions/workflows/desktop-windows-build.yml)
 [![Roadmap Contract](https://github.com/Swir/SWIR_OS/actions/workflows/roadmap-contract.yml/badge.svg)](https://github.com/Swir/SWIR_OS/actions/workflows/roadmap-contract.yml)
 
-![Roadmap](https://img.shields.io/badge/ROADMAP-84.6%25-02050A?style=for-the-badge&logoColor=62E5FF)
-![Completed](https://img.shields.io/badge/DONE-55%2F65-02050A?style=for-the-badge&logoColor=62E5FF)
+![Roadmap](https://img.shields.io/badge/ROADMAP-86.2%25-02050A?style=for-the-badge&logoColor=62E5FF)
+![Completed](https://img.shields.io/badge/DONE-56%2F65-02050A?style=for-the-badge&logoColor=62E5FF)
 ![Status](https://img.shields.io/badge/STATUS-IN%20PROGRESS-02050A?style=for-the-badge&logoColor=62E5FF)
 
 [![Author](https://img.shields.io/badge/Author-Swir-0088FF?style=flat-square&logo=github)](https://github.com/Swir)
@@ -31,9 +31,9 @@
 
 ## 📊 Project status
 
-<img width="100%" src="assets/readme/progress-card.svg" alt="SWIR OS roadmap progress — 84.6%, 55 of 65 verified deliverables" />
+<img width="100%" src="assets/readme/progress-card.svg" alt="SWIR OS roadmap progress — 86.2%, 56 of 65 verified deliverables" />
 
-**Measured scope:** full Web → Desktop → System `Version roadmap`. **Project progress:** 55/65 = **84.6%**. **Release readiness:** not ready; physical Live USB qualification, the complete native application suite and other release gates remain open.
+**Measured scope:** full Web → Desktop → System `Version roadmap`. **Project progress:** 56/65 = **86.2%**. **Release readiness:** not ready; physical Live USB qualification, the complete native application suite and other release gates remain open.
 
 SWIR OS is actively being developed as three connected editions: a browser-based Web Edition, a Windows Desktop Edition with native adapters, and a real Linux-native System Edition intended to run from removable media and install to disk as a standalone operating system.
 
@@ -46,7 +46,7 @@ SWIR OS is actively being developed as three connected editions: a browser-based
 ### Overall roadmap
 
 
-**55 of 65 measurable roadmap deliverables are complete.** The native System shell, Live USB, disk installation, detached boot, graphical-installer E2E and physical-hardware qualification are tracked explicitly rather than hidden inside generic bootable-image milestones. The authoritative checklist and progress math live in [`SWIR-OS-ARCHITECTURE.md`](SWIR-OS-ARCHITECTURE.md). A prototype, contract skeleton or CI job alone does not count as a completed roadmap item.
+**56 of 65 measurable roadmap deliverables are complete.** The native System shell, Live USB, disk installation, detached boot, graphical-installer E2E and physical-hardware qualification are tracked explicitly rather than hidden inside generic bootable-image milestones. The authoritative checklist and progress math live in [`SWIR-OS-ARCHITECTURE.md`](SWIR-OS-ARCHITECTURE.md). A prototype, contract skeleton or CI job alone does not count as a completed roadmap item.
 
 ---
 
@@ -87,7 +87,7 @@ Windows kernel drivers are **not** treated as a general solution for Linux hardw
 | 🍷 **Windows compatibility** | Managed Wine compatibility has a live E2E that launches a deterministic Win64 application through controlled per-app compatibility state. Broader application compatibility is still being expanded. |
 | 📦 **Packages** | The Debian 13 System package path verifies the production distribution provider, read-only APT dependency resolution, real journaled APT installation and fail-closed interrupted-transaction reconciliation. Flatpak/AppImage remain explicit experimental adapters. |
 | 🛟 **Recovery** | A dedicated UEFI recovery entry boots a hardened SWIR recovery target with `SWIR_ROOT` read-only, normal fstab automounting disabled, no guest NIC and no automatic filesystem/package/firmware mutation. |
-| 🔧 **Hardware & drivers** | PCI/USB inventory, Hardware Catalog, Driver Center runtime, Linux in-tree drivers and `linux-firmware` are verified foundations. Supported Driver Center package/fwupd mutation routes add a private parent journal; direct kernel-module mutation remains disabled. |
+| 🔧 **Hardware & drivers** | PCI/USB inventory, Hardware Catalog, Driver Center runtime, Linux in-tree drivers and `linux-firmware` are verified foundations. The allowlisted official-vendor repository path now binds reviewed policy/evidence to Driver Center activation, disposable-VM recovery, and disabled-by-default final-image trust staging; physical vendor-hardware qualification remains separate. Supported Driver Center package/fwupd mutation routes add a private parent journal; direct kernel-module mutation remains disabled. |
 | 🌐 **Networking** | NetworkManager integration is exercised through a real isolated live E2E path. |
 | 🌍 **Native browser** | SWIR Browser now runs natively on GTK4/WebKitGTK 6.0 with tabs, bounded owner-only history/bookmarks, downloads, ephemeral private tabs, explicit permission prompts, Default Apps integration and approved alternative-browser handoff through Software Center. |
 | 🎵 **Native Player** | SWIR Player now runs natively on GTK4/GStreamer for local audio/video, with bounded owner-only library/playlists, MPRIS2 media-key integration, Gio notifications, desktop MIME integration and separately verified Debian 13 GTK4 GStreamer runtime. It remains unprivileged and has no self-updater or direct package mutation. |
@@ -314,7 +314,7 @@ Development currently prioritizes the highest-impact path to a dependable Deskto
 
 1. build the mandatory native application suite on top of the verified SWIR desktop shell,
 2. harden the Desktop host/update/signing lifecycle,
-3. verify fwupd/LVFS mutation on supported hardware and controlled official-vendor repository policy,
+3. verify fwupd/LVFS mutation on supported hardware while keeping the verified official-vendor repository path fail-closed,
 4. qualify physical Live USB boot/install and recovery on dedicated hardware,
 5. finish full-system i18n, reliability and accessibility without inflating VM evidence into hardware claims.
 
@@ -334,7 +334,7 @@ SWIR OS is under active development and is **not yet a finished System Edition d
 - Production package-signing provisioning is not yet fully cut over.
 - The signed GitHub-backed update feed/user-policy roadmap gate remains open.
 - Flatpak and AppImage provider paths are experimental and not silently enabled in the production System provider factory.
-- Real supported-device fwupd/LVFS mutation, exceptional vendor repositories, direct module mutation and any rollback mechanism not proven by the child service remain outside the completed journaled-transaction gate.
+- Real supported-device fwupd/LVFS mutation, physical vendor-driver qualification, direct module mutation and any rollback mechanism not proven by the child service remain outside the completed journaled-transaction gate.
 - The dedicated recovery entry is read-only-first and intentionally does not claim automatic filesystem repair or automatic package/firmware rollback.
 - Hardware catalog coverage is intentionally limited; current CI does not claim broad physical-hardware qualification.
 - Managed Wine execution is verified as a controlled compatibility foundation, not as a claim that every Windows application works.
