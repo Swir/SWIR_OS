@@ -12,6 +12,7 @@ const packageSignatures = read('desktop/windows/DesktopPackageSignatureVerifier.
 const packageTrustRoots = read('desktop/windows/DesktopPackageTrustRootStore.cs');
 const packageTrustRootTemplate = read('desktop/windows/package-trust-roots.json');
 const packageSigner = read('desktop/windows/DesktopPackageSignatureTool.cs');
+const packageSignatureTests = read('desktop/windows/DesktopPackageSignatureSelfTests.cs');
 const hostProject = read('desktop/windows/SWIR.Desktop.Host.csproj');
 const runtime = read('swir-runtime.js');
 
@@ -51,6 +52,10 @@ const checks = [
   [bridge.includes('packageSignatureSchema = DesktopPackageSignatureVerifier.SignatureSchema') && bridge.includes('packageSignatureVerification = true'), 'package bridge advertises embedded signature verification'],
   [packageSignatures.includes('swir.package-signature/1.0') && packageSignatures.includes('SignatureAlgorithm.Ed25519.Verify'), 'package verifier implements Ed25519 embedded signature schema'],
   [packageSignatures.includes('PACKAGE_CONTENT_DIGEST_MISMATCH') && packageSignatures.includes('PACKAGE_SIGNATURE_IDENTITY_MISMATCH'), 'package verifier binds signature to content digest and manifest identity'],
+  [packageSignatures.includes('MaxSignatureEnvelopeBytes') && packageSignatures.includes('MaxManifestBytes'), 'package verifier bounds signature and manifest control records'],
+  [packageSignatures.includes('PACKAGE_ENTRY_LENGTH_MISMATCH') && packageSignatures.includes('HashEntryBounded'), 'package verifier streams payload hashing with declared-length enforcement'],
+  [packageSignatures.includes("Replace('\\\\', '/')") && !packageSignatures.includes("TrimStart('/')"), 'package verifier does not normalize absolute archive paths into relative paths'],
+  [packageSignatureTests.includes('absolute-entry.swirapp') && packageSignatureTests.includes('duplicate-entry.swirapp') && packageSignatureTests.includes('oversized-envelope.swirapp'), 'package signature self-tests cover hostile absolute, duplicate, and oversized envelope shapes'],
   [packageTrustRoots.includes('swir.package-trust-roots/1.0') && packageTrustRoots.includes('package:swirapp'), 'package trust-root store validates package-only root scope'],
   [packageTrustRoots.includes('SWIR_PACKAGE_TRUST_ROOTS'), 'package trust-root path supports explicit deployment provisioning'],
   [packageTrustRoots.includes('RequireSignedPackages') && packageTrustRoots.includes('PACKAGE_TRUST_ROOT_REQUIRED'), 'package trust lock fails closed when signed packages are required but roots are missing'],
