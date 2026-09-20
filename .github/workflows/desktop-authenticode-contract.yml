@@ -44,8 +44,10 @@ jobs:
           $ErrorActionPreference = 'Stop'
           Set-StrictMode -Version Latest
 
-          # Keep CI identity creation fully inside .NET. Hosted Windows certificate
-          # provider cmdlets have occasionally blocked until the job timeout.
+          # Generate the short-lived identity fully in memory. Importing a
+          # self-signed root through provider APIs can trigger an interactive
+          # trust prompt on hosted Windows runners, so the public certificate is
+          # added with certutil -f instead.
           $subject = 'CN=SWIR OS CI Authenticode Contract'
           $rsa = [System.Security.Cryptography.RSA]::Create(2048)
           try {
@@ -82,18 +84,8 @@ jobs:
               [IO.File]::WriteAllBytes($pfx, $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Pfx, $passwordText))
               [IO.File]::WriteAllBytes($cer, $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert))
 
-              $publicCert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($cer)
-              $rootStore = [System.Security.Cryptography.X509Certificates.X509Store]::new(
-                [System.Security.Cryptography.X509Certificates.StoreName]::Root,
-                [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
-              )
-              try {
-                $rootStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-                $rootStore.Add($publicCert)
-              } finally {
-                $rootStore.Close()
-                $publicCert.Dispose()
-              }
+              & "$env:SystemRoot\System32\certutil.exe" -user -f -addstore Root $cer | Out-Host
+              if ($LASTEXITCODE -ne 0) { throw "certutil failed to trust the CI certificate (exit $LASTEXITCODE)." }
 
               "SWIR_AUTHENTICODE_PFX_PATH=$pfx" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
               "SWIR_AUTHENTICODE_PFX_PASSWORD=$passwordText" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
@@ -184,19 +176,6 @@ jobs:
         run: |
           $thumb = ($env:SWIR_AUTHENTICODE_CERT_THUMBPRINT -replace '[^A-Fa-f0-9]', '').ToUpperInvariant()
           if ($thumb) {
-            $rootStore = [System.Security.Cryptography.X509Certificates.X509Store]::new(
-              [System.Security.Cryptography.X509Certificates.StoreName]::Root,
-              [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
-            )
-            try {
-              $rootStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-              $matches = $rootStore.Certificates.Find(
-                [System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
-                $thumb,
-                $false
-              )
-              foreach ($cert in $matches) { $rootStore.Remove($cert) }
-            } finally {
-              $rootStore.Close()
-            }
+            & "$env:SystemRoot\System32\certutil.exe" -user -f -delstore Root $thumb | Out-Host
+            if ($LASTEXITCODE -ne 0) { Write-Warning "certutil cleanup returned exit $LASTEXITCODE." }
           }
