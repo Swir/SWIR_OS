@@ -18,9 +18,10 @@ internal static class DesktopPackageSignatureTool
             return 2;
         }
 
+        byte[]? privateKey = null;
         try
         {
-            var privateKey = Convert.FromBase64String(File.ReadAllText(args[3]).Trim());
+            privateKey = Convert.FromBase64String(File.ReadAllText(args[3]).Trim());
             using var key = Key.Import(
                 SignatureAlgorithm.Ed25519,
                 privateKey,
@@ -34,6 +35,11 @@ internal static class DesktopPackageSignatureTool
         {
             Console.Error.WriteLine($"Package signing failed: {ex.Message}");
             return 1;
+        }
+        finally
+        {
+            if (privateKey is not null)
+                System.Security.Cryptography.CryptographicOperations.ZeroMemory(privateKey);
         }
     }
 

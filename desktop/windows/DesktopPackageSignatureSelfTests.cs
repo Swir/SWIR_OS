@@ -69,6 +69,11 @@ internal static class DesktopPackageSignatureSelfTests
             var oversizedContext = NewBridge(Path.Combine(root, "oversized-data"));
             ExpectPackageCode(() => Install(oversizedContext, oversizedEnvelope), "PACKAGE_SIGNATURE_INVALID");
 
+            var missingConfiguredRoots = Path.Combine(root, "missing-package-trust-roots.json");
+            Environment.SetEnvironmentVariable("SWIR_PACKAGE_TRUST_ROOTS", missingConfiguredRoots);
+            ExpectPackageCode(() => DesktopPackageTrustRootStore.LoadProvisioned(), "PACKAGE_TRUST_ROOTS_MISSING");
+            Environment.SetEnvironmentVariable("SWIR_PACKAGE_TRUST_ROOTS", rootsPath);
+
             var optionalRootsPath = Path.Combine(root, "optional-package-trust-roots.json");
             WriteTrustRoots(optionalRootsPath, trustedKey.PublicKey.Export(KeyBlobFormat.RawPublicKey), requireSigned: false);
             Environment.SetEnvironmentVariable("SWIR_PACKAGE_TRUST_ROOTS", optionalRootsPath);

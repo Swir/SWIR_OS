@@ -21,11 +21,18 @@ internal static class DesktopPackageTrustRootStore
     public static LoadResult LoadProvisioned()
     {
         var configured = Environment.GetEnvironmentVariable("SWIR_PACKAGE_TRUST_ROOTS");
-        var path = string.IsNullOrWhiteSpace(configured)
-            ? Path.Combine(AppContext.BaseDirectory, DefaultFileName)
-            : Path.GetFullPath(configured);
+        var explicitlyConfigured = !string.IsNullOrWhiteSpace(configured);
+        var path = explicitlyConfigured
+            ? Path.GetFullPath(configured!)
+            : Path.Combine(AppContext.BaseDirectory, DefaultFileName);
         if (!File.Exists(path))
+        {
+            if (explicitlyConfigured)
+                throw new DesktopPackageException(
+                    "PACKAGE_TRUST_ROOTS_MISSING",
+                    "Configured package trust-root file does not exist; refusing to downgrade package signature policy.");
             return new LoadResult(path, Array.Empty<DesktopPackageSignatureVerifier.TrustRoot>(), false);
+        }
 
         RootDocument? document;
         try { document = JsonSerializer.Deserialize<RootDocument>(File.ReadAllText(path), JsonOptions); }
