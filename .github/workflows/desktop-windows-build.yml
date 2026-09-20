@@ -2,28 +2,40 @@ name: Desktop Windows Build
 
 on:
   push:
+    branches: [main]
     paths:
       - 'desktop/windows/**'
-      - 'desktop/policies/**'
       - 'swir-runtime.js'
       - 'swir-apps.js'
+      - 'swir-packages.js'
       - 'swir-app-bridge.js'
       - 'swir-app-bridge-host.js'
-      - 'scripts/validate-native-appdata-bridge.mjs'
-      - 'scripts/validate-update-center-desktop-contract.mjs'
+      - 'swir-code.html'
+      - 'swir-image.html'
+      - 'swir-archive.html'
+      - 'swir-pdf.html'
+      - 'swir-chat.html'
+      - 'swir-chat-api.php'
+      - 'swir-updates.html'
+      - 'sw.js'
       - '.github/workflows/desktop-windows-build.yml'
   pull_request:
     paths:
       - 'desktop/windows/**'
-      - 'desktop/policies/**'
       - 'swir-runtime.js'
       - 'swir-apps.js'
+      - 'swir-packages.js'
       - 'swir-app-bridge.js'
       - 'swir-app-bridge-host.js'
-      - 'scripts/validate-native-appdata-bridge.mjs'
-      - 'scripts/validate-update-center-desktop-contract.mjs'
+      - 'swir-code.html'
+      - 'swir-image.html'
+      - 'swir-archive.html'
+      - 'swir-pdf.html'
+      - 'swir-chat.html'
+      - 'swir-chat-api.php'
+      - 'swir-updates.html'
+      - 'sw.js'
       - '.github/workflows/desktop-windows-build.yml'
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -31,7 +43,7 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: desktop/windows
@@ -63,16 +75,19 @@ jobs:
         run: node validate-chat-bridge.mjs
 
       - name: Validate native App Data bridge routing
-        run: node ../../scripts/validate-native-appdata-bridge.mjs
+        run: node validate-native-appdata-bridge.mjs
 
       - name: Validate Update Center Desktop readiness boundary
-        run: node ../../scripts/validate-update-center-desktop-contract.mjs
+        run: node validate-update-center-desktop-contract.mjs
 
       - name: Setup .NET 8
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: '8.0.x'
 
+      # Compile the shipping host before running the expensive updater/recovery matrix.
+      # This catches accidental second entry points, missing production references and
+      # other host-integration regressions immediately instead of several minutes later.
       - name: Restore Desktop Host compile gate
         run: dotnet restore SWIR.Desktop.Host.csproj
 
