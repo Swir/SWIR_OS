@@ -9,6 +9,9 @@ on:
       - 'system/hardware/firmware-update-transaction-selftest.mjs'
       - 'system/hardware/firmware-update-verification-service.mjs'
       - 'system/hardware/firmware-update-verification-selftest.mjs'
+      - 'system/hardware/firmware-physical-qualification-service.mjs'
+      - 'system/hardware/firmware-physical-qualification-cli.mjs'
+      - 'system/hardware/firmware-physical-qualification-selftest.mjs'
       - 'system/hardware/firmware-driver-mutation-integration.selftest.mjs'
       - 'system/hardware/driver-mutation-transaction-service.mjs'
       - 'system/SWIR-FIRMWARE-UPDATE-TRANSACTIONS-0.1.md'
@@ -20,6 +23,9 @@ on:
       - 'system/hardware/firmware-update-transaction-selftest.mjs'
       - 'system/hardware/firmware-update-verification-service.mjs'
       - 'system/hardware/firmware-update-verification-selftest.mjs'
+      - 'system/hardware/firmware-physical-qualification-service.mjs'
+      - 'system/hardware/firmware-physical-qualification-cli.mjs'
+      - 'system/hardware/firmware-physical-qualification-selftest.mjs'
       - 'system/hardware/firmware-driver-mutation-integration.selftest.mjs'
       - 'system/hardware/driver-mutation-transaction-service.mjs'
       - 'system/SWIR-FIRMWARE-UPDATE-TRANSACTIONS-0.1.md'
@@ -50,11 +56,16 @@ jobs:
           node --check system/hardware/firmware-update-transaction-selftest.mjs
           node --check system/hardware/firmware-update-verification-service.mjs
           node --check system/hardware/firmware-update-verification-selftest.mjs
+          node --check system/hardware/firmware-physical-qualification-service.mjs
+          node --check system/hardware/firmware-physical-qualification-cli.mjs
+          node --check system/hardware/firmware-physical-qualification-selftest.mjs
           node --check system/hardware/firmware-driver-mutation-integration.selftest.mjs
       - name: Transaction self-test
         run: node system/hardware/firmware-update-transaction-selftest.mjs
       - name: Post-update verification self-test
         run: node system/hardware/firmware-update-verification-selftest.mjs
+      - name: Physical qualification harness self-test
+        run: node system/hardware/firmware-physical-qualification-selftest.mjs
       - name: Driver Center integration self-test
         run: node system/hardware/firmware-driver-mutation-integration.selftest.mjs
       - name: Fail-closed policy assertions
@@ -78,6 +89,14 @@ jobs:
           grep -F "failedTransactionAutoPromotion: false" system/hardware/firmware-update-verification-service.mjs
           grep -F "automaticRetry: false" system/hardware/firmware-update-verification-service.mjs
           grep -F "physicalHardwareQualification: false" system/hardware/firmware-update-verification-service.mjs
+          grep -F "ciEvidenceCountsAsPhysicalQualification: false" system/hardware/firmware-physical-qualification-service.mjs
+          grep -F "interactiveApplyRequired: true" system/hardware/firmware-physical-qualification-service.mjs
+          grep -F "interactiveFinalizeRequired: true" system/hardware/firmware-physical-qualification-service.mjs
+          grep -F "autoReboot: false" system/hardware/firmware-physical-qualification-service.mjs
+          grep -F "autoRollback: false" system/hardware/firmware-physical-qualification-service.mjs
+          grep -F "physicalityProvenBySoftware: false" system/hardware/firmware-physical-qualification-service.mjs
+          ! grep -F -- '--yes' system/hardware/firmware-physical-qualification-cli.mjs
+          ! grep -F -- '--force' system/hardware/firmware-physical-qualification-cli.mjs
           grep -F "shell: false" system/hardware/firmware-update-transaction-service.mjs
 
   debian-13:
@@ -94,4 +113,5 @@ jobs:
         run: |
           node system/hardware/firmware-update-transaction-selftest.mjs
           node system/hardware/firmware-update-verification-selftest.mjs
+          node system/hardware/firmware-physical-qualification-selftest.mjs
           node system/hardware/firmware-driver-mutation-integration.selftest.mjs
