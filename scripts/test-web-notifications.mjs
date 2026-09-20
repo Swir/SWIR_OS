@@ -30,7 +30,7 @@ function createHarness(initial = {}) {
   };
   const context = vm.createContext({ window, localStorage, CustomEvent, Date, Math, JSON, Object, Array, String, TypeError, Error, Set, Promise, console });
   vm.runInContext(source, context, { filename: 'swir-notifications.js' });
-  return { api: window.SwirNotifications, store, events, nativeCalls };
+  return { api: window.SwirNotifications, window, store, events, nativeCalls };
 }
 
 const HISTORY_KEY = 'swir-app-notifications-v1';
@@ -83,12 +83,13 @@ const recent = new Date().toISOString();
   assert.equal(h.events.at(-1).type, 'swir:notification-action');
 }
 
-// Providers that only implement the shipping four-argument show contract remain compatible.
+// Providers that only implement the shipping four-argument show contract remain compatible even when Web actions are present.
 {
   const h = createHarness();
-  delete h.api;
-  const service = createHarness();
-  delete service.nativeCalls;
+  delete h.window.SWIR_NATIVE_HOST.notifications.showWithActions;
+  await h.api.send('system', { message: 'Legacy provider', actions: [{ id: 'review', label: 'Review', type: 'event' }] });
+  assert.equal(h.nativeCalls[0][0], 'show');
+  assert.equal(h.nativeCalls[0].length, 5, 'legacy native show receives exactly four notification arguments');
 }
 
 // Tag replacement and the history cap are deterministic.
