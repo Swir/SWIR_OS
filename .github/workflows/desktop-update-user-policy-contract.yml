@@ -7,6 +7,8 @@ on:
       - 'swir-update-policy-frame.js'
       - 'swir-v11.js'
       - 'sw.js'
+      - 'desktop/windows/DesktopUpdateUserPolicy.cs'
+      - 'desktop/tests/update-user-policy/**'
       - 'scripts/validate-update-user-policy.mjs'
       - '.github/workflows/desktop-update-user-policy-contract.yml'
       - 'SWIR-PRODUCT-BASELINE-1.0.md'
@@ -16,6 +18,8 @@ on:
       - 'swir-update-policy-frame.js'
       - 'swir-v11.js'
       - 'sw.js'
+      - 'desktop/windows/DesktopUpdateUserPolicy.cs'
+      - 'desktop/tests/update-user-policy/**'
       - 'scripts/validate-update-user-policy.mjs'
       - '.github/workflows/desktop-update-user-policy-contract.yml'
       - 'SWIR-PRODUCT-BASELINE-1.0.md'
@@ -25,7 +29,7 @@ permissions:
   contents: read
 
 jobs:
-  validate:
+  validate-web-policy:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -41,3 +45,18 @@ jobs:
         run: node --check scripts/validate-update-user-policy.mjs
       - name: Verify Automatic Notify Manual policy semantics
         run: node scripts/validate-update-user-policy.mjs
+
+  validate-native-policy:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Run durable native user-policy self-tests
+        shell: pwsh
+        run: dotnet run --configuration Release --project desktop/tests/update-user-policy/DesktopUpdateUserPolicySelfTests.csproj
+      - name: Build shipping Desktop Host with native policy
+        shell: pwsh
+        run: dotnet build desktop/windows/SWIR.Desktop.Host.csproj --configuration Release --no-restore
