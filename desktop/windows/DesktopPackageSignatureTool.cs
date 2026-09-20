@@ -1,3 +1,4 @@
+#if SWIR_PACKAGE_SIGNATURE_TOOL
 using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
@@ -73,3 +74,4 @@ internal static class DesktopPackageSignatureTool
         output.Write(envelope);
     }
 }
+#endif
