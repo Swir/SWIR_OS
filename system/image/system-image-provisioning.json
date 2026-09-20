@@ -5,7 +5,6 @@
   "productionOwnerUid": 0,
   "directories": [
     { "path": "/etc/swir", "mode": "0755" },
-    { "path": "/etc/swir/hardware", "mode": "0755" },
     { "path": "/var/lib/swir/image", "mode": "0700" },
     { "path": "/var/lib/swir/security/catalog-trust", "mode": "0700" },
     { "path": "/var/lib/swir/package-transactions", "mode": "0700" },
@@ -37,13 +36,6 @@
       "mode": "0644",
       "kind": "repository-source",
       "requiredActionIds": ["org.swir.system.firmware.update", "org.swir.system.firmware.recover"]
-    },
-    {
-      "id": "vendor-repository-policy",
-      "source": "system/hardware/vendor-repositories.debian13.json",
-      "path": "/etc/swir/hardware/vendor-repositories.json",
-      "mode": "0644",
-      "kind": "repository-source"
     },
     {
       "id": "repository-trust-policy",
