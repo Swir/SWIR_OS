@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadSystemImageProvisioningManifest, stageSystemImageFoundation, verifySystemImageFoundation, SystemImageProvisioningPolicy } from './system-image-provisioning.mjs';
+import { loadVendorOfficialRepositoryPolicy, resolveVendorOfficialRepositories } from '../hardware/vendor-official-repository-service.mjs';
 
 const fsp = fs.promises;
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -36,6 +37,8 @@ assert.equal(manifest.policy.allowRealRootTarget, false);
 assert.equal(manifest.policy.allowSymlinkDestinations, false);
 assert.equal(manifest.policy.allowArbitraryUrls, false);
 assert.equal(manifest.policy.allowExampleRepositoryPolicy, false);
+assert(manifest.directories.some(entry => entry.path === '/etc/swir/hardware' && entry.mode === '0755'));
+assert(manifest.files.some(entry => entry.id === 'vendor-repository-policy' && entry.source === 'system/hardware/vendor-repositories.debian13.json' && entry.path === '/etc/swir/hardware/vendor-repositories.json' && entry.mode === '0644'));
 
 const staged = await stageSystemImageFoundation({
   rootfs,
@@ -49,8 +52,21 @@ assert.equal(staged.ready, true);
 assert.equal(staged.staged, true);
 assert.equal(staged.bootableImageClaim, false);
 assert.equal(staged.blockers.length, 0);
-assert.equal(staged.state.artifacts.length, 4);
+assert.equal(staged.state.artifacts.length, 5);
 assert.equal(staged.state.production, false);
+
+const stagedVendorPolicyPath = path.join(rootfs, 'etc/swir/hardware/vendor-repositories.json');
+const stagedVendorStat = await fsp.lstat(stagedVendorPolicyPath);
+assert.equal(stagedVendorStat.isFile(), true);
+assert.equal(stagedVendorStat.isSymbolicLink(), false);
+assert.equal(stagedVendorStat.mode & 0o777, 0o644);
+const stagedVendorPolicy = await loadVendorOfficialRepositoryPolicy(stagedVendorPolicyPath);
+const stagedVendorReviews = resolveVendorOfficialRepositories(stagedVendorPolicy, {
+  hardwareVendor: '10de', distributionId: 'debian', versionId: '13', architecture: 'x86_64'
+});
+assert.equal(stagedVendorReviews.length, 1);
+assert.equal(stagedVendorReviews[0].repositoryId, 'nvidia-cuda-debian13-x86_64');
+assert.equal(stagedVendorReviews[0].automaticEnable, false);
 
 const verified = await verifySystemImageFoundation({ rootfs, production: false });
 assert.equal(verified.ready, true);
