@@ -9,6 +9,7 @@
   <ItemGroup>
     <Compile Include="UpdateBroker.cs" />
     <Compile Include="UpdateStagingBroker.cs" />
+    <Compile Include="DesktopGitHubUpdatePolicy.cs" />
     <Compile Include="DesktopPackageBuilder.cs" />
     <Compile Include="DesktopUpdateReleaseBuilder.cs" />
     <Compile Include="DesktopReleaseBundleBuilder.cs" />
