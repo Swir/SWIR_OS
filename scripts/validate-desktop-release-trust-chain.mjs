@@ -56,8 +56,12 @@ for (const fragment of [
 for (const fragment of [
   'legacySha256Fallback = _catalogTrust is null',
   'trustMode = _catalogTrust is null ? "LEGACY_SHA_UNTIL_ROOT_PROVISIONED" : "SIGNED_CATALOG_REQUIRED"',
+  'persistedTrustProvenance = true',
   'CATALOG_AUTHORIZATION_REQUIRED',
-  'return _installer.Install(path, trust.Sha256);'
+  '_installer.Install(path, trust.Sha256, ToTrustProof(trust))',
+  'DesktopPackageTrustProof.SignedCatalog',
+  'trust.CatalogSequence.Value',
+  'trust.ExpiresAt.Value'
 ]) {
   if (!packageBridge.includes(fragment)) fail(`Desktop package bridge production trust boundary missing: ${fragment}`);
 }
@@ -67,13 +71,23 @@ for (const fragment of [
 // signed metadata into an identity-only check or replace constant-time digest comparison.
 for (const fragment of [
   'integrity = "sha256-required"',
+  'trustProvenance = "deployment-recorded"',
+  'signedCatalogProvenance = true',
   'var expected = NormalizeHash(expectedSha256);',
   'var actual = ComputeSha256(bundlePath);',
   'CryptographicOperations.FixedTimeEquals',
   'PACKAGE_HASH_MISMATCH',
+  'PACKAGE_TRUST_PROOF_INVALID',
+  'PACKAGE_TRUST_EXPIRED',
+  'TrustMode',
+  'SignatureVerified',
+  'SignerKeyId',
+  'CatalogSequence',
+  'CatalogVersion',
+  'TrustExpiresAt',
   'bundleSha256 = actual'
 ]) {
-  if (!packageInstaller.includes(fragment)) fail(`Desktop package payload integrity boundary missing: ${fragment}`);
+  if (!packageInstaller.includes(fragment)) fail(`Desktop package payload integrity/trust boundary missing: ${fragment}`);
 }
 const hashCheck = packageInstaller.indexOf('CryptographicOperations.FixedTimeEquals');
 const archiveOpen = packageInstaller.indexOf('ZipFile.OpenRead(bundlePath)');
@@ -85,11 +99,18 @@ for (const fragment of [
   'requireSignedCatalog = true',
   'SignatureAlgorithm.Ed25519',
   'CATALOG_ROLLBACK_DETECTED',
-  'signed v1 must survive Host restart',
-  'signed v2 must survive Host restart',
-  'rolled-back v1 must survive Host restart'
+  'persistedTrustProvenance',
+  'trustMode',
+  'signatureVerified',
+  'signerKeyId',
+  'catalogSequence',
+  'catalogVersion',
+  'trustExpiresAt',
+  'signed package status must preserve signed trust mode',
+  'rollback should restore v1 catalog sequence',
+  'Rolling the payload back must never roll the catalog trust high-water mark back.'
 ]) {
-  if (!lifecycle.includes(fragment)) fail(`Signed package lifecycle coverage missing: ${fragment}`);
+  if (!lifecycle.includes(fragment)) fail(`Signed package lifecycle/provenance coverage missing: ${fragment}`);
 }
 
 for (const fragment of [
