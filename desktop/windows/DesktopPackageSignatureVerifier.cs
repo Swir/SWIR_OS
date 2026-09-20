@@ -14,6 +14,9 @@ internal sealed class DesktopPackageSignatureVerifier
     private const int MaxEntries = 2048;
     private const long MaxEntryBytes = 64L * 1024 * 1024;
     private const long MaxExpandedBytes = 256L * 1024 * 1024;
+    private const long MaxManifestBytes = 1024L * 1024;
+    private const long MaxSignatureEnvelopeBytes = 64L * 1024;
+    private const int HashBufferBytes = 128 * 1024;
     private readonly IReadOnlyDictionary<string, TrustRoot> _roots;
 
     internal sealed record TrustRoot(string KeyId, string Name, byte[] PublicKey, IReadOnlyList<string> Scope);
@@ -51,12 +54,14 @@ internal sealed class DesktopPackageSignatureVerifier
             }
             if (signatureEntries.Length != 1)
                 throw new DesktopPackageException("PACKAGE_SIGNATURE_INVALID", "Desktop package must contain exactly one embedded signature envelope.");
+            if (signatureEntries[0].Length > MaxSignatureEnvelopeBytes)
+                throw new DesktopPackageException("PACKAGE_SIGNATURE_INVALID", $"Embedded package signature envelope exceeds {MaxSignatureEnvelopeBytes} bytes.");
 
             SignatureEnvelope envelope;
             try
             {
-                using var stream = signatureEntries[0].Open();
-                envelope = JsonSerializer.Deserialize<SignatureEnvelope>(stream, JsonOptions)
+                var bytes = ReadEntryBytesBounded(signatureEntries[0], MaxSignatureEnvelopeBytes, "signature envelope");
+                envelope = JsonSerializer.Deserialize<SignatureEnvelope>(bytes, JsonOptions)
                     ?? throw new DesktopPackageException("PACKAGE_SIGNATURE_INVALID", "Embedded package signature envelope is empty.");
             }
             catch (DesktopPackageException) { throw; }
@@ -139,15 +144,15 @@ internal sealed class DesktopPackageSignatureVerifier
                 string digest;
                 if (string.Equals(path, ManifestEntryName, StringComparison.Ordinal))
                 {
+                    if (length > MaxManifestBytes)
+                        throw new DesktopPackageException("PACKAGE_MANIFEST_INVALID", $"swir-package.json exceeds {MaxManifestBytes} bytes.");
                     try
                     {
-                        using var stream = entry.Open();
-                        using var buffer = new MemoryStream();
-                        stream.CopyTo(buffer);
-                        var bytes = buffer.ToArray();
+                        var bytes = ReadEntryBytesBounded(entry, MaxManifestBytes, "manifest");
                         digest = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
                         manifest = JsonDocument.Parse(bytes);
                     }
+                    catch (DesktopPackageException) { throw; }
                     catch (JsonException ex)
                     {
                         throw new DesktopPackageException("PACKAGE_MANIFEST_INVALID", ex.Message);
@@ -155,8 +160,7 @@ internal sealed class DesktopPackageSignatureVerifier
                 }
                 else
                 {
-                    using var stream = entry.Open();
-                    digest = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+                    digest = HashEntryBounded(entry);
                 }
                 entries.Add(new ContentEntry(path, length, digest));
             }
@@ -193,7 +197,49 @@ internal sealed class DesktopPackageSignatureVerifier
             ["version"] = version
         });
 
-    internal static string NormalizeEntryPath(string path) => (path ?? string.Empty).Replace('\\', '/').TrimStart('/');
+    internal static string NormalizeEntryPath(string path) => (path ?? string.Empty).Replace('\\', '/');
+
+    private static string HashEntryBounded(ZipArchiveEntry entry)
+    {
+        using var stream = entry.Open();
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = new byte[HashBufferBytes];
+        long actual = 0;
+        while (true)
+        {
+            var read = stream.Read(buffer, 0, buffer.Length);
+            if (read <= 0) break;
+            actual = checked(actual + read);
+            if (actual > MaxEntryBytes || actual > entry.Length)
+                throw new DesktopPackageException("PACKAGE_ENTRY_LENGTH_MISMATCH", $"Package entry expanded beyond its declared length: {entry.FullName}");
+            hash.AppendData(buffer, 0, read);
+        }
+        if (actual != entry.Length)
+            throw new DesktopPackageException("PACKAGE_ENTRY_LENGTH_MISMATCH", $"Package entry length does not match archive metadata: {entry.FullName}");
+        return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+    }
+
+    private static byte[] ReadEntryBytesBounded(ZipArchiveEntry entry, long maxBytes, string label)
+    {
+        if (entry.Length < 0 || entry.Length > maxBytes)
+            throw new DesktopPackageException("PACKAGE_ENTRY_TOO_LARGE", $"Package {label} exceeds {maxBytes} bytes.");
+        using var stream = entry.Open();
+        using var buffer = new MemoryStream((int)Math.Min(entry.Length, int.MaxValue));
+        var chunk = new byte[64 * 1024];
+        long actual = 0;
+        while (true)
+        {
+            var read = stream.Read(chunk, 0, chunk.Length);
+            if (read <= 0) break;
+            actual = checked(actual + read);
+            if (actual > maxBytes || actual > entry.Length)
+                throw new DesktopPackageException("PACKAGE_ENTRY_LENGTH_MISMATCH", $"Package {label} expanded beyond its declared length.");
+            buffer.Write(chunk, 0, read);
+        }
+        if (actual != entry.Length)
+            throw new DesktopPackageException("PACKAGE_ENTRY_LENGTH_MISMATCH", $"Package {label} length does not match archive metadata.");
+        return buffer.ToArray();
+    }
 
     private static string? OptionalString(JsonElement node, string name)
         => node.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString()?.Trim() : null;
