@@ -202,7 +202,7 @@ internal sealed class DesktopPackageSignatureVerifier
     private static string HashEntryBounded(ZipArchiveEntry entry)
     {
         using var stream = entry.Open();
-        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        using var hash = System.Security.Cryptography.IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         var buffer = new byte[HashBufferBytes];
         long actual = 0;
         while (true)
