@@ -48,7 +48,11 @@ const actionable=await window.SwirNotifications.send('chat',{
 });
 assert.equal(nativeActionDeliveries.length,1,'action-aware native notification provider must receive actionable notifications');
 assert.deepEqual(nativeActionDeliveries[0].slice(0,4),['Action','Open chat','swir.chat',false]);
-assert.deepEqual(nativeActionDeliveries[0][4],[{id:'open-chat',label:'Open',type:'open-app',targetApp:'chat'}]);
+assert.equal(
+  JSON.stringify(nativeActionDeliveries[0][4]),
+  JSON.stringify([{id:'open-chat',label:'Open',type:'open-app',targetApp:'chat'}]),
+  'native action payload must remain declarative across the VM bridge'
+);
 assert.equal(actionable.nativeDelivery.provider,'test-native-actions');
 assert.equal(toasts.length,0,'actionable native delivery must not be duplicated as a shell toast');
 
