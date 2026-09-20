@@ -39,38 +39,153 @@ jobs:
           dotnet-version: '8.0.x'
 
       - name: Provision isolated CI code-signing identity
-        shell: powershell
+        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $subject = 'CN=SWIR OS CI Authenticode Contract'
-          $cert = New-SelfSignedCertificate `
-            -Subject $subject `
-            -Type CodeSigningCert `
-            -KeyAlgorithm RSA `
-            -KeyLength 2048 `
-            -KeyExportPolicy Exportable `
-            -CertStoreLocation 'Cert:\CurrentUser\My' `
-            -NotAfter (Get-Date).AddDays(2)
-          if (-not $cert.HasPrivateKey) { throw 'CI code-signing certificate has no private key.' }
-          $passwordText = 'SWIR-CI-Authenticode-Contract-Only!2026'
-          $password = ConvertTo-SecureString $passwordText -AsPlainText -Force
-          $pfx = Join-Path $env:RUNNER_TEMP 'swir-ci-authenticode.pfx'
-          $cer = Join-Path $env:RUNNER_TEMP 'swir-ci-authenticode.cer'
-          Export-PfxCertificate -Cert $cert -FilePath $pfx -Password $password | Out-Null
-          Export-Certificate -Cert $cert -FilePath $cer | Out-Null
-          Import-Certificate -FilePath $cer -CertStoreLocation 'Cert:\CurrentUser\Root' | Out-Null
-          "SWIR_AUTHENTICODE_PFX_PATH=$pfx" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "SWIR_AUTHENTICODE_PFX_PASSWORD=$passwordText" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "SWIR_AUTHENTICODE_CERT_THUMBPRINT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "SWIR_AUTHENTICODE_REQUIRED=true" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Set-StrictMode -Version Latest
+
+          # Build an ephemeral two-certificate hierarchy entirely in memory.
+          # The disposable hosted Windows runner is already an isolated admin
+          # environment, so the short-lived CA is trusted in LocalMachine Root
+          # rather than CurrentUser Root. CurrentUser root writes are protected
+          # by Windows and can surface an interactive confirmation that deadlocks
+          # a non-interactive runner. The store mutation itself is isolated in a
+          # child process with a hard timeout and is removed in the always step.
+          $notBefore = [DateTimeOffset]::UtcNow.AddMinutes(-5)
+          $rootNotAfter = [DateTimeOffset]::UtcNow.AddDays(2)
+          $leafNotAfter = [DateTimeOffset]::UtcNow.AddDays(1)
+          $rootRsa = [System.Security.Cryptography.RSA]::Create(2048)
+          $leafRsa = [System.Security.Cryptography.RSA]::Create(2048)
+          try {
+            $rootRequest = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
+              'CN=SWIR OS CI Authenticode Root',
+              $rootRsa,
+              [System.Security.Cryptography.HashAlgorithmName]::SHA256,
+              [System.Security.Cryptography.RSASignaturePadding]::Pkcs1
+            )
+            $rootRequest.CertificateExtensions.Add(
+              [System.Security.Cryptography.X509Certificates.X509BasicConstraintsExtension]::new($true, $false, 0, $true)
+            )
+            $rootRequest.CertificateExtensions.Add(
+              [System.Security.Cryptography.X509Certificates.X509KeyUsageExtension]::new(
+                [System.Security.Cryptography.X509Certificates.X509KeyUsageFlags]::KeyCertSign -bor
+                [System.Security.Cryptography.X509Certificates.X509KeyUsageFlags]::CrlSign,
+                $true
+              )
+            )
+            $rootRequest.CertificateExtensions.Add(
+              [System.Security.Cryptography.X509Certificates.X509SubjectKeyIdentifierExtension]::new($rootRequest.PublicKey, $false)
+            )
+            $rootCert = $rootRequest.CreateSelfSigned($notBefore, $rootNotAfter)
+            try {
+              $leafRequest = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
+                'CN=SWIR OS CI Authenticode Contract',
+                $leafRsa,
+                [System.Security.Cryptography.HashAlgorithmName]::SHA256,
+                [System.Security.Cryptography.RSASignaturePadding]::Pkcs1
+              )
+              $eku = [System.Security.Cryptography.OidCollection]::new()
+              [void]$eku.Add([System.Security.Cryptography.Oid]::new('1.3.6.1.5.5.7.3.3', 'Code Signing'))
+              $leafRequest.CertificateExtensions.Add(
+                [System.Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]::new($eku, $true)
+              )
+              $leafRequest.CertificateExtensions.Add(
+                [System.Security.Cryptography.X509Certificates.X509KeyUsageExtension]::new(
+                  [System.Security.Cryptography.X509Certificates.X509KeyUsageFlags]::DigitalSignature,
+                  $true
+                )
+              )
+              $leafRequest.CertificateExtensions.Add(
+                [System.Security.Cryptography.X509Certificates.X509BasicConstraintsExtension]::new($false, $false, 0, $true)
+              )
+              $leafRequest.CertificateExtensions.Add(
+                [System.Security.Cryptography.X509Certificates.X509SubjectKeyIdentifierExtension]::new($leafRequest.PublicKey, $false)
+              )
+
+              $serial = [byte[]]::new(16)
+              [System.Security.Cryptography.RandomNumberGenerator]::Fill($serial)
+              $serial[0] = $serial[0] -bor 1
+              $leafPublic = $leafRequest.Create($rootCert, $notBefore, $leafNotAfter, $serial)
+              try {
+                $leafCert = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::CopyWithPrivateKey($leafPublic, $leafRsa)
+                try {
+                  if (-not $leafCert.HasPrivateKey) { throw 'CI code-signing certificate has no private key.' }
+                  $passwordText = 'SWIR-CI-Authenticode-Contract-Only!2026'
+                  $pfx = Join-Path $env:RUNNER_TEMP 'swir-ci-authenticode.pfx'
+                  [IO.File]::WriteAllBytes($pfx, $leafCert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Pfx, $passwordText))
+
+                  $rootBytesBase64 = [Convert]::ToBase64String(
+                    $rootCert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
+                  )
+                  $installJob = Start-Job -ScriptBlock {
+                    param([string]$CertificateBase64)
+                    $ErrorActionPreference = 'Stop'
+                    $bytes = [Convert]::FromBase64String($CertificateBase64)
+                    $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($bytes)
+                    try {
+                      $store = [System.Security.Cryptography.X509Certificates.X509Store]::new(
+                        [System.Security.Cryptography.X509Certificates.StoreName]::Root,
+                        [System.Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine
+                      )
+                      try {
+                        $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+                        $store.Add($cert)
+                        $matches = $store.Certificates.Find(
+                          [System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
+                          $cert.Thumbprint,
+                          $false
+                        )
+                        if ($matches.Count -ne 1) { throw 'Ephemeral Authenticode CI root was not installed exactly once.' }
+                      } finally {
+                        $store.Close()
+                        $store.Dispose()
+                      }
+                    } finally {
+                      $cert.Dispose()
+                    }
+                  } -ArgumentList $rootBytesBase64
+                  try {
+                    if (-not (Wait-Job -Job $installJob -Timeout 20)) {
+                      Stop-Job -Job $installJob -ErrorAction SilentlyContinue
+                      throw 'Timed out while installing the ephemeral Authenticode root into LocalMachine\\Root.'
+                    }
+                    Receive-Job -Job $installJob -ErrorAction Stop | Out-Null
+                    if ($installJob.State -ne 'Completed') {
+                      throw "Ephemeral Authenticode root install job ended in state $($installJob.State)."
+                    }
+                  } finally {
+                    Remove-Job -Job $installJob -Force -ErrorAction SilentlyContinue
+                  }
+
+                  "SWIR_AUTHENTICODE_PFX_PATH=$pfx" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+                  "SWIR_AUTHENTICODE_PFX_PASSWORD=$passwordText" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+                  "SWIR_AUTHENTICODE_CERT_THUMBPRINT=$($leafCert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+                  "SWIR_AUTHENTICODE_ROOT_THUMBPRINT=$($rootCert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+                  "SWIR_AUTHENTICODE_REQUIRED=true" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+                } finally {
+                  $leafCert.Dispose()
+                }
+              } finally {
+                $leafPublic.Dispose()
+              }
+            } finally {
+              $rootCert.Dispose()
+            }
+          } finally {
+            $leafRsa.Dispose()
+            $rootRsa.Dispose()
+          }
 
       - name: Verify signing helper fail-closed and tamper detection
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $source = Join-Path $env:SystemRoot 'System32\where.exe'
-          $target = Join-Path $env:RUNNER_TEMP 'swir-authenticode-helper-fixture.exe'
-          Copy-Item -LiteralPath $source -Destination $target -Force
+          # Use a fresh unsigned PowerShell fixture. A Windows inbox executable
+          # can already carry a Microsoft Authenticode signature; re-signing it
+          # may leave multiple signatures and make Get-AuthenticodeSignature
+          # report the original signer instead of the pinned CI identity.
+          $target = Join-Path $env:RUNNER_TEMP 'swir-authenticode-helper-fixture.ps1'
+          Set-Content -LiteralPath $target -Value "Write-Output 'SWIR Authenticode fixture'" -Encoding utf8NoBOM
           $helper = Join-Path (Get-Location) 'sign-desktop-artifact.ps1'
           $result = & $helper -FilePath $target | ConvertFrom-Json
           if ($result.schema -ne 'swir.desktop-authenticode/0.1' -or $result.status -ne 'valid' -or $result.signerThumbprint -ne $env:SWIR_AUTHENTICODE_CERT_THUMBPRINT) {
@@ -78,12 +193,12 @@ jobs:
           }
           $signature = Get-AuthenticodeSignature -FilePath $target
           if ($signature.Status -ne 'Valid') { throw "Signed helper fixture is not valid: $($signature.Status)" }
-          [IO.File]::AppendAllText($target, 'tamper-after-signing')
+          Add-Content -LiteralPath $target -Value '# tamper-after-signing'
           $tampered = Get-AuthenticodeSignature -FilePath $target
           if ($tampered.Status -eq 'Valid') { throw 'Authenticode remained valid after artifact tampering.' }
 
-          $wrong = Join-Path $env:RUNNER_TEMP 'swir-authenticode-wrong-pin.exe'
-          Copy-Item -LiteralPath $source -Destination $wrong -Force
+          $wrong = Join-Path $env:RUNNER_TEMP 'swir-authenticode-wrong-pin.ps1'
+          Set-Content -LiteralPath $wrong -Value "Write-Output 'SWIR wrong-pin fixture'" -Encoding utf8NoBOM
           $failed = $false
           try { & $helper -FilePath $wrong -ExpectedThumbprint ('0' * 40) | Out-Null } catch { $failed = $true }
           if (-not $failed) { throw 'Signing helper accepted the wrong pinned certificate thumbprint.' }
@@ -99,15 +214,15 @@ jobs:
             -Channel preview `
             -SourceCommit $env:GITHUB_SHA
           if ($LASTEXITCODE -ne 0) { throw "Signed Desktop Host publish failed with exit code $LASTEXITCODE." }
-          $host = Join-Path $publish 'SWIR.Desktop.Host.exe'
+          $hostExe = Join-Path $publish 'SWIR.Desktop.Host.exe'
           $manifest = Get-Content (Join-Path $publish 'desktop-host-build.json') -Raw | ConvertFrom-Json
           if ($manifest.authenticode.contract -ne 'swir.desktop-authenticode/0.1' -or $manifest.authenticode.required -ne $true -or $manifest.authenticode.signed -ne $true -or $manifest.authenticode.status -ne 'valid') {
             throw 'Desktop Host build manifest does not prove required Authenticode signing.'
           }
           if ($manifest.authenticode.signerThumbprint -ne $env:SWIR_AUTHENTICODE_CERT_THUMBPRINT) { throw 'Desktop Host manifest signer pin mismatch.' }
-          $signature = Get-AuthenticodeSignature -FilePath $host
+          $signature = Get-AuthenticodeSignature -FilePath $hostExe
           if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Thumbprint -ne $env:SWIR_AUTHENTICODE_CERT_THUMBPRINT) { throw 'Desktop Host Authenticode verification failed.' }
-          $hash = (Get-FileHash -LiteralPath $host -Algorithm SHA256).Hash.ToLowerInvariant()
+          $hash = (Get-FileHash -LiteralPath $hostExe -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($manifest.integrity.entryPoint.sha256 -ne $hash) { throw 'Desktop Host integrity manifest was not calculated from the signed Host bytes.' }
 
       - name: Build Authenticode-signed one-file Setup
@@ -138,10 +253,37 @@ jobs:
 
       - name: Cleanup CI certificate
         if: always()
-        shell: powershell
+        shell: pwsh
         run: |
-          $thumb = $env:SWIR_AUTHENTICODE_CERT_THUMBPRINT
-          if ($thumb) {
-            Remove-Item -LiteralPath "Cert:\CurrentUser\My\$thumb" -Force -ErrorAction SilentlyContinue
-            Remove-Item -LiteralPath "Cert:\CurrentUser\Root\$thumb" -Force -ErrorAction SilentlyContinue
+          $rootThumb = ($env:SWIR_AUTHENTICODE_ROOT_THUMBPRINT -replace '[^A-Fa-f0-9]', '').ToUpperInvariant()
+          if ($rootThumb) {
+            $cleanupJob = Start-Job -ScriptBlock {
+              param([string]$Thumbprint)
+              $ErrorActionPreference = 'Stop'
+              $store = [System.Security.Cryptography.X509Certificates.X509Store]::new(
+                [System.Security.Cryptography.X509Certificates.StoreName]::Root,
+                [System.Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine
+              )
+              try {
+                $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+                $matches = $store.Certificates.Find(
+                  [System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
+                  $Thumbprint,
+                  $false
+                )
+                foreach ($match in $matches) { $store.Remove($match) }
+              } finally {
+                $store.Close()
+                $store.Dispose()
+              }
+            } -ArgumentList $rootThumb
+            try {
+              if (-not (Wait-Job -Job $cleanupJob -Timeout 20)) {
+                Stop-Job -Job $cleanupJob -ErrorAction SilentlyContinue
+                throw 'Timed out while removing the ephemeral Authenticode CI root.'
+              }
+              Receive-Job -Job $cleanupJob -ErrorAction Stop | Out-Null
+            } finally {
+              Remove-Job -Job $cleanupJob -Force -ErrorAction SilentlyContinue
+            }
           }

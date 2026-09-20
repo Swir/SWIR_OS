@@ -1,0 +1,84 @@
+using System.Text.Json;
+
+namespace Swir.Desktop.Host;
+
+internal static class DesktopPackageTrustRootStore
+{
+    public const string Schema = "swir.package-trust-roots/1.0";
+    private const string DefaultFileName = "package-trust-roots.json";
+
+    internal sealed record LoadResult(string Source, IReadOnlyList<DesktopPackageSignatureVerifier.TrustRoot> Roots, bool RequireSignedPackages);
+    private sealed record RootDocument(string? Schema, RootRecord[]? Roots, bool RequireSignedPackages = false);
+    private sealed record RootRecord(
+        string? KeyId,
+        string? Name,
+        string? Algorithm,
+        string? Format,
+        string? PublicKey,
+        string[]? Scope,
+        bool Enabled = true);
+
+    public static LoadResult LoadProvisioned()
+    {
+        var configured = Environment.GetEnvironmentVariable("SWIR_PACKAGE_TRUST_ROOTS");
+        var explicitlyConfigured = !string.IsNullOrWhiteSpace(configured);
+        var path = explicitlyConfigured
+            ? Path.GetFullPath(configured!)
+            : Path.Combine(AppContext.BaseDirectory, DefaultFileName);
+        if (!File.Exists(path))
+        {
+            if (explicitlyConfigured)
+                throw new DesktopPackageException(
+                    "PACKAGE_TRUST_ROOTS_MISSING",
+                    "Configured package trust-root file does not exist; refusing to downgrade package signature policy.");
+            return new LoadResult(path, Array.Empty<DesktopPackageSignatureVerifier.TrustRoot>(), false);
+        }
+
+        RootDocument? document;
+        try { document = JsonSerializer.Deserialize<RootDocument>(File.ReadAllText(path), JsonOptions); }
+        catch (Exception ex) { throw new DesktopPackageException("PACKAGE_TRUST_ROOTS_INVALID", $"Package trust-root file is unreadable: {ex.Message}"); }
+        if (document is null || !string.Equals(document.Schema, Schema, StringComparison.Ordinal))
+            throw new DesktopPackageException("PACKAGE_TRUST_ROOTS_INVALID", $"Package trust-root schema must be {Schema}.");
+
+        var roots = new List<DesktopPackageSignatureVerifier.TrustRoot>();
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var record in document.Roots ?? Array.Empty<RootRecord>())
+        {
+            if (!record.Enabled) continue;
+            var keyId = (record.KeyId ?? string.Empty).Trim();
+            if (keyId.Length is < 1 or > 128 || keyId.Any(char.IsControl) || !ids.Add(keyId))
+                throw new DesktopPackageException("PACKAGE_TRUST_ROOTS_INVALID", "Enabled package trust roots require unique non-empty keyId values.");
+            if (!string.Equals(record.Algorithm, "Ed25519", StringComparison.Ordinal) || !string.Equals(record.Format, "raw", StringComparison.OrdinalIgnoreCase))
+                throw new DesktopPackageException("PACKAGE_TRUST_ROOTS_INVALID", $"Package trust root {keyId} must use Ed25519 raw public keys.");
+
+            byte[] publicKey;
+            try { publicKey = Convert.FromBase64String((record.PublicKey ?? string.Empty).Trim()); }
+            catch (FormatException) { throw new DesktopPackageException("PACKAGE_TRUST_ROOTS_INVALID", $"Package trust root {keyId} publicKey is not base64."); }
+            if (publicKey.Length != 32)
+                throw new DesktopPackageException("PACKAGE_TRUST_ROOTS_INVALID", $"Package trust root {keyId} must contain a 32-byte Ed25519 raw public key.");
+
+            var scope = (record.Scope ?? Array.Empty<string>())
+                .Select(item => item.Trim())
+                .Where(item => item.Length > 0)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+            if (!(scope.Contains("*", StringComparer.Ordinal) || scope.Contains("package:swirapp", StringComparer.Ordinal)))
+                throw new DesktopPackageException("PACKAGE_TRUST_ROOTS_INVALID", $"Package trust root {keyId} must be scoped to package:swirapp.");
+
+            roots.Add(new DesktopPackageSignatureVerifier.TrustRoot(
+                keyId,
+                string.IsNullOrWhiteSpace(record.Name) ? keyId : record.Name.Trim(),
+                publicKey,
+                scope));
+        }
+
+        if (document.RequireSignedPackages && roots.Count == 0)
+            throw new DesktopPackageException(
+                "PACKAGE_TRUST_ROOT_REQUIRED",
+                "This Desktop release requires signed .swirapp packages, but no enabled package:swirapp trust root is provisioned.");
+
+        return new LoadResult(path, roots, document.RequireSignedPackages);
+    }
+
+    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
+}

@@ -5,19 +5,13 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
-    <StartupObject>Swir.Desktop.Host.DesktopCatalogCutoverLifecycleSelfTests</StartupObject>
+    <DefineConstants>$(DefineConstants);SWIR_PACKAGE_SIGNATURE_TOOL</DefineConstants>
+    <StartupObject>Swir.Desktop.Host.DesktopPackageSignatureTool</StartupObject>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="DesktopAppPackageInstaller.cs" />
-    <Compile Include="CapabilityBroker.cs" />
-    <Compile Include="DesktopPackageDependencyResolver.cs" />
-    <Compile Include="DesktopCatalogTrustVerifier.cs" />
-    <Compile Include="DesktopCatalogTrustRootStore.cs" />
     <Compile Include="DesktopPackageSignatureVerifier.cs" />
-    <Compile Include="DesktopPackageTrustRootStore.cs" />
-    <Compile Include="DesktopPackageBridge.cs" />
-    <Compile Include="DesktopCatalogCutoverLifecycleSelfTests.cs" />
-    <Compile Include="DesktopPackageBridgeSelfTestShim.cs" />
+    <Compile Include="DesktopPackageSignatureTool.cs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="NSec.Cryptography" Version="24.4.0" />
