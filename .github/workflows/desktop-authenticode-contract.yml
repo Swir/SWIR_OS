@@ -134,9 +134,12 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $source = Join-Path $env:SystemRoot 'System32\where.exe'
-          $target = Join-Path $env:RUNNER_TEMP 'swir-authenticode-helper-fixture.exe'
-          Copy-Item -LiteralPath $source -Destination $target -Force
+          # Use a fresh unsigned PowerShell fixture. A Windows inbox executable
+          # can already carry a Microsoft Authenticode signature; re-signing it
+          # may leave multiple signatures and make Get-AuthenticodeSignature
+          # report the original signer instead of the pinned CI identity.
+          $target = Join-Path $env:RUNNER_TEMP 'swir-authenticode-helper-fixture.ps1'
+          Set-Content -LiteralPath $target -Value "Write-Output 'SWIR Authenticode fixture'" -Encoding utf8NoBOM
           $helper = Join-Path (Get-Location) 'sign-desktop-artifact.ps1'
           $result = & $helper -FilePath $target | ConvertFrom-Json
           if ($result.schema -ne 'swir.desktop-authenticode/0.1' -or $result.status -ne 'valid' -or $result.signerThumbprint -ne $env:SWIR_AUTHENTICODE_CERT_THUMBPRINT) {
@@ -144,12 +147,12 @@ jobs:
           }
           $signature = Get-AuthenticodeSignature -FilePath $target
           if ($signature.Status -ne 'Valid') { throw "Signed helper fixture is not valid: $($signature.Status)" }
-          [IO.File]::AppendAllText($target, 'tamper-after-signing')
+          Add-Content -LiteralPath $target -Value '# tamper-after-signing'
           $tampered = Get-AuthenticodeSignature -FilePath $target
           if ($tampered.Status -eq 'Valid') { throw 'Authenticode remained valid after artifact tampering.' }
 
-          $wrong = Join-Path $env:RUNNER_TEMP 'swir-authenticode-wrong-pin.exe'
-          Copy-Item -LiteralPath $source -Destination $wrong -Force
+          $wrong = Join-Path $env:RUNNER_TEMP 'swir-authenticode-wrong-pin.ps1'
+          Set-Content -LiteralPath $wrong -Value "Write-Output 'SWIR wrong-pin fixture'" -Encoding utf8NoBOM
           $failed = $false
           try { & $helper -FilePath $wrong -ExpectedThumbprint ('0' * 40) | Out-Null } catch { $failed = $true }
           if (-not $failed) { throw 'Signing helper accepted the wrong pinned certificate thumbprint.' }
