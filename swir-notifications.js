@@ -135,15 +135,15 @@
     return persistenceAdapter || localStorageAdapter;
   }
 
-  function loadHistory() {
+  function loadInitialHistory() {
     try {
       const loaded = activeAdapter().load();
       if (loaded && typeof loaded.then === 'function') return memoryHistory.slice();
       memoryHistory = sanitizeHistory(loaded);
-      return memoryHistory.slice();
     } catch {
-      return memoryHistory.slice();
+      // Keep a validated in-memory snapshot when storage is missing or corrupt.
     }
+    return memoryHistory.slice();
   }
 
   function envelope(history) {
@@ -199,7 +199,7 @@
       time: new Date().toISOString()
     };
     const nativeDelivery = await deliverNative(item);
-    const history = loadHistory();
+    const history = memoryHistory.slice();
     if (item.tag) {
       const i = history.findIndex(x => x.appId === item.appId && x.tag === item.tag);
       if (i >= 0) history.splice(i, 1);
@@ -212,18 +212,18 @@
   }
 
   function list(appId = null) {
-    const h = loadHistory();
+    const h = memoryHistory.slice();
     return appId ? h.filter(x => x.appId === appId) : h;
   }
 
   async function clear(appId = null) {
-    const next = appId ? loadHistory().filter(x => x.appId !== appId) : [];
+    const next = appId ? memoryHistory.filter(x => x.appId !== appId) : [];
     await persistHistory(next);
     window.dispatchEvent(new CustomEvent('swir:notifications-clear', { detail: { appId } }));
   }
 
   async function invokeAction(notificationId, actionId) {
-    const item = loadHistory().find(row => row.id === notificationId);
+    const item = memoryHistory.find(row => row.id === notificationId);
     if (!item) throw new Error('Notification not found');
     const action = item.actions.find(row => row.id === actionId);
     if (!action) throw new Error('Notification action not found');
@@ -243,7 +243,7 @@
   }
 
   // Load/migrate the bounded local snapshot once. Restoring history never invokes actions.
-  loadHistory();
+  loadInitialHistory();
 
   window.SwirNotifications = Object.freeze({
     send,
