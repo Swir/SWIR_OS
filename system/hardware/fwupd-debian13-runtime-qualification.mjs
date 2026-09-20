@@ -96,7 +96,7 @@ function parseDpkgStatus(output) {
   return match[2];
 }
 
-export function qualifyFwupdDebian13Runtime({ root = '/', commandRunner = defaultCommandRunner, expectedOwnerUid = 0 } = {}) {
+function qualifyFwupdDebian13RuntimeImpl({ root, commandRunner, expectedOwnerUid }) {
   assert(typeof commandRunner === 'function', 'COMMAND_RUNNER_REQUIRED', 'command runner is required');
   assert(Number.isInteger(expectedOwnerUid) && expectedOwnerUid >= 0, 'OWNER_UID_INVALID', 'expected owner uid must be a non-negative integer');
   const resolvedRoot = path.resolve(root);
@@ -138,6 +138,10 @@ export function qualifyFwupdDebian13Runtime({ root = '/', commandRunner = defaul
   });
 }
 
+export function qualifyFwupdDebian13Runtime({ root = '/', commandRunner = defaultCommandRunner } = {}) {
+  return qualifyFwupdDebian13RuntimeImpl({ root, commandRunner, expectedOwnerUid: 0 });
+}
+
 function makeFile(root, rel, content, mode = 0o644) {
   const target = rootPath(root, rel);
   fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o755 });
@@ -163,20 +167,20 @@ function selfTest() {
       return 'Usage: fwupdmgr [OPTION…]\n';
     };
     const options = { root, commandRunner: fakeRunner, expectedOwnerUid };
-    const result = qualifyFwupdDebian13Runtime(options);
+    const result = qualifyFwupdDebian13RuntimeImpl(options);
     assert(result.passed && result.files.length === 3, 'SELFTEST_RESULT_INVALID', 'qualification result failed');
     assert(result.package.version === '2.0.20-1~deb13u1', 'SELFTEST_VERSION_INVALID', 'package version was not preserved');
     assert(result.policy.firmwareMutationAllowed === false && result.policy.physicalHardwareQualification === false, 'SELFTEST_POLICY_INVALID', 'safety policy weakened');
 
     fs.chmodSync(rootPath(root, '/etc/fwupd/remotes.d/lvfs.conf'), 0o666);
     let blocked = false;
-    try { qualifyFwupdDebian13Runtime(options); } catch (error) { blocked = error?.code === 'TRUSTED_FILE_WRITABLE'; }
+    try { qualifyFwupdDebian13RuntimeImpl(options); } catch (error) { blocked = error?.code === 'TRUSTED_FILE_WRITABLE'; }
     assert(blocked, 'SELFTEST_WRITABLE_NOT_BLOCKED', 'writable LVFS config was not rejected');
 
     fs.chmodSync(rootPath(root, '/etc/fwupd/remotes.d/lvfs.conf'), 0o644);
     fs.writeFileSync(rootPath(root, '/etc/os-release'), 'ID=ubuntu\nVERSION_ID="24.04"\n');
     blocked = false;
-    try { qualifyFwupdDebian13Runtime(options); } catch (error) { blocked = error?.code === 'DISTRO_UNSUPPORTED'; }
+    try { qualifyFwupdDebian13RuntimeImpl(options); } catch (error) { blocked = error?.code === 'DISTRO_UNSUPPORTED'; }
     assert(blocked, 'SELFTEST_DISTRO_NOT_BLOCKED', 'unexpected distro was not rejected');
     console.log('SWIR Debian 13 fwupd runtime qualification self-test: OK');
   } finally {
