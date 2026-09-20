@@ -44,90 +44,117 @@ jobs:
           $ErrorActionPreference = 'Stop'
           Set-StrictMode -Version Latest
 
-          # Generate the short-lived identity fully in memory. Do not modify a
-          # root-CA store in CI: Windows can surface an interactive root-trust
-          # confirmation even when certutil is invoked non-interactively. A
-          # self-signed end-entity test certificate is instead pinned directly
-          # in the current user's TrustedPeople store for this job only.
-          $subject = 'CN=SWIR OS CI Authenticode Contract'
-          $rsa = [System.Security.Cryptography.RSA]::Create(2048)
+          # Build an ephemeral two-certificate hierarchy entirely in memory.
+          # The test leaf is issued by a short-lived CA that exists only in the
+          # hosted runner's CurrentUser Root store and is removed in the always
+          # cleanup step. This lets Get-AuthenticodeSignature exercise the same
+          # Windows trust-chain policy as a real release without storing any
+          # production signing material in the repository.
+          $notBefore = [DateTimeOffset]::UtcNow.AddMinutes(-5)
+          $rootNotAfter = [DateTimeOffset]::UtcNow.AddDays(2)
+          $leafNotAfter = [DateTimeOffset]::UtcNow.AddDays(1)
+          $rootRsa = [System.Security.Cryptography.RSA]::Create(2048)
+          $leafRsa = [System.Security.Cryptography.RSA]::Create(2048)
           try {
-            $request = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
-              $subject,
-              $rsa,
+            $rootRequest = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
+              'CN=SWIR OS CI Authenticode Root',
+              $rootRsa,
               [System.Security.Cryptography.HashAlgorithmName]::SHA256,
               [System.Security.Cryptography.RSASignaturePadding]::Pkcs1
             )
-            $eku = [System.Security.Cryptography.OidCollection]::new()
-            [void]$eku.Add([System.Security.Cryptography.Oid]::new('1.3.6.1.5.5.7.3.3', 'Code Signing'))
-            $request.CertificateExtensions.Add(
-              [System.Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]::new($eku, $false)
+            $rootRequest.CertificateExtensions.Add(
+              [System.Security.Cryptography.X509Certificates.X509BasicConstraintsExtension]::new($true, $false, 0, $true)
             )
-            $request.CertificateExtensions.Add(
+            $rootRequest.CertificateExtensions.Add(
               [System.Security.Cryptography.X509Certificates.X509KeyUsageExtension]::new(
-                [System.Security.Cryptography.X509Certificates.X509KeyUsageFlags]::DigitalSignature,
+                [System.Security.Cryptography.X509Certificates.X509KeyUsageFlags]::KeyCertSign -bor
+                [System.Security.Cryptography.X509Certificates.X509KeyUsageFlags]::CrlSign,
                 $true
               )
             )
-            $request.CertificateExtensions.Add(
-              [System.Security.Cryptography.X509Certificates.X509BasicConstraintsExtension]::new($false, $false, 0, $true)
+            $rootRequest.CertificateExtensions.Add(
+              [System.Security.Cryptography.X509Certificates.X509SubjectKeyIdentifierExtension]::new($rootRequest.PublicKey, $false)
             )
-
-            $cert = $request.CreateSelfSigned(
-              [DateTimeOffset]::UtcNow.AddMinutes(-5),
-              [DateTimeOffset]::UtcNow.AddDays(2)
-            )
+            $rootCert = $rootRequest.CreateSelfSigned($notBefore, $rootNotAfter)
             try {
-              if (-not $cert.HasPrivateKey) { throw 'CI code-signing certificate has no private key.' }
-              $passwordText = 'SWIR-CI-Authenticode-Contract-Only!2026'
-              $pfx = Join-Path $env:RUNNER_TEMP 'swir-ci-authenticode.pfx'
-              [IO.File]::WriteAllBytes($pfx, $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Pfx, $passwordText))
-
-              $publicOnly = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
-                $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
+              $leafRequest = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
+                'CN=SWIR OS CI Authenticode Contract',
+                $leafRsa,
+                [System.Security.Cryptography.HashAlgorithmName]::SHA256,
+                [System.Security.Cryptography.RSASignaturePadding]::Pkcs1
               )
-              try {
-                $trustedPeople = [System.Security.Cryptography.X509Certificates.X509Store]::new(
-                  [System.Security.Cryptography.X509Certificates.StoreName]::TrustedPeople,
-                  [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
+              $eku = [System.Security.Cryptography.OidCollection]::new()
+              [void]$eku.Add([System.Security.Cryptography.Oid]::new('1.3.6.1.5.5.7.3.3', 'Code Signing'))
+              $leafRequest.CertificateExtensions.Add(
+                [System.Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]::new($eku, $true)
+              )
+              $leafRequest.CertificateExtensions.Add(
+                [System.Security.Cryptography.X509Certificates.X509KeyUsageExtension]::new(
+                  [System.Security.Cryptography.X509Certificates.X509KeyUsageFlags]::DigitalSignature,
+                  $true
                 )
+              )
+              $leafRequest.CertificateExtensions.Add(
+                [System.Security.Cryptography.X509Certificates.X509BasicConstraintsExtension]::new($false, $false, 0, $true)
+              )
+              $leafRequest.CertificateExtensions.Add(
+                [System.Security.Cryptography.X509Certificates.X509SubjectKeyIdentifierExtension]::new($leafRequest.PublicKey, $false)
+              )
+
+              $serial = [byte[]]::new(16)
+              [System.Security.Cryptography.RandomNumberGenerator]::Fill($serial)
+              $serial[0] = $serial[0] -bor 1
+              $leafPublic = $leafRequest.Create($rootCert, $notBefore, $leafNotAfter, $serial)
+              try {
+                $leafCert = $leafPublic.CopyWithPrivateKey($leafRsa)
                 try {
-                  $trustedPeople.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-                  $trustedPeople.Add($publicOnly)
+                  if (-not $leafCert.HasPrivateKey) { throw 'CI code-signing certificate has no private key.' }
+                  $passwordText = 'SWIR-CI-Authenticode-Contract-Only!2026'
+                  $pfx = Join-Path $env:RUNNER_TEMP 'swir-ci-authenticode.pfx'
+                  [IO.File]::WriteAllBytes($pfx, $leafCert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Pfx, $passwordText))
+
+                  $rootPublic = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
+                    $rootCert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
+                  )
+                  try {
+                    $rootStore = [System.Security.Cryptography.X509Certificates.X509Store]::new(
+                      [System.Security.Cryptography.X509Certificates.StoreName]::Root,
+                      [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
+                    )
+                    try {
+                      $rootStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+                      $rootStore.Add($rootPublic)
+                      $matches = $rootStore.Certificates.Find(
+                        [System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
+                        $rootPublic.Thumbprint,
+                        $false
+                      )
+                      if ($matches.Count -ne 1) { throw 'Ephemeral Authenticode CI root was not installed exactly once.' }
+                    } finally {
+                      $rootStore.Close()
+                      $rootStore.Dispose()
+                    }
+                  } finally {
+                    $rootPublic.Dispose()
+                  }
+
+                  "SWIR_AUTHENTICODE_PFX_PATH=$pfx" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+                  "SWIR_AUTHENTICODE_PFX_PASSWORD=$passwordText" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+                  "SWIR_AUTHENTICODE_CERT_THUMBPRINT=$($leafCert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+                  "SWIR_AUTHENTICODE_ROOT_THUMBPRINT=$($rootCert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+                  "SWIR_AUTHENTICODE_REQUIRED=true" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
                 } finally {
-                  $trustedPeople.Close()
-                  $trustedPeople.Dispose()
+                  $leafCert.Dispose()
                 }
               } finally {
-                $publicOnly.Dispose()
+                $leafPublic.Dispose()
               }
-
-              $verifyStore = [System.Security.Cryptography.X509Certificates.X509Store]::new(
-                [System.Security.Cryptography.X509Certificates.StoreName]::TrustedPeople,
-                [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
-              )
-              try {
-                $verifyStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadOnly)
-                $matches = $verifyStore.Certificates.Find(
-                  [System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
-                  $cert.Thumbprint,
-                  $false
-                )
-                if ($matches.Count -ne 1) { throw 'CI code-signing certificate was not pinned exactly once in CurrentUser\\TrustedPeople.' }
-              } finally {
-                $verifyStore.Close()
-                $verifyStore.Dispose()
-              }
-
-              "SWIR_AUTHENTICODE_PFX_PATH=$pfx" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-              "SWIR_AUTHENTICODE_PFX_PASSWORD=$passwordText" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-              "SWIR_AUTHENTICODE_CERT_THUMBPRINT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-              "SWIR_AUTHENTICODE_REQUIRED=true" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
             } finally {
-              $cert.Dispose()
+              $rootCert.Dispose()
             }
           } finally {
-            $rsa.Dispose()
+            $leafRsa.Dispose()
+            $rootRsa.Dispose()
           }
 
       - name: Verify signing helper fail-closed and tamper detection
@@ -209,22 +236,22 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          $thumb = ($env:SWIR_AUTHENTICODE_CERT_THUMBPRINT -replace '[^A-Fa-f0-9]', '').ToUpperInvariant()
-          if ($thumb) {
-            $store = [System.Security.Cryptography.X509Certificates.X509Store]::new(
-              [System.Security.Cryptography.X509Certificates.StoreName]::TrustedPeople,
+          $rootThumb = ($env:SWIR_AUTHENTICODE_ROOT_THUMBPRINT -replace '[^A-Fa-f0-9]', '').ToUpperInvariant()
+          if ($rootThumb) {
+            $rootStore = [System.Security.Cryptography.X509Certificates.X509Store]::new(
+              [System.Security.Cryptography.X509Certificates.StoreName]::Root,
               [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
             )
             try {
-              $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-              $matches = $store.Certificates.Find(
+              $rootStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+              $matches = $rootStore.Certificates.Find(
                 [System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
-                $thumb,
+                $rootThumb,
                 $false
               )
-              foreach ($match in $matches) { $store.Remove($match) }
+              foreach ($match in $matches) { $rootStore.Remove($match) }
             } finally {
-              $store.Close()
-              $store.Dispose()
+              $rootStore.Close()
+              $rootStore.Dispose()
             }
           }
