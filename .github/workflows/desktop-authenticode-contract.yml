@@ -214,15 +214,15 @@ jobs:
             -Channel preview `
             -SourceCommit $env:GITHUB_SHA
           if ($LASTEXITCODE -ne 0) { throw "Signed Desktop Host publish failed with exit code $LASTEXITCODE." }
-          $host = Join-Path $publish 'SWIR.Desktop.Host.exe'
+          $hostExe = Join-Path $publish 'SWIR.Desktop.Host.exe'
           $manifest = Get-Content (Join-Path $publish 'desktop-host-build.json') -Raw | ConvertFrom-Json
           if ($manifest.authenticode.contract -ne 'swir.desktop-authenticode/0.1' -or $manifest.authenticode.required -ne $true -or $manifest.authenticode.signed -ne $true -or $manifest.authenticode.status -ne 'valid') {
             throw 'Desktop Host build manifest does not prove required Authenticode signing.'
           }
           if ($manifest.authenticode.signerThumbprint -ne $env:SWIR_AUTHENTICODE_CERT_THUMBPRINT) { throw 'Desktop Host manifest signer pin mismatch.' }
-          $signature = Get-AuthenticodeSignature -FilePath $host
+          $signature = Get-AuthenticodeSignature -FilePath $hostExe
           if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Thumbprint -ne $env:SWIR_AUTHENTICODE_CERT_THUMBPRINT) { throw 'Desktop Host Authenticode verification failed.' }
-          $hash = (Get-FileHash -LiteralPath $host -Algorithm SHA256).Hash.ToLowerInvariant()
+          $hash = (Get-FileHash -LiteralPath $hostExe -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($manifest.integrity.entryPoint.sha256 -ne $hash) { throw 'Desktop Host integrity manifest was not calculated from the signed Host bytes.' }
 
       - name: Build Authenticode-signed one-file Setup
