@@ -179,10 +179,12 @@
   }
 
   async function deliverNative(item) {
-    const show = window.SWIR_NATIVE_HOST?.notifications?.show;
-    if (typeof show !== 'function') return null;
+    const show=window.SWIR_NATIVE_HOST?.notifications?.show;
+    if(typeof show!=='function')return null;
     const actions = item.actions.map(({ id, label, type, targetApp }) => ({ id, label, type, targetApp }));
-    return show(item.title, item.message, item.packageId, item.silent, actions);
+    return actions.length
+      ? show(item.title,item.message,item.packageId,item.silent,actions)
+      : show(item.title,item.message,item.packageId,item.silent);
   }
 
   async function send(appId, options = {}) {
@@ -198,7 +200,7 @@
       ...n,
       time: new Date().toISOString()
     };
-    const nativeDelivery = await deliverNative(item);
+    const nativeDelivery=await deliverNative(item);
     const history = memoryHistory.slice();
     if (item.tag) {
       const i = history.findIndex(x => x.appId === item.appId && x.tag === item.tag);
@@ -207,7 +209,7 @@
     history.unshift(item);
     await persistHistory(history);
     window.dispatchEvent(new CustomEvent('swir:notification', { detail: { ...item, nativeDelivery } }));
-    if (!nativeDelivery) window.SwirOS?.toast?.(item.title, item.message);
+    if(!nativeDelivery)window.SwirOS?.toast?.(item.title,item.message);
     return { ...item, nativeDelivery };
   }
 
