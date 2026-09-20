@@ -1,0 +1,48 @@
+{
+  "schema": "swir.vendor-official-repository-policy/0.1",
+  "failClosed": true,
+  "defaultEnabled": false,
+  "allowDirectBinaryDownloads": false,
+  "entries": [
+    {
+      "id": "nvidia-cuda-debian13-x86_64",
+      "vendor": "NVIDIA",
+      "sourceClass": "vendor-official-repository",
+      "enabled": true,
+      "packageManager": "apt",
+      "officialHosts": [
+        "developer.download.nvidia.com"
+      ],
+      "baseUrl": "https://developer.download.nvidia.com/compute/cuda/repos/debian13/x86_64/",
+      "distributions": [
+        {
+          "id": "debian",
+          "versions": [
+            "13"
+          ],
+          "architectures": [
+            "x86_64"
+          ]
+        }
+      ],
+      "suites": [
+        "./"
+      ],
+      "components": [],
+      "packages": [
+        "nvidia-driver",
+        "nvidia-open"
+      ],
+      "hardwareVendors": [
+        "10de"
+      ],
+      "keyring": {
+        "path": "/usr/share/keyrings/nvidia-cuda-archive-keyring.gpg",
+        "fingerprint": "02182E60104FCDC26EAE1B8597A5D4CB8793F200"
+      },
+      "directBinaryDownloads": false,
+      "automaticEnable": false,
+      "arbitraryPackages": false
+    }
+  ]
+}
