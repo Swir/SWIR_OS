@@ -5,6 +5,10 @@ on:
     branches: [main]
     paths:
       - 'system/image/build-live-usb-img.sh'
+      - 'system/image/stage-vendor-repository-trust.mjs'
+      - 'system/hardware/vendor-repositories.debian13.json'
+      - 'system/hardware/vendor-official-repository-service.mjs'
+      - 'system/hardware/vendor-repository-trust-evidence.mjs'
       - 'system/installer/swir-install-engine.sh'
       - 'system/installer/swir-installer.py'
       - 'system/installer/swir-installer-helper.py'
@@ -26,6 +30,10 @@ on:
   pull_request:
     paths:
       - 'system/image/build-live-usb-img.sh'
+      - 'system/image/stage-vendor-repository-trust.mjs'
+      - 'system/hardware/vendor-repositories.debian13.json'
+      - 'system/hardware/vendor-official-repository-service.mjs'
+      - 'system/hardware/vendor-repository-trust-evidence.mjs'
       - 'system/installer/swir-install-engine.sh'
       - 'system/installer/swir-installer.py'
       - 'system/installer/swir-installer-helper.py'
@@ -62,30 +70,40 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Validate installer and media source syntax
+      - name: Validate installer, media and vendor trust source syntax
         shell: bash
         run: |
           set -euo pipefail
           bash -n system/image/build-live-usb-img.sh
+          node --check system/image/stage-vendor-repository-trust.mjs
           bash -n system/installer/swir-install-engine.sh
           bash -n system/installer/provision-graphical-installer.sh
           bash -n system/e2e/debian13-live-usb-install-vm-e2e.sh
           python3 -m py_compile system/installer/swir-installer.py system/installer/swir-installer-helper.py
           node --check system/image/validate-live-usb-install-evidence.mjs
           python3 -m json.tool system/contracts/system-live-usb-install-e2e.schema.json >/dev/null
-      - name: Enforce install safety invariants
+          python3 -m json.tool system/hardware/vendor-repositories.debian13.json >/dev/null
+      - name: Enforce install and vendor trust safety invariants
         shell: bash
         run: |
           set -euo pipefail
           grep -F 'target must use a stable /dev/disk/by-id/* path' system/installer/swir-install-engine.sh >/dev/null
           grep -F 'refusing to install onto the currently booted source media' system/installer/swir-install-engine.sh >/dev/null
           grep -F 'confirmation token does not match the current target identity' system/installer/swir-install-engine.sh >/dev/null
-          grep -F 'destructiveWritePerformed": False' system/installer/swir-install-engine.sh >/dev/null
+          grep -F 'destructiveWritePerformed\": False' system/installer/swir-install-engine.sh >/dev/null
           grep -F 'usb-storage,drive=liveusb,bootindex=1,serial=SWIR_LIVE_E2E' system/e2e/debian13-live-usb-install-vm-e2e.sh >/dev/null
           grep -F 'sourceUsbDetachedBeforeInstalledBoot' system/e2e/debian13-live-usb-install-vm-e2e.sh >/dev/null
           grep -F 'graphicalInstallerUiSmokePassed' system/e2e/debian13-live-usb-install-vm-e2e.sh >/dev/null
           grep -F '"graphicalInstallerClaim": False' system/e2e/debian13-live-usb-install-vm-e2e.sh >/dev/null
-          ! grep -E 'curl |wget |--no-check-gpg|AllowUnauthenticated|trusted=yes' system/image/build-live-usb-img.sh system/installer/swir-install-engine.sh system/installer/provision-graphical-installer.sh system/e2e/debian13-live-usb-install-vm-e2e.sh
+          grep -F 'automaticRepositoryEnablement: false' system/image/stage-vendor-repository-trust.mjs >/dev/null
+          grep -F -- '--stage --rootfs "$ROOTFS"' system/image/build-live-usb-img.sh >/dev/null
+          grep -F -- '--verify --rootfs "$ROOTFS"' system/image/build-live-usb-img.sh >/dev/null
+          ! grep -E 'curl |wget |--no-check-gpg|AllowUnauthenticated|trusted=yes' \
+            system/image/build-live-usb-img.sh \
+            system/image/stage-vendor-repository-trust.mjs \
+            system/installer/swir-install-engine.sh \
+            system/installer/provision-graphical-installer.sh \
+            system/e2e/debian13-live-usb-install-vm-e2e.sh
       - name: Validate locked roadmap math
         run: node scripts/validate-roadmap-progress.mjs
 
@@ -104,7 +122,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             mmdebstrap debian-archive-keyring qemu-system-x86 qemu-utils ovmf \
-            e2fsprogs dosfstools rsync parted util-linux udev
+            e2fsprogs dosfstools rsync parted util-linux udev gnupg gpgv
       - name: Boot Live USB, install to blank disk and boot installed system
         env:
           SWIR_LIVE_INSTALL_WORK_ROOT: ${{ runner.temp }}/swir-live-install-e2e
