@@ -34,24 +34,26 @@ internal static class DesktopSignedPackageLifecycleSelfTests
             // Signed install, then reconstruct all native bridge objects to model a Host restart.
             var context = NewBridge(packageData, trustData);
             InstallSigned(context, v1, signingKey, "1.0.0", 501);
-            Require(StatusJson(context.Bridge).Contains("1.0.0", StringComparison.Ordinal), "signed v1 install should be visible before restart");
+            AssertSignedStatus(context.Bridge, "1.0.0", 501);
 
             context = NewBridge(packageData, trustData);
-            Require(StatusJson(context.Bridge).Contains("1.0.0", StringComparison.Ordinal), "signed v1 must survive Host restart");
+            AssertSignedStatus(context.Bridge, "1.0.0", 501);
 
             // Signed update through a strictly newer catalog sequence.
             InstallSigned(context, v2, signingKey, "2.0.0", 502);
-            Require(StatusJson(context.Bridge).Contains("2.0.0", StringComparison.Ordinal), "signed v2 update should become current");
+            AssertSignedStatus(context.Bridge, "2.0.0", 502);
 
             context = NewBridge(packageData, trustData);
-            Require(StatusJson(context.Bridge).Contains("2.0.0", StringComparison.Ordinal), "signed v2 must survive Host restart");
+            AssertSignedStatus(context.Bridge, "2.0.0", 502);
 
-            // Native rollback must restore the previously verified payload and survive another restart.
+            // Native rollback must restore the previously verified payload and its exact trust provenance.
             var rollback = JsonSerializer.Serialize(context.Bridge.Rollback("swir.lifecycle", Shell));
             Require(rollback.Contains("1.0.0", StringComparison.Ordinal), "rollback should restore v1 metadata");
+            Require(rollback.Contains("\"signatureVerified\":true", StringComparison.Ordinal), "rollback should restore signed trust status");
+            Require(rollback.Contains("\"catalogSequence\":501", StringComparison.Ordinal), "rollback should restore v1 catalog sequence");
 
             context = NewBridge(packageData, trustData);
-            Require(StatusJson(context.Bridge).Contains("1.0.0", StringComparison.Ordinal), "rolled-back v1 must survive Host restart");
+            AssertSignedStatus(context.Bridge, "1.0.0", 501);
 
             // Rolling the payload back must never roll the catalog trust high-water mark back.
             var staleToken = Register(context.Capabilities, v1);
@@ -60,7 +62,7 @@ internal static class DesktopSignedPackageLifecycleSelfTests
             ExpectBridgeCode(() => context.Capabilities.Describe(staleToken, Shell), "CAPABILITY_INVALID");
 
             context = NewBridge(packageData, trustData);
-            Require(StatusJson(context.Bridge).Contains("1.0.0", StringComparison.Ordinal), "rejected stale catalog must not mutate rolled-back payload");
+            AssertSignedStatus(context.Bridge, "1.0.0", 501);
 
             Console.WriteLine("Signed Desktop package lifecycle self-tests passed.");
             return 0;
@@ -80,6 +82,7 @@ internal static class DesktopSignedPackageLifecycleSelfTests
         var bridge = new DesktopPackageBridge(capabilities, new DesktopAppPackageInstaller(packageData), verifier);
         var info = JsonSerializer.Serialize(bridge.Describe());
         Require(info.Contains("SIGNED_CATALOG_REQUIRED", StringComparison.Ordinal), "lifecycle bridge must remain locked to signed catalog authorization after restart");
+        Require(info.Contains("\"persistedTrustProvenance\":true", StringComparison.Ordinal), "bridge must advertise persistent package trust provenance");
         return new BridgeContext(bridge, capabilities);
     }
 
@@ -90,7 +93,23 @@ internal static class DesktopSignedPackageLifecycleSelfTests
         var result = JsonSerializer.Serialize(context.Bridge.InstallFromCapability(token, authorization, Shell));
         Require(result.Contains(version, StringComparison.Ordinal), $"signed install result should contain {version}");
         Require(result.Contains("VERIFIED", StringComparison.Ordinal), "signed install must retain installer health verification");
+        Require(result.Contains("\"trustMode\":\"SIGNED_CATALOG\"", StringComparison.Ordinal), "signed install must report signed catalog trust mode");
+        Require(result.Contains("\"signatureVerified\":true", StringComparison.Ordinal), "signed install must report verified signature provenance");
+        Require(result.Contains($"\"catalogSequence\":{sequence}", StringComparison.Ordinal), "signed install must report verified catalog sequence");
+        Require(result.Contains($"\"signerKeyId\":\"{KeyId}\"", StringComparison.Ordinal), "signed install must report verified signer key ID");
         ExpectBridgeCode(() => context.Capabilities.Describe(token, Shell), "CAPABILITY_INVALID");
+    }
+
+    private static void AssertSignedStatus(DesktopPackageBridge bridge, string version, long sequence)
+    {
+        var status = StatusJson(bridge);
+        Require(status.Contains(version, StringComparison.Ordinal), $"signed package status should contain {version}");
+        Require(status.Contains("\"trustMode\":\"SIGNED_CATALOG\"", StringComparison.Ordinal), "signed package status must preserve signed trust mode");
+        Require(status.Contains("\"signatureVerified\":true", StringComparison.Ordinal), "signed package status must preserve verified signature provenance");
+        Require(status.Contains($"\"signerKeyId\":\"{KeyId}\"", StringComparison.Ordinal), "signed package status must preserve signer key ID");
+        Require(status.Contains($"\"catalogSequence\":{sequence}", StringComparison.Ordinal), "signed package status must preserve catalog sequence");
+        Require(status.Contains($"\"catalogVersion\":\"lifecycle-{sequence}\"", StringComparison.Ordinal), "signed package status must preserve catalog version");
+        Require(status.Contains("\"trustExpiresAt\":", StringComparison.Ordinal), "signed package status must preserve authorization expiry");
     }
 
     private static string Register(CapabilityBroker broker, string bundle)
