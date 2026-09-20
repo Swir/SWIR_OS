@@ -11,6 +11,8 @@ internal sealed class DesktopPackageBridge
     private readonly DesktopAppPackageInstaller _installer;
     private readonly DesktopPackageDependencyResolver _dependencies;
     private readonly DesktopCatalogTrustVerifier? _catalogTrust;
+    private readonly DesktopPackageSignatureVerifier _packageSignatures;
+    private readonly bool _requireSignedPackages;
     private readonly string _releaseRoot;
 
     private sealed record TrustedInstallAuthorization(
@@ -29,6 +31,10 @@ internal sealed class DesktopPackageBridge
     {
     }
 
+    internal DesktopPackageBridge(DesktopPackageBridge source) : this(source._capabilities, source._installer, source._catalogTrust, source._releaseRoot)
+    {
+    }
+
     internal DesktopPackageBridge(CapabilityBroker capabilities, DesktopAppPackageInstaller installer, DesktopCatalogTrustVerifier? catalogTrust, string? releaseRoot = null)
     {
         _capabilities = capabilities ?? throw new ArgumentNullException(nameof(capabilities));
@@ -37,11 +43,14 @@ internal sealed class DesktopPackageBridge
         _releaseRoot = Path.GetFullPath(releaseRoot ?? AppContext.BaseDirectory);
         _dependencies = new DesktopPackageDependencyResolver(
             new DesktopPackageDependencyResolver.RuntimeInfo("1.7.13", "1.3.0", 2, "DESKTOP"));
+        var packageTrust = DesktopPackageTrustRootStore.LoadProvisioned();
+        _packageSignatures = new DesktopPackageSignatureVerifier(packageTrust.Roots);
+        _requireSignedPackages = packageTrust.RequireSignedPackages;
     }
 
     public object Describe() => new
     {
-        schema = "swir.desktop-package-bridge/1.3",
+        schema = "swir.desktop-package-bridge/1.4",
         provider = "desktop-native",
         input = "owner-bound-file-capability-or-signed-release-artifact",
         installer = _installer.Describe(),
@@ -54,6 +63,11 @@ internal sealed class DesktopPackageBridge
         signedIdentityBinding = true,
         signedReleaseArtifactRouting = true,
         persistedTrustProvenance = true,
+        packageSignatureSchema = DesktopPackageSignatureVerifier.SignatureSchema,
+        packageSignatureVerification = true,
+        packageSignatureRequired = _requireSignedPackages,
+        packageSignatureTrustedRoots = _packageSignatures.TrustedRootCount,
+        packageSignatureCoverage = "canonical-entry-sha256+package-identity",
         releaseArtifactRoot = "packages/",
         legacySha256Fallback = _catalogTrust is null,
         trustMode = _catalogTrust is null ? "LEGACY_SHA_UNTIL_ROOT_PROVISIONED" : "SIGNED_CATALOG_REQUIRED"
@@ -88,6 +102,12 @@ internal sealed class DesktopPackageBridge
         BindAuthorizationToBundle(trust, plan);
         if (!plan.Ok)
             throw new DesktopPackageException("PACKAGE_DEPENDENCY_UNSATISFIED", string.Join("; ", plan.Errors));
+
+        var packageSignature = _packageSignatures.Verify(path, _requireSignedPackages);
+        if (!string.Equals(packageSignature.PackageId, plan.PackageId, StringComparison.Ordinal) ||
+            !string.Equals(packageSignature.Version, plan.Version, StringComparison.Ordinal))
+            throw new DesktopPackageException("PACKAGE_SIGNATURE_IDENTITY_MISMATCH", "Verified package signature identity does not match dependency preflight identity.");
+
         return _installer.Install(path, trust.Sha256, ToTrustProof(trust));
     }
 
