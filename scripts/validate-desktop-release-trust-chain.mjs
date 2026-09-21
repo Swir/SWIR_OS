@@ -5,11 +5,15 @@ const read = (path) => fs.readFileSync(path, 'utf8');
 
 const workflow = read('.github/workflows/desktop-release.yml');
 const roots = JSON.parse(read('desktop/windows/catalog-trust-roots.json'));
+const packageRoots = JSON.parse(read('desktop/windows/package-trust-roots.json'));
 const lifecycle = read('desktop/windows/DesktopSignedPackageLifecycleSelfTests.cs');
 const cutover = read('.github/workflows/desktop-catalog-cutover-contract.yml');
 const runtimeStage = read('desktop/windows/stage-desktop-runtime.ps1');
 const packageBridge = read('desktop/windows/DesktopPackageBridge.cs');
 const packageInstaller = read('desktop/windows/DesktopAppPackageInstaller.cs');
+const packageSignatureVerifier = read('desktop/windows/DesktopPackageSignatureVerifier.cs');
+const packageSignatureTool = read('desktop/windows/DesktopPackageSignatureTool.cs');
+const storeBuilder = read('desktop/windows/build-store-packages.ps1');
 
 const requiredWorkflowFragments = [
   'SWIR_CATALOG_SIGNING_PRIVATE_KEY_PEM: ${{ secrets.SWIR_CATALOG_SIGNING_PRIVATE_KEY_PEM }}',
@@ -43,6 +47,10 @@ if (roots.schema !== 'swir.catalog-trust-roots/1.0') fail('Unexpected checked-in
 if (roots.requireSignedCatalog !== false || !Array.isArray(roots.roots) || roots.roots.length !== 0) {
   fail('The source-tree preview trust store must remain empty/fail-neutral; production roots are staged only by the controlled release pipeline.');
 }
+if (packageRoots.schema !== 'swir.package-trust-roots/1.0') fail('Unexpected checked-in package trust-root schema.');
+if (packageRoots.requireSignedPackages !== false || !Array.isArray(packageRoots.roots) || packageRoots.roots.length !== 0) {
+  fail('The source-tree package trust store must remain empty/fail-neutral; production package roots must be provisioned by a controlled signing pipeline.');
+}
 
 for (const fragment of [
   "Copy-Item -LiteralPath (Join-Path $catalogRelease 'catalog-trust-roots.json')",
@@ -57,7 +65,11 @@ for (const fragment of [
   'legacySha256Fallback = _catalogTrust is null',
   'trustMode = _catalogTrust is null ? "LEGACY_SHA_UNTIL_ROOT_PROVISIONED" : "SIGNED_CATALOG_REQUIRED"',
   'persistedTrustProvenance = true',
+  'packageSignatureVerification = true',
+  'packageSignatureRequired = _requireSignedPackages',
+  'packageSignatureTrustedRoots = _packageSignatureVerifier.TrustedRootCount',
   'CATALOG_AUTHORIZATION_REQUIRED',
+  '_packageSignatureVerifier.Verify(path, _requireSignedPackages)',
   '_installer.Install(path, trust.Sha256, ToTrustProof(trust))',
   'DesktopPackageTrustProof.SignedCatalog',
   'trust.CatalogSequence.Value',
@@ -96,21 +108,61 @@ if (hashCheck < 0 || archiveOpen < 0 || hashCheck > archiveOpen) {
 }
 
 for (const fragment of [
+  'SignatureSchema = "swir.package-signature/1.0"',
+  'PACKAGE_SIGNATURE_REQUIRED',
+  'PACKAGE_CONTENT_DIGEST_MISMATCH',
+  'PACKAGE_SIGNATURE_UNKNOWN_KEY',
+  'SignatureAlgorithm.Ed25519.Verify',
+  'CryptographicOperations.FixedTimeEquals'
+]) {
+  if (!packageSignatureVerifier.includes(fragment)) fail(`Embedded package signature verifier invariant missing: ${fragment}`);
+}
+
+for (const fragment of [
+  'trust-root',
+  'verify',
+  'requireSignedPackages = true',
+  'DesktopPackageTrustRootStore.LoadProvisioned()',
+  'Verify(bundlePath, requireSignature: true)',
+  'CryptographicOperations.ZeroMemory'
+]) {
+  if (!packageSignatureTool.includes(fragment)) fail(`Package signing utility release guard missing: ${fragment}`);
+}
+
+for (const fragment of [
+  'PackageSigningKeyId',
+  'PackageSigningPrivateKeyFile',
+  'PackageTrustRootsOutput',
+  'PackageSignerDll',
+  'dotnet $packageSigner sign',
+  'dotnet $packageSigner verify',
+  'The signed bytes are authoritative',
+  'Get-FileHash -LiteralPath $artifactPath -Algorithm SHA256'
+]) {
+  if (!storeBuilder.includes(fragment)) fail(`Reviewed Store package signing pipeline missing: ${fragment}`);
+}
+
+for (const fragment of [
   'requireSignedCatalog = true',
+  'requireSignedPackages = true',
   'SignatureAlgorithm.Ed25519',
+  'PACKAGE_SIGNATURE_REQUIRED',
+  'PACKAGE_CONTENT_DIGEST_MISMATCH',
   'CATALOG_ROLLBACK_DETECTED',
   'persistedTrustProvenance',
+  'packageSignatureRequired',
+  'packageSignatureTrustedRoots',
   'trustMode',
   'signatureVerified',
   'signerKeyId',
   'catalogSequence',
   'catalogVersion',
   'trustExpiresAt',
-  'signed package status must preserve signed trust mode',
+  'signed package status must preserve signed catalog trust mode',
   'rollback should restore v1 catalog sequence',
   'Rolling the payload back must never roll the catalog trust high-water mark back.'
 ]) {
-  if (!lifecycle.includes(fragment)) fail(`Signed package lifecycle/provenance coverage missing: ${fragment}`);
+  if (!lifecycle.includes(fragment)) fail(`Signed catalog + package lifecycle/provenance coverage missing: ${fragment}`);
 }
 
 for (const fragment of [
