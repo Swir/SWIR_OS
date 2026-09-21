@@ -1,0 +1,235 @@
+name: Desktop Package Signing Evidence
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/desktop-package-signing-evidence.yml'
+      - 'desktop/windows/DesktopPackageSignature*.cs'
+      - 'desktop/windows/SWIR.Desktop.PackageSignature*.csproj'
+      - 'desktop/windows/build-store-packages.ps1'
+      - 'desktop/windows/New-PackageSigningEvidence.ps1'
+      - 'scripts/validate-package-signing-evidence.mjs'
+      - 'swir-packages.js'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/desktop-package-signing-evidence.yml'
+      - 'desktop/windows/DesktopPackageSignature*.cs'
+      - 'desktop/windows/SWIR.Desktop.PackageSignature*.csproj'
+      - 'desktop/windows/build-store-packages.ps1'
+      - 'desktop/windows/New-PackageSigningEvidence.ps1'
+      - 'scripts/validate-package-signing-evidence.mjs'
+      - 'swir-packages.js'
+  workflow_dispatch:
+    inputs:
+      production:
+        description: 'Use the protected production package-signing environment/key and emit production evidence (main only)'
+        required: true
+        default: false
+        type: boolean
+      package_key_id:
+        description: 'Ed25519 package signing key id; required for production evidence'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-package-signing-evidence-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  contract-evidence:
+    name: Ephemeral contract evidence
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: desktop/windows
+
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build package signing verifier
+        run: dotnet build SWIR.Desktop.PackageSignatureTool.csproj --configuration Release
+
+      - name: Build, verify and record ephemeral signed package evidence
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $store = Join-Path '${{ runner.temp }}' 'swir-package-evidence-contract'
+          $privateKey = Join-Path '${{ runner.temp }}' 'swir-package-evidence-contract-private.b64'
+          $trust = Join-Path $store 'package-trust-roots.json'
+          $evidence = Join-Path $store 'package-signing-evidence.json'
+          $signer = Join-Path (Get-Location) 'bin\Release\net8.0-windows\SWIR.Desktop.PackageSignatureTool.dll'
+          $keyId = 'ci-package-evidence-root'
+
+          node -e "const fs=require('fs'),crypto=require('crypto'); const {privateKey}=crypto.generateKeyPairSync('ed25519'); const jwk=privateKey.export({format:'jwk'}); const raw=Buffer.from(jwk.d,'base64url'); if(raw.length!==32) throw new Error('Expected 32-byte Ed25519 raw private key'); fs.writeFileSync(process.argv[1], raw.toString('base64'));" $privateKey
+          if ($LASTEXITCODE -ne 0) { throw 'Could not generate ephemeral Ed25519 package signing key.' }
+
+          try {
+            & (Join-Path (Get-Location) 'build-store-packages.ps1') `
+              -OutputDir $store `
+              -SourceRoot '${{ github.workspace }}' `
+              -PackageSigningKeyId $keyId `
+              -PackageSigningPrivateKeyFile $privateKey `
+              -PackageTrustRootsOutput $trust `
+              -PackageSignerDll $signer
+            if ($LASTEXITCODE -ne 0) { throw "Signed Store package build failed with exit code $LASTEXITCODE" }
+
+            & (Join-Path (Get-Location) 'New-PackageSigningEvidence.ps1') `
+              -StoreDir $store `
+              -TrustRootsPath $trust `
+              -SignerDll $signer `
+              -SourceCommit '${{ github.sha }}' `
+              -ExpectedKeyId $keyId `
+              -OutputPath $evidence `
+              -EvidenceKind contract `
+              -GitHubRepository '${{ github.repository }}' `
+              -GitHubRunId '${{ github.run_id }}' `
+              -GitHubRunAttempt '${{ github.run_attempt }}'
+            if ($LASTEXITCODE -ne 0) { throw "Package signing evidence generation failed with exit code $LASTEXITCODE" }
+
+            node '${{ github.workspace }}\scripts\validate-package-signing-evidence.mjs' $evidence $store $trust contract
+            if ($LASTEXITCODE -ne 0) { throw "Package signing evidence validation failed with exit code $LASTEXITCODE" }
+          }
+          finally {
+            if (Test-Path $privateKey -PathType Leaf) {
+              $length = (Get-Item -LiteralPath $privateKey).Length
+              if ($length -gt 0) { [System.IO.File]::WriteAllBytes($privateKey, (New-Object byte[] $length)) }
+              Remove-Item -LiteralPath $privateKey -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+          if (Test-Path $privateKey) { throw 'Ephemeral package signing key file survived cleanup.' }
+
+      - name: Upload non-secret contract evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-signing-contract-evidence-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/swir-package-evidence-contract/package-signing-evidence.json
+            ${{ runner.temp }}/swir-package-evidence-contract/package-trust-roots.json
+            ${{ runner.temp }}/swir-package-evidence-contract/catalog-artifacts.json
+          if-no-files-found: error
+          retention-days: 7
+
+  production-evidence:
+    name: Protected production evidence
+    if: github.event_name == 'workflow_dispatch' && inputs.production == true && github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    environment: desktop-production-signing
+    defaults:
+      run:
+        working-directory: desktop/windows
+    env:
+      SWIR_PACKAGE_KEY_ID: ${{ inputs.package_key_id }}
+      SWIR_PACKAGE_SIGNING_PRIVATE_KEY_BASE64: ${{ secrets.SWIR_PACKAGE_SIGNING_PRIVATE_KEY_BASE64 }}
+
+    steps:
+      - name: Checkout exact main commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Validate protected signing inputs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:SWIR_PACKAGE_KEY_ID -notmatch '^[A-Za-z0-9._-]{1,128}$') { throw 'package_key_id is required and invalid.' }
+          if ([string]::IsNullOrWhiteSpace($env:SWIR_PACKAGE_SIGNING_PRIVATE_KEY_BASE64)) { throw 'Protected SWIR_PACKAGE_SIGNING_PRIVATE_KEY_BASE64 secret is not configured.' }
+          try { $raw = [Convert]::FromBase64String($env:SWIR_PACKAGE_SIGNING_PRIVATE_KEY_BASE64.Trim()) }
+          catch { throw 'Protected package signing private key is not canonical base64.' }
+          try {
+            if ($raw.Length -ne 32) { throw 'Protected Ed25519 package signing private key must be exactly 32 bytes.' }
+            if ([Convert]::ToBase64String($raw) -cne $env:SWIR_PACKAGE_SIGNING_PRIVATE_KEY_BASE64.Trim()) { throw 'Protected package signing private key must use canonical base64.' }
+          }
+          finally { [System.Security.Cryptography.CryptographicOperations]::ZeroMemory($raw) }
+
+      - name: Build package signing verifier
+        run: dotnet build SWIR.Desktop.PackageSignatureTool.csproj --configuration Release
+
+      - name: Build, verify and record protected production package evidence
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $store = Join-Path '${{ runner.temp }}' 'swir-package-evidence-production'
+          $privateKey = Join-Path '${{ runner.temp }}' 'swir-package-evidence-production-private.b64'
+          $trust = Join-Path $store 'package-trust-roots.json'
+          $evidence = Join-Path $store 'package-signing-evidence.json'
+          $signer = Join-Path (Get-Location) 'bin\Release\net8.0-windows\SWIR.Desktop.PackageSignatureTool.dll'
+          Write-Output '::add-mask::${{ secrets.SWIR_PACKAGE_SIGNING_PRIVATE_KEY_BASE64 }}'
+          [System.IO.File]::WriteAllText($privateKey, $env:SWIR_PACKAGE_SIGNING_PRIVATE_KEY_BASE64, [System.Text.UTF8Encoding]::new($false))
+
+          try {
+            & (Join-Path (Get-Location) 'build-store-packages.ps1') `
+              -OutputDir $store `
+              -SourceRoot '${{ github.workspace }}' `
+              -PackageSigningKeyId $env:SWIR_PACKAGE_KEY_ID `
+              -PackageSigningPrivateKeyFile $privateKey `
+              -PackageTrustRootsOutput $trust `
+              -PackageSignerDll $signer
+            if ($LASTEXITCODE -ne 0) { throw "Production signed Store package build failed with exit code $LASTEXITCODE" }
+
+            & (Join-Path (Get-Location) 'New-PackageSigningEvidence.ps1') `
+              -StoreDir $store `
+              -TrustRootsPath $trust `
+              -SignerDll $signer `
+              -SourceCommit '${{ github.sha }}' `
+              -ExpectedKeyId $env:SWIR_PACKAGE_KEY_ID `
+              -OutputPath $evidence `
+              -EvidenceKind production `
+              -GitHubRepository '${{ github.repository }}' `
+              -GitHubRunId '${{ github.run_id }}' `
+              -GitHubRunAttempt '${{ github.run_attempt }}'
+            if ($LASTEXITCODE -ne 0) { throw "Production signing evidence generation failed with exit code $LASTEXITCODE" }
+
+            node '${{ github.workspace }}\scripts\validate-package-signing-evidence.mjs' $evidence $store $trust production
+            if ($LASTEXITCODE -ne 0) { throw "Production signing evidence validation failed with exit code $LASTEXITCODE" }
+          }
+          finally {
+            if (Test-Path $privateKey -PathType Leaf) {
+              $length = (Get-Item -LiteralPath $privateKey).Length
+              if ($length -gt 0) { [System.IO.File]::WriteAllBytes($privateKey, (New-Object byte[] $length)) }
+              Remove-Item -LiteralPath $privateKey -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+          if (Test-Path $privateKey) { throw 'Production package signing key file survived cleanup.' }
+
+      - name: Upload public production signing evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-signing-production-evidence-${{ github.sha }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/swir-package-evidence-production/package-signing-evidence.json
+            ${{ runner.temp }}/swir-package-evidence-production/package-trust-roots.json
+            ${{ runner.temp }}/swir-package-evidence-production/catalog-artifacts.json
+          if-no-files-found: error
+          retention-days: 90
