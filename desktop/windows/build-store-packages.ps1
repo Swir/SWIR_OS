@@ -22,6 +22,16 @@ if (-not (Test-Path $source -PathType Container)) { throw "SWIR source root does
 if (-not (Test-Path (Join-Path $source 'swir-packages.js') -PathType Leaf)) { throw 'swir-packages.js is missing.' }
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) { throw 'Node.js is required to export the reviewed package catalog.' }
 
+# Refuse stale package output before any generated trust material is written into
+# the output tree. Controlled signed builds are allowed to place their public
+# package trust-root file inside the otherwise-empty output directory.
+if (Test-Path $output -PathType Container) {
+    $existing = @(Get-ChildItem -LiteralPath $output -Force)
+    if ($existing.Count -gt 0) { throw "Desktop Store package output must be empty: $output" }
+} else {
+    New-Item -ItemType Directory -Path $output -Force | Out-Null
+}
+
 $signingRequested = (-not [string]::IsNullOrWhiteSpace($PackageSigningKeyId)) -or
                     (-not [string]::IsNullOrWhiteSpace($PackageSigningPrivateKeyFile)) -or
                     (-not [string]::IsNullOrWhiteSpace($PackageTrustRootsOutput))
@@ -41,7 +51,7 @@ if ($signingRequested) {
     if (-not (Test-Path $packagePrivateKey -PathType Leaf)) { throw "Package signing private-key file is missing: $packagePrivateKey" }
     $packageTrustRoots = [System.IO.Path]::GetFullPath($PackageTrustRootsOutput)
     $packageSigner = if ([string]::IsNullOrWhiteSpace($PackageSignerDll)) {
-        Join-Path $PSScriptRoot 'bin\Release\net8.0\SWIR.Desktop.PackageSignatureTool.dll'
+        Join-Path $PSScriptRoot 'bin\Release\net8.0-windows\SWIR.Desktop.PackageSignatureTool.dll'
     } else {
         [System.IO.Path]::GetFullPath($PackageSignerDll)
     }
@@ -61,12 +71,6 @@ if ($signingRequested) {
     }
 }
 
-if (Test-Path $output -PathType Container) {
-    $existing = @(Get-ChildItem -LiteralPath $output -Force)
-    if ($existing.Count -gt 0) { throw "Desktop Store package output must be empty: $output" }
-} else {
-    New-Item -ItemType Directory -Path $output -Force | Out-Null
-}
 $packagesDir = Join-Path $output 'packages'
 New-Item -ItemType Directory -Path $packagesDir -Force | Out-Null
 
