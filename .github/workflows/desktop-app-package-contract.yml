@@ -159,7 +159,7 @@ jobs:
           $store = Join-Path '${{ runner.temp }}' 'swir-signed-store-contract'
           $privateKey = Join-Path '${{ runner.temp }}' 'swir-package-signing-private.b64'
           $trustRoots = Join-Path '${{ runner.temp }}' 'swir-package-trust-roots.json'
-          $signer = Join-Path '${{ github.workspace }}' 'desktop\windows\bin\Release\net8.0\SWIR.Desktop.PackageSignatureTool.dll'
+          $signer = Join-Path '${{ github.workspace }}' 'desktop\windows\bin\Release\net8.0-windows\SWIR.Desktop.PackageSignatureTool.dll'
           node -e "const fs=require('fs'),crypto=require('crypto'); const {privateKey}=crypto.generateKeyPairSync('ed25519'); const jwk=privateKey.export({format:'jwk'}); const raw=Buffer.from(jwk.d,'base64url'); if(raw.length!==32) throw new Error('Expected 32-byte Ed25519 raw private key'); fs.writeFileSync(process.argv[1], raw.toString('base64'));" $privateKey
           if ($LASTEXITCODE -ne 0) { throw 'Could not generate ephemeral raw Ed25519 package signing key.' }
 
