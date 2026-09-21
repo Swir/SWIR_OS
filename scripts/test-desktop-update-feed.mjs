@@ -137,6 +137,12 @@ try {
   fs.writeFileSync(missingSignature.incomingPath, JSON.stringify(unsignedEnvelope));
   expectThrow(() => promote(missingSignature, output), 'not valid canonical base64');
 
+  const nonCanonicalSignature = writeCandidate('0.5.9');
+  const nonCanonicalEnvelope = JSON.parse(fs.readFileSync(nonCanonicalSignature.incomingPath, 'utf8'));
+  nonCanonicalEnvelope.Signature = 'AB==';
+  fs.writeFileSync(nonCanonicalSignature.incomingPath, JSON.stringify(nonCanonicalEnvelope));
+  expectThrow(() => promote(nonCanonicalSignature, output), 'not valid canonical base64');
+
   const hashMismatch = writeCandidate('0.5.9', { actualPackageBytes: Buffer.from('TAMPERED-RELEASE-ASSET', 'utf8') });
   const beforeHashFailure = fs.readFileSync(output, 'utf8');
   expectThrow(() => promote(hashMismatch, output), 'size does not match signed payload');
