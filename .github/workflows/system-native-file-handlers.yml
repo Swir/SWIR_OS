@@ -48,8 +48,10 @@ jobs:
           grep -F 'Exec=/usr/local/bin/swir-files --archive-manager --archive-open %f' system/apps/swir-archive-manager.desktop >/dev/null
           grep -F 'Gio.ApplicationFlags.HANDLES_OPEN' system/apps/swir-text-editor.py >/dev/null
           grep -F 'document changed since it was opened; refusing overwrite' system/apps/swir-text-editor.py >/dev/null
+          grep -F 'Save As refuses to replace an existing file' system/apps/swir-text-editor.py >/dev/null
           grep -F 'remote/URI document input is not accepted' system/apps/swir-text-editor.py >/dev/null
-          grep -F 'O_NOFOLLOW' system/apps/swir-files.py >/dev/null
+          grep -F 'O_NOFOLLOW' system/apps/swir-text-editor.py system/apps/swir-files.py >/dev/null
+          grep -F 'os.O_EXCL' system/apps/swir-text-editor.py >/dev/null
           ! grep -RE 'shell *= *True|os\.system\(' system/apps/swir-text-editor.py system/apps/swir-files.py
           ! grep -RE "/usr/bin/(sudo|pkexec|su)([[:space:]\"']|$)|/bin/su([[:space:]\"']|$)" system/apps/swir-text-editor.py system/apps/swir-files.py
 
@@ -110,21 +112,28 @@ jobs:
                 SWIR_ARCHIVE_E2E_DESTINATION="$DEST" \
             python3 system/apps/swir-files.py --archive-manager --archive-open "$RUNTIME/sample.zip"
 
-          python3 - "$RUNTIME/text-editor.json" "$RUNTIME/archive.json" "$RUNTIME/sample.py" "$DEST" <<'PY'
+          python3 - "$RUNTIME/text-editor.json" "$RUNTIME/archive.json" "$RUNTIME/sample.py" "$RUNTIME/swir-text-editor-created.txt" "$DEST" <<'PY'
           import json, pathlib, stat, sys
           text = json.load(open(sys.argv[1], encoding='utf-8'))
           archive = json.load(open(sys.argv[2], encoding='utf-8'))
           text_path = pathlib.Path(sys.argv[3])
-          destination = pathlib.Path(sys.argv[4]).resolve()
+          created_path = pathlib.Path(sys.argv[4])
+          destination = pathlib.Path(sys.argv[5]).resolve()
 
-          assert text['schema'] == 'swir.native-text-editor-runtime-evidence/0.1'
+          assert text['schema'] == 'swir.native-text-editor-runtime-evidence/0.2'
           assert text['passed'] is True
           assert text['applicationId'] == 'dev.swir.TextEditor'
           assert text['nativeToolkit'] == 'gtk4' and text['displayProtocol'] == 'wayland'
           assert text['windowMapped'] is True and text['privilegedOperations'] is False
           assert text['localFilesOnly'] is True and text['remoteUriInputAccepted'] is False
-          assert text['symlinkInputAccepted'] is False and text['atomicSave'] is True
+          assert text['symlinkInputAccepted'] is False and text['hardlinkInputAccepted'] is False
+          assert text['atomicOverwrite'] is True and text['exclusiveCreate'] is True
+          assert text['existingSaveAsTargetReplaced'] is False
+          assert text['interactiveOpen'] is True and text['interactiveNew'] is True and text['interactiveSaveAs'] is True
+          assert text['maxDocumentBytes'] == 4 * 1024 * 1024
           assert text_path.read_text(encoding='utf-8').endswith('# SWIR Text Editor E2E saved\n')
+          assert created_path.read_text(encoding='utf-8') == 'created by E2E\n'
+          assert stat.S_IMODE(created_path.stat().st_mode) == 0o600
 
           assert archive['schema'] == 'swir.native-archive-manager-runtime-evidence/0.1'
           assert archive['passed'] is True
