@@ -6,12 +6,16 @@ on:
     paths:
       - 'system/apps/core_runtime.py'
       - 'system/apps/core_runtime.selftest.py'
+      - 'system/apps/i18n_runtime.py'
+      - 'system/apps/i18n_runtime.selftest.py'
       - 'system/apps/swir-settings.py'
       - '.github/workflows/system-native-locale-foundation.yml'
   pull_request:
     paths:
       - 'system/apps/core_runtime.py'
       - 'system/apps/core_runtime.selftest.py'
+      - 'system/apps/i18n_runtime.py'
+      - 'system/apps/i18n_runtime.selftest.py'
       - 'system/apps/swir-settings.py'
       - '.github/workflows/system-native-locale-foundation.yml'
   workflow_dispatch:
@@ -29,14 +33,21 @@ jobs:
     timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
-      - name: Compile and exercise locale normalization policy
+      - name: Compile and exercise locale and catalog policy
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m py_compile system/apps/core_runtime.py system/apps/core_runtime.selftest.py system/apps/swir-settings.py
+          python3 -m py_compile \
+            system/apps/core_runtime.py \
+            system/apps/core_runtime.selftest.py \
+            system/apps/i18n_runtime.py \
+            system/apps/i18n_runtime.selftest.py \
+            system/apps/swir-settings.py
           PYTHONPATH=system/apps python3 system/apps/core_runtime.selftest.py
+          PYTHONPATH=system/apps python3 system/apps/i18n_runtime.selftest.py
           PYTHONPATH=system/apps python3 - <<'PY'
           from core_runtime import detect_system_language, normalize_language_tag
+          from i18n_runtime import translator_for
 
           cases = [
               ({'LANG': 'pl_PL.UTF-8'}, 'pl-PL'),
@@ -52,7 +63,10 @@ jobs:
               actual = detect_system_language(environment)
               assert actual == expected, (environment, actual, expected)
           assert normalize_language_tag('../../escape') is None
-          print('native locale policy matrix: PASS')
+          assert translator_for('pl_PL.UTF-8')('button.save') == 'Zapisz'
+          assert translator_for('no_NO.UTF-8')('button.save') == 'Lagre'
+          assert translator_for('de_DE.UTF-8').catalog_language == 'en'
+          print('native locale + i18n policy matrix: PASS')
           PY
 
   wayland-settings-first-run:
@@ -66,17 +80,17 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends weston python3-gi gir1.2-gtk-4.0
-      - name: Verify Settings persists detected Polish first-run language
+      - name: Verify real Polish and Norwegian Settings surfaces
         shell: bash
         run: |
           set -euo pipefail
           RUNTIME="${{ runner.temp }}/swir-locale-runtime"
-          CONFIG="${{ runner.temp }}/swir-locale-config"
           DATA="${{ runner.temp }}/swir-locale-data"
-          mkdir -p "$RUNTIME" "$CONFIG" "$DATA"
-          chmod 0700 "$RUNTIME" "$CONFIG" "$DATA"
+          CONFIG_PL="${{ runner.temp }}/swir-locale-config-pl"
+          CONFIG_NB="${{ runner.temp }}/swir-locale-config-nb"
+          mkdir -p "$RUNTIME" "$DATA" "$CONFIG_PL" "$CONFIG_NB"
+          chmod 0700 "$RUNTIME" "$DATA" "$CONFIG_PL" "$CONFIG_NB"
           export XDG_RUNTIME_DIR="$RUNTIME"
-          export XDG_CONFIG_HOME="$CONFIG"
           export XDG_DATA_HOME="$DATA"
           export WAYLAND_DISPLAY=wayland-swir-locale
           export GDK_BACKEND=wayland
@@ -84,7 +98,6 @@ jobs:
           export LANGUAGE=''
           export LC_ALL=''
           export LC_MESSAGES=''
-          export LANG='pl_PL.UTF-8'
 
           weston --backend=headless-backend.so --socket="$WAYLAND_DISPLAY" --idle-time=0 --log="$RUNTIME/weston.log" &
           WESTON_PID=$!
@@ -97,23 +110,56 @@ jobs:
           done
           [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]]
 
+          export XDG_CONFIG_HOME="$CONFIG_PL"
+          export LANG='pl_PL.UTF-8'
           timeout --signal=TERM --kill-after=5s 25s \
             env SWIR_APP_E2E=1 SWIR_APP_EVIDENCE_PATH="$RUNTIME/settings-pl.json" \
             python3 system/apps/swir-settings.py
 
-          python3 - "$RUNTIME/settings-pl.json" "$CONFIG/swir/settings.json" <<'PY'
+          export XDG_CONFIG_HOME="$CONFIG_NB"
+          export LANG='no_NO.UTF-8'
+          timeout --signal=TERM --kill-after=5s 25s \
+            env SWIR_APP_E2E=1 SWIR_APP_EVIDENCE_PATH="$RUNTIME/settings-nb.json" \
+            python3 system/apps/swir-settings.py
+
+          python3 - \
+            "$RUNTIME/settings-pl.json" "$CONFIG_PL/swir/settings.json" \
+            "$RUNTIME/settings-nb.json" "$CONFIG_NB/swir/settings.json" <<'PY'
           import json, pathlib, stat, sys
-          evidence = json.load(open(sys.argv[1], encoding='utf-8'))
-          stored_path = pathlib.Path(sys.argv[2])
-          stored = json.load(open(stored_path, encoding='utf-8'))
-          assert evidence['schema'] == 'swir.native-settings-runtime-evidence/0.3'
-          assert evidence['passed'] is True
-          assert evidence['nativeToolkit'] == 'gtk4'
-          assert evidence['displayProtocol'] == 'wayland'
-          assert evidence['windowMapped'] is True
-          assert evidence['privilegedOperations'] is False
-          assert evidence['language'] == 'pl-PL'
-          assert stored['language'] == 'pl-PL'
-          assert stat.S_IMODE(stored_path.stat().st_mode) == 0o600
-          print('native Settings first-run Polish locale evidence: PASS')
+
+          pl_evidence = json.load(open(sys.argv[1], encoding='utf-8'))
+          pl_stored_path = pathlib.Path(sys.argv[2])
+          pl_stored = json.load(open(pl_stored_path, encoding='utf-8'))
+          nb_evidence = json.load(open(sys.argv[3], encoding='utf-8'))
+          nb_stored_path = pathlib.Path(sys.argv[4])
+          nb_stored = json.load(open(nb_stored_path, encoding='utf-8'))
+
+          for evidence in (pl_evidence, nb_evidence):
+              assert evidence['schema'] == 'swir.native-settings-runtime-evidence/0.3'
+              assert evidence['passed'] is True
+              assert evidence['nativeToolkit'] == 'gtk4'
+              assert evidence['displayProtocol'] == 'wayland'
+              assert evidence['windowMapped'] is True
+              assert evidence['privilegedOperations'] is False
+              assert evidence['localizedSurfaceVerified'] is True
+              assert evidence['i18nCatalogFallback'] is False
+              assert evidence['textDirection'] == 'ltr'
+
+          assert pl_evidence['language'] == 'pl-PL'
+          assert pl_evidence['i18nCatalogLanguage'] == 'pl-PL'
+          assert pl_evidence['windowTitle'] == 'Ustawienia SWIR'
+          assert pl_evidence['languageSectionLabel'] == 'Język i region'
+          assert pl_evidence['saveButtonLabel'] == 'Zapisz'
+          assert pl_stored['language'] == 'pl-PL'
+          assert stat.S_IMODE(pl_stored_path.stat().st_mode) == 0o600
+
+          assert nb_evidence['language'] == 'nb-NO'
+          assert nb_evidence['i18nCatalogLanguage'] == 'nb-NO'
+          assert nb_evidence['windowTitle'] == 'SWIR-innstillinger'
+          assert nb_evidence['languageSectionLabel'] == 'Språk og område'
+          assert nb_evidence['saveButtonLabel'] == 'Lagre'
+          assert nb_stored['language'] == 'nb-NO'
+          assert stat.S_IMODE(nb_stored_path.stat().st_mode) == 0o600
+
+          print('native Settings localized Polish/Norwegian Wayland evidence: PASS')
           PY
