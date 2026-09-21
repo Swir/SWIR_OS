@@ -13,6 +13,8 @@ internal static class DesktopUpdateUserPolicyIntegrationSelfTests
         Run("notify-only blocks automatic preparation", NotifyOnlyBlocksAutomaticPrepare, failures);
         Run("manual blocks background checks but permits explicit checks", ManualBlocksBackgroundCheck, failures);
         Run("automatic permits background check and automatic preparation", AutomaticPermitsBackgroundWork, failures);
+        Run("downgrading automatic policy revokes queued automatic preparation", PolicyDowngradeRevokesQueuedAutomaticPrepare, failures);
+        Run("policy downgrade does not revoke explicit user preparation", PolicyDowngradePreservesExplicitUserPrepare, failures);
         Run("user policy survives host service recreation", PolicyPersistsAcrossHostServiceRecreation, failures);
         Run("invalid policy mutation is fail-closed and atomic", InvalidPolicyMutationLeavesPriorPolicyUntouched, failures);
         Run("strict persistence rejects unknown fields", UnknownPersistedFieldFallsBackSafely, failures);
@@ -70,6 +72,31 @@ internal static class DesktopUpdateUserPolicyIntegrationSelfTests
         Expect(check.GetProperty("verified").GetBoolean(), "automatic background check remains verified");
         var queued = Json(f.Service.QueueAutomaticPrepare(true));
         Expect(queued.GetProperty("state").GetString() == "queued", "automatic preparation is queued only after policy allows it");
+        _ = f.Service.Cancel(true);
+    }
+
+    private static void PolicyDowngradeRevokesQueuedAutomaticPrepare()
+    {
+        using var f = new Fixture();
+        _ = f.Service.SetUserPolicy(true, "automatic");
+        var queued = Json(f.Service.QueueAutomaticPrepare(true));
+        Expect(queued.GetProperty("state").GetString() == "queued", "automatic preparation must first reach the acknowledged queued state");
+
+        var downgraded = Json(f.Service.SetUserPolicy(true, "notify"));
+        Expect(downgraded.GetProperty("mode").GetString() == "notify", "downgraded mode persists as notify-only");
+        var host = Json(f.Service.Describe());
+        Expect(host.GetProperty("preparation").GetProperty("state").GetString() == "idle", "policy downgrade must revoke queued automatic preparation before execution");
+        ExpectNotQueued(() => f.Service.ExecuteQueuedAsync().GetAwaiter().GetResult());
+    }
+
+    private static void PolicyDowngradePreservesExplicitUserPrepare()
+    {
+        using var f = new Fixture();
+        var queued = Json(f.Service.QueuePrepare(true));
+        Expect(queued.GetProperty("state").GetString() == "queued", "explicit user preparation is queued in notify-only mode");
+        _ = f.Service.SetUserPolicy(true, "manual");
+        var host = Json(f.Service.Describe());
+        Expect(host.GetProperty("preparation").GetProperty("state").GetString() == "queued", "manual mode must not revoke an explicit user-requested preparation");
         _ = f.Service.Cancel(true);
     }
 
@@ -135,6 +162,13 @@ internal static class DesktopUpdateUserPolicyIntegrationSelfTests
         try { action(); }
         catch (DesktopUpdateBridgeCommandException ex) when (ex.Code == "UPDATE_USER_POLICY_INVALID") { return; }
         throw new InvalidOperationException("Expected UPDATE_USER_POLICY_INVALID.");
+    }
+
+    private static void ExpectNotQueued(Action action)
+    {
+        try { action(); }
+        catch (DesktopUpdateBridgeCommandException ex) when (ex.Code == "UPDATE_PREPARATION_NOT_QUEUED") { return; }
+        throw new InvalidOperationException("Expected UPDATE_PREPARATION_NOT_QUEUED.");
     }
 
     private static void ExpectTrustBlocked(Action action)
