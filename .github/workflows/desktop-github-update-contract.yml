@@ -11,6 +11,9 @@ on:
       - 'desktop/windows/SWIR.Desktop.UpdateUserPolicyIntegration.SelfTests.csproj'
       - 'desktop/windows/DesktopUpdateBackgroundCycleSelfTests.cs'
       - 'desktop/windows/SWIR.Desktop.UpdateBackgroundCycle.SelfTests.csproj'
+      - 'desktop/windows/DesktopUpdateBackgroundScheduler.cs'
+      - 'desktop/windows/DesktopUpdateBackgroundSchedulerSelfTests.cs'
+      - 'desktop/windows/SWIR.Desktop.UpdateBackgroundScheduler.SelfTests.csproj'
       - 'desktop/windows/DesktopGitHubUpdatePolicy.cs'
       - 'desktop/windows/DesktopReleaseBundleBuilder.cs'
       - 'desktop/windows/DesktopReleaseBundleSelfTests.cs'
@@ -33,6 +36,9 @@ on:
       - 'desktop/windows/SWIR.Desktop.UpdateUserPolicyIntegration.SelfTests.csproj'
       - 'desktop/windows/DesktopUpdateBackgroundCycleSelfTests.cs'
       - 'desktop/windows/SWIR.Desktop.UpdateBackgroundCycle.SelfTests.csproj'
+      - 'desktop/windows/DesktopUpdateBackgroundScheduler.cs'
+      - 'desktop/windows/DesktopUpdateBackgroundSchedulerSelfTests.cs'
+      - 'desktop/windows/SWIR.Desktop.UpdateBackgroundScheduler.SelfTests.csproj'
       - 'desktop/windows/DesktopGitHubUpdatePolicy.cs'
       - 'desktop/windows/DesktopReleaseBundleBuilder.cs'
       - 'desktop/windows/DesktopReleaseBundleSelfTests.cs'
@@ -80,6 +86,9 @@ jobs:
       - name: Verify policy-aware background update cycle
         working-directory: desktop/windows
         run: dotnet run --project SWIR.Desktop.UpdateBackgroundCycle.SelfTests.csproj --configuration Release
+      - name: Verify non-overlapping update background scheduler
+        working-directory: desktop/windows
+        run: dotnet run --project SWIR.Desktop.UpdateBackgroundScheduler.SelfTests.csproj --configuration Release
       - name: Verify release bundle integration
         working-directory: desktop/windows
         run: dotnet run --project SWIR.Desktop.ReleaseBundle.SelfTests.csproj --configuration Release

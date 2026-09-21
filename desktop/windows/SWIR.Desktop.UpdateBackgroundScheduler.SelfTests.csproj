@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>SWIR.Desktop.UpdateBackgroundScheduler.SelfTests</AssemblyName>
+    <RootNamespace>Swir.Desktop.Host</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="DesktopUpdateBackgroundScheduler.cs" />
+    <Compile Include="DesktopUpdateBackgroundSchedulerSelfTests.cs" />
+  </ItemGroup>
+</Project>
