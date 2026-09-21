@@ -10,12 +10,15 @@ import tempfile
 from core_runtime import (
     DEFAULT_THEME_ID,
     SETTINGS_SCHEMA,
+    SUPPORTED_UI_LANGUAGES,
     THEME_SCHEMA,
     ThemePolicyError,
     ThemeStore,
     UserSettingsStore,
     contrast_ratio,
+    detect_system_language,
     list_directory,
+    normalize_language_tag,
     resolve_directory,
     theme_css,
     validate_settings,
@@ -52,6 +55,26 @@ def sample_theme() -> dict[str, object]:
 
 
 def main() -> None:
+    assert set(SUPPORTED_UI_LANGUAGES) == {
+        "en", "pl-PL", "nb-NO", "de-DE", "es-ES", "fr-FR", "it-IT",
+        "pt-BR", "uk-UA", "ru-RU", "tr-TR", "ar", "he", "ja", "zh-CN",
+    }
+    assert normalize_language_tag("pl_PL.UTF-8") == "pl-PL"
+    assert normalize_language_tag("nb_NO.UTF-8") == "nb-NO"
+    assert normalize_language_tag("no_NO.UTF-8") == "nb-NO"
+    assert normalize_language_tag("iw_IL.UTF-8") == "he"
+    assert normalize_language_tag("fr_CA.UTF-8") == "fr-FR"
+    assert normalize_language_tag("zh_CN.UTF-8") == "zh-CN"
+    assert normalize_language_tag("C.UTF-8") == "en"
+    assert normalize_language_tag("../../bad") is None
+    assert normalize_language_tag("xx_YY.UTF-8") is None
+    assert detect_system_language({"LANGUAGE": "xx_YY:pl_PL:en_US", "LANG": "de_DE.UTF-8"}) == "pl-PL"
+    assert detect_system_language({"LC_ALL": "de_DE.UTF-8", "LANG": "pl_PL.UTF-8"}) == "de-DE"
+    assert detect_system_language({"LC_MESSAGES": "es_MX.UTF-8"}) == "es-ES"
+    assert detect_system_language({"LANG": "C.UTF-8"}) == "en"
+    assert detect_system_language({"LANG": "xx_YY.UTF-8"}) == "en"
+    assert detect_system_language({}) == "en"
+
     with tempfile.TemporaryDirectory(prefix="swir-core-runtime-") as tmp:
         root = pathlib.Path(tmp)
         home = root / "home"
@@ -72,10 +95,32 @@ def main() -> None:
         assert ".hidden.txt" not in [row.name for row in rows]
         assert ".hidden.txt" in [row.name for row in list_directory(home, include_hidden=True)]
 
-        store = UserSettingsStore(root / "config")
-        defaults = store.load()
-        assert defaults["schema"] == SETTINGS_SCHEMA
-        assert defaults["themeId"] == DEFAULT_THEME_ID
+        old_language = os.environ.get("LANGUAGE")
+        old_lc_all = os.environ.get("LC_ALL")
+        old_lc_messages = os.environ.get("LC_MESSAGES")
+        old_lang = os.environ.get("LANG")
+        try:
+            os.environ.pop("LANGUAGE", None)
+            os.environ.pop("LC_ALL", None)
+            os.environ.pop("LC_MESSAGES", None)
+            os.environ["LANG"] = "pl_PL.UTF-8"
+            store = UserSettingsStore(root / "config")
+            defaults = store.load()
+            assert defaults["schema"] == SETTINGS_SCHEMA
+            assert defaults["themeId"] == DEFAULT_THEME_ID
+            assert defaults["language"] == "pl-PL"
+        finally:
+            for key, value in (
+                ("LANGUAGE", old_language),
+                ("LC_ALL", old_lc_all),
+                ("LC_MESSAGES", old_lc_messages),
+                ("LANG", old_lang),
+            ):
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
         saved = store.save({
             "appearance": "system",
             "language": "pl-PL",
