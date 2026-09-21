@@ -19,6 +19,7 @@ internal static class GitHubUpdateSourceSelfTests
         LookalikeGitHubHostIsBlocked(package, update);
         HttpRedirectTargetIsBlocked(package, update);
         SecondRedirectIsBlocked(package, update);
+        SignedGitHubSourceMustBeImmutable(package, update);
         OfficialReleasePathValidation();
         Console.WriteLine($"SWIR GitHub update source self-tests passed: {_passed}");
         return 0;
@@ -98,6 +99,35 @@ internal static class GitHubUpdateSourceSelfTests
             });
             using var downloader = new UpdateDownloadClient(new UpdateStagingBroker(root), client);
             ExpectCode("UPDATE_REDIRECT_LIMIT_EXCEEDED", () => downloader.DownloadAndStageAsync(update).GetAwaiter().GetResult(), "second redirect rejected");
+        }
+        finally { Delete(root); }
+    }
+
+    private static void SignedGitHubSourceMustBeImmutable(byte[] package, UpdateBroker.VerifiedUpdate update)
+    {
+        var root = TempRoot();
+        try
+        {
+            var requests = 0;
+            using var client = Client(_ => { requests++; return Response(package, HttpStatusCode.OK, package.Length); });
+            using var downloader = new UpdateDownloadClient(new UpdateStagingBroker(root), client);
+
+            ExpectCode("UPDATE_URL_INVALID", () => downloader.DownloadAndStageAsync(update with
+            {
+                PackageUri = new Uri("https://github.com/Swir/SWIR_OS/releases/latest/download/SWIR-Desktop-preview.zip")
+            }).GetAwaiter().GetResult(), "mutable latest GitHub release URL rejected before network access");
+
+            ExpectCode("UPDATE_URL_INVALID", () => downloader.DownloadAndStageAsync(update with
+            {
+                PackageUri = new Uri("https://github.com/Swir/SWIR_OS/releases/download/desktop-v0.5.8-preview/SWIR-Desktop-0.5.8-preview.zip?download=1")
+            }).GetAwaiter().GetResult(), "query-bearing signed GitHub release URL rejected before network access");
+
+            ExpectCode("UPDATE_URL_INVALID", () => downloader.DownloadAndStageAsync(update with
+            {
+                PackageUri = new Uri("https://github.com/Other/SWIR_OS/releases/download/desktop-v0.5.8-preview/SWIR-Desktop-0.5.8-preview.zip")
+            }).GetAwaiter().GetResult(), "other-owner signed GitHub release URL rejected before network access");
+
+            Expect(requests == 0, "invalid signed GitHub source URLs make zero HTTP requests");
         }
         finally { Delete(root); }
     }

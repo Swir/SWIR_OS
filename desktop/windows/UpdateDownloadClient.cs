@@ -121,8 +121,11 @@ internal sealed class UpdateDownloadClient : IDisposable
     private static void ValidateVerifiedUri(Uri uri)
     {
         if (uri is null || !uri.IsAbsoluteUri || !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
-            || !uri.IsDefaultPort || !string.IsNullOrEmpty(uri.UserInfo) || !string.IsNullOrEmpty(uri.Fragment))
+            || !uri.IsDefaultPort || !string.IsNullOrEmpty(uri.UserInfo) || !string.IsNullOrEmpty(uri.Fragment)
+            || !string.IsNullOrEmpty(uri.Query))
             throw new UpdateSecurityException("UPDATE_URL_INVALID", "Verified update URL is not a canonical HTTPS URL.");
+        if (string.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase) && !IsOfficialSwirGitHubReleaseUri(uri))
+            throw new UpdateSecurityException("UPDATE_URL_INVALID", "Signed GitHub update URL must be an immutable Swir/SWIR_OS release asset.");
     }
 
     private static bool IsRedirect(HttpStatusCode statusCode)

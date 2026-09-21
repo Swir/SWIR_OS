@@ -15,6 +15,7 @@ on:
       - 'desktop/windows/*BuildIdentity*'
       - 'scripts/promote-desktop-update-feed.mjs'
       - 'scripts/test-desktop-update-feed.mjs'
+      - 'scripts/test-desktop-update-feed-security.mjs'
       - '.github/workflows/desktop-github-update-contract.yml'
       - '.github/workflows/desktop-update-feed.yml'
   pull_request:
@@ -31,6 +32,7 @@ on:
       - 'desktop/windows/*BuildIdentity*'
       - 'scripts/promote-desktop-update-feed.mjs'
       - 'scripts/test-desktop-update-feed.mjs'
+      - 'scripts/test-desktop-update-feed-security.mjs'
       - '.github/workflows/desktop-github-update-contract.yml'
       - '.github/workflows/desktop-update-feed.yml'
   workflow_dispatch:
@@ -70,3 +72,5 @@ jobs:
         run: dotnet run --project SWIR.Desktop.UpdatePreparationHost.SelfTests.csproj --configuration Release
       - name: Verify anti-downgrade feed promotion
         run: node scripts/test-desktop-update-feed.mjs
+      - name: Verify signed feed and artifact trust boundary
+        run: node scripts/test-desktop-update-feed-security.mjs
