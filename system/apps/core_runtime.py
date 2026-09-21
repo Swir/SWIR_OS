@@ -2,8 +2,8 @@
 """Shared unprivileged runtime helpers for native SWIR System Edition apps.
 
 The helpers in this module intentionally avoid privileged mutation. They provide
-small, testable filesystem, settings and data-only theme primitives used by
-first-party GTK applications. Privileged system configuration remains behind
+small, testable filesystem, settings, locale and data-only theme primitives used
+by first-party GTK applications. Privileged system configuration remains behind
 dedicated brokers and Polkit policies.
 """
 
@@ -17,7 +17,7 @@ import re
 import sys
 import tempfile
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, Mapping
 
 SETTINGS_SCHEMA: Final = "swir.user-settings/0.1"
 THEME_SCHEMA: Final = "swir.theme/1.0"
@@ -42,6 +42,32 @@ _COLOR_KEYS: Final = (
 )
 _THEME_TOKEN_KEYS: Final = frozenset((*_COLOR_KEYS, "radius", "spacing", "fontScale"))
 _THEME_TOP_LEVEL_KEYS: Final = frozenset({"schema", "id", "name", "tokens"})
+
+SUPPORTED_UI_LANGUAGES: Final = (
+    "en",
+    "pl-PL",
+    "nb-NO",
+    "de-DE",
+    "es-ES",
+    "fr-FR",
+    "it-IT",
+    "pt-BR",
+    "uk-UA",
+    "ru-RU",
+    "tr-TR",
+    "ar",
+    "he",
+    "ja",
+    "zh-CN",
+)
+_LANGUAGE_BY_PRIMARY: Final = {
+    tag.split("-", 1)[0].lower(): tag for tag in SUPPORTED_UI_LANGUAGES
+}
+_LANGUAGE_PRIMARY_ALIASES: Final = {
+    "no": "nb",
+    "iw": "he",
+}
+_LANGUAGE_ENV_ORDER: Final = ("LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG")
 
 DEFAULT_THEME: Final = {
     "schema": THEME_SCHEMA,
@@ -117,11 +143,69 @@ def list_directory(path: pathlib.Path, *, include_hidden: bool = False) -> list[
     return rows
 
 
+def normalize_language_tag(value: object) -> str | None:
+    """Normalize a POSIX/BCP-47 locale candidate into a supported SWIR UI tag.
+
+    Encoding/modifier suffixes are ignored, aliases such as ``no``/``iw`` are
+    canonicalized, and unsupported languages return ``None`` so callers can
+    continue through the fallback chain. ``C``/``POSIX`` deliberately map to
+    English rather than leaking a pseudo-locale into persisted user settings.
+    """
+
+    if not isinstance(value, str):
+        return None
+    candidate = value.strip()
+    if not candidate:
+        return None
+    candidate = candidate.split(":", 1)[0].strip()
+    candidate = candidate.split(".", 1)[0].split("@", 1)[0].replace("_", "-")
+    if not candidate:
+        return None
+    if candidate.upper() in {"C", "POSIX"}:
+        return "en"
+    if not _LANGUAGE_RE.fullmatch(candidate):
+        return None
+
+    parts = candidate.split("-")
+    primary = _LANGUAGE_PRIMARY_ALIASES.get(parts[0].lower(), parts[0].lower())
+    if primary in {"zh"} and len(parts) > 1:
+        region = parts[1].upper()
+        exact = f"{primary}-{region}"
+        if exact in SUPPORTED_UI_LANGUAGES:
+            return exact
+    if len(parts) > 1:
+        region = parts[1].upper()
+        exact = f"{primary}-{region}"
+        if exact in SUPPORTED_UI_LANGUAGES:
+            return exact
+    return _LANGUAGE_BY_PRIMARY.get(primary)
+
+
+def detect_system_language(environment: Mapping[str, str] | None = None) -> str:
+    """Resolve first-run UI language from standard locale variables.
+
+    ``LANGUAGE`` may contain a colon-separated preference list. The first
+    supported entry wins, followed by LC_ALL, LC_MESSAGES and LANG. Unsupported
+    or malformed values fall back to English. This function never mutates the
+    process locale and is therefore safe to call from GTK application startup.
+    """
+
+    env = os.environ if environment is None else environment
+    for key in _LANGUAGE_ENV_ORDER:
+        raw = env.get(key, "")
+        candidates = raw.split(":") if key == "LANGUAGE" else [raw]
+        for candidate in candidates:
+            resolved = normalize_language_tag(candidate)
+            if resolved is not None:
+                return resolved
+    return "en"
+
+
 def default_settings() -> dict[str, object]:
     return {
         "schema": SETTINGS_SCHEMA,
         "appearance": "dark",
-        "language": "en",
+        "language": detect_system_language(),
         "clock24h": True,
         "themeId": DEFAULT_THEME_ID,
     }

@@ -32,6 +32,7 @@ for source_file in \
   system/session/swir-session-launcher.sh \
   system/session/swir-shell.py \
   system/apps/core_runtime.py \
+  system/apps/i18n_runtime.py \
   system/apps/backup_runtime.py \
   system/apps/hardware_center_runtime.py \
   system/apps/package_status_runtime.py \
@@ -189,6 +190,7 @@ install -d -m 0755 \
 install -m 0755 "$SOURCE_ROOT/system/session/swir-session-launcher.sh" "$(safe_target /usr/local/bin/swir-session)"
 install -m 0755 "$SOURCE_ROOT/system/session/swir-shell.py" "$(safe_target /usr/local/bin/swir-shell)"
 install -m 0644 "$SOURCE_ROOT/system/apps/core_runtime.py" "$(safe_target /usr/local/lib/swir/core_runtime.py)"
+install -m 0644 "$SOURCE_ROOT/system/apps/i18n_runtime.py" "$(safe_target /usr/local/lib/swir/i18n_runtime.py)"
 install -m 0644 "$SOURCE_ROOT/system/apps/backup_runtime.py" "$(safe_target /usr/local/lib/swir/backup_runtime.py)"
 install -m 0644 "$SOURCE_ROOT/system/apps/hardware_center_runtime.py" "$(safe_target /usr/local/lib/swir/hardware_center_runtime.py)"
 install -m 0644 "$SOURCE_ROOT/system/apps/package_status_runtime.py" "$(safe_target /usr/local/lib/swir/package_status_runtime.py)"
@@ -252,6 +254,7 @@ chroot "$ROOTFS" /usr/bin/python3 -m py_compile \
   /usr/local/bin/swir-update-center \
   /usr/local/lib/swir/backup_runtime.py \
   /usr/local/lib/swir/core_runtime.py \
+  /usr/local/lib/swir/i18n_runtime.py \
   /usr/local/lib/swir/hardware_center_runtime.py \
   /usr/local/lib/swir/package_status_runtime.py \
   /usr/local/lib/swir/package_transaction_client.py \
@@ -345,6 +348,7 @@ verify_trusted_regular_file /usr/local/bin/swir-terminal yes
 verify_trusted_regular_file /usr/local/bin/swir-update-center yes
 verify_trusted_regular_file /usr/local/lib/swir/backup_runtime.py no
 verify_trusted_regular_file /usr/local/lib/swir/core_runtime.py no
+verify_trusted_regular_file /usr/local/lib/swir/i18n_runtime.py no
 verify_trusted_regular_file /usr/local/lib/swir/hardware_center_runtime.py no
 verify_trusted_regular_file /usr/local/lib/swir/hardware/hardware-service.mjs no
 verify_trusted_regular_file /usr/local/lib/swir/hardware/driver-resolver.mjs no

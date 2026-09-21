@@ -19,6 +19,7 @@ if LIBDIR.is_dir() and str(LIBDIR) not in sys.path:
     sys.path.insert(0, str(LIBDIR))
 
 from core_runtime import DEFAULT_THEME_ID, UserSettingsStore  # noqa: E402
+from i18n_runtime import Translator, translator_for  # noqa: E402
 from theme_runtime import ThemePolicyError, ThemeStore  # noqa: E402
 
 APP_ID: Final = "dev.swir.Settings"
@@ -86,7 +87,10 @@ class SwirSettings(Gtk.Application):
         self.theme_combo: Gtk.ComboBoxText | None = None
         self.theme_store = ThemeStore()
         self.status: Gtk.Label | None = None
+        self.save_button: Gtk.Button | None = None
+        self.regional_title: Gtk.Label | None = None
         self.store = UserSettingsStore()
+        self.translator: Translator = translator_for("en")
         self.e2e = os.environ.get("SWIR_APP_E2E", "0") == "1"
         self.evidence_path = os.environ.get("SWIR_APP_EVIDENCE_PATH", "")
         self.theme_e2e_package = os.environ.get("SWIR_THEME_E2E_PACKAGE", "")
@@ -94,6 +98,9 @@ class SwirSettings(Gtk.Application):
         self.theme_import_verified = False
         self.default_apps_mutation_verified = False
         self.default_apps_verified_ids: dict[str, str] = {}
+
+    def _t(self, key: str, **values: object) -> str:
+        return self.translator(key, **values)
 
     def do_startup(self) -> None:
         Gtk.Application.do_startup(self)
@@ -179,10 +186,11 @@ class SwirSettings(Gtk.Application):
                 failed.append(content_type)
         verified = not failed and self._is_default_for_all(app, handler_types)
         if update_status and self.status is not None:
+            category = self._t(f"category.{category_id}")
             if verified:
-                self.status.set_text(f"Default {category_id} app changed to {app.get_display_name()}.")
+                self.status.set_text(self._t("status.default_changed", category=category, app=app.get_display_name()))
             else:
-                self.status.set_text(f"Could not update every {category_id} handler; no system privilege was used.")
+                self.status.set_text(self._t("status.default_failed", category=category))
         return verified
 
     def _apply_default_clicked(self, _button: Gtk.Button, category_id: str) -> None:
@@ -191,7 +199,7 @@ class SwirSettings(Gtk.Application):
         app = self.default_apps.get(category_id, {}).get(identity or "")
         if app is None:
             if self.status is not None:
-                self.status.set_text(f"No compatible {category_id} handler is available.")
+                self.status.set_text(self._t("status.default_missing", category=self._t(f"category.{category_id}")))
             return
         self._apply_default_app(category_id, app)
 
@@ -209,23 +217,25 @@ class SwirSettings(Gtk.Application):
             self.window.present()
             return
         settings = self.store.load()
+        self.translator = translator_for(settings["language"])
         window = Gtk.ApplicationWindow(application=self)
-        window.set_title("SWIR Settings")
+        window.set_title(self._t("app.window_title"))
         window.set_default_size(820, 820)
         window.add_css_class("swir-app")
+        window.set_direction(Gtk.TextDirection.RTL if self.translator.text_direction == "rtl" else Gtk.TextDirection.LTR)
         self.window = window
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         window.set_child(root)
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         header.add_css_class("swir-header")
-        brand = Gtk.Label(label="◆  SWIR Settings")
+        brand = Gtk.Label(label=f"◆  {self._t('app.window_title')}")
         brand.add_css_class("swir-brand")
         brand.set_xalign(0)
         header.append(brand)
         spacer = Gtk.Box()
         spacer.set_hexpand(True)
         header.append(spacer)
-        scope = Gtk.Label(label="USER SETTINGS")
+        scope = Gtk.Label(label=self._t("app.scope"))
         scope.add_css_class("swir-muted")
         header.append(scope)
         root.append(header)
@@ -242,10 +252,10 @@ class SwirSettings(Gtk.Application):
 
         regional = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
         regional.add_css_class("swir-card")
-        title = Gtk.Label(label="Language & Region")
-        title.add_css_class("swir-section")
-        title.set_xalign(0)
-        regional.append(title)
+        self.regional_title = Gtk.Label(label=self._t("section.language_region"))
+        self.regional_title.add_css_class("swir-section")
+        self.regional_title.set_xalign(0)
+        regional.append(self.regional_title)
         self.language = Gtk.ComboBoxText()
         selected_language = 0
         for index, (label, tag) in enumerate(LANGUAGES):
@@ -253,48 +263,41 @@ class SwirSettings(Gtk.Application):
             if tag == settings["language"]:
                 selected_language = index
         self.language.set_active(selected_language)
-        regional.append(self._row("Interface language preference", self.language))
-        self.clock24h = Gtk.CheckButton(label="Use 24-hour clock")
+        regional.append(self._row(self._t("row.interface_language"), self.language))
+        self.clock24h = Gtk.CheckButton(label=self._t("row.clock24h"))
         self.clock24h.set_active(bool(settings["clock24h"]))
         regional.append(self.clock24h)
         content.append(regional)
 
         appearance_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
         appearance_card.add_css_class("swir-card")
-        appearance_title = Gtk.Label(label="Appearance & Shell Themes")
+        appearance_title = Gtk.Label(label=self._t("section.appearance"))
         appearance_title.add_css_class("swir-section")
         appearance_title.set_xalign(0)
         appearance_card.append(appearance_title)
         self.appearance = Gtk.ComboBoxText()
         self.appearance.append("dark", "SWIR Dark")
-        self.appearance.append("system", "Follow system preference")
+        self.appearance.append("system", self._t("option.follow_system"))
         self.appearance.set_active_id(str(settings["appearance"]))
-        appearance_card.append(self._row("Color preference", self.appearance))
+        appearance_card.append(self._row(self._t("row.color_preference"), self.appearance))
 
         self.theme_combo = Gtk.ComboBoxText()
         self.theme_combo.set_hexpand(True)
         self._load_themes(str(settings.get("themeId", DEFAULT_THEME_ID)))
-        appearance_card.append(self._row("Shell theme / skin", self.theme_combo))
+        appearance_card.append(self._row(self._t("row.shell_theme"), self.theme_combo))
 
         theme_actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        import_theme = Gtk.Button(label="Import .swirtheme")
+        import_theme = Gtk.Button(label=self._t("button.import_theme"))
         import_theme.add_css_class("swir-button")
         import_theme.connect("clicked", self._choose_theme_package)
         theme_actions.append(import_theme)
-        reset_theme = Gtk.Button(label="Reset to SWIR Default")
+        reset_theme = Gtk.Button(label=self._t("button.reset_theme"))
         reset_theme.add_css_class("swir-button")
         reset_theme.connect("clicked", self._reset_theme)
         theme_actions.append(reset_theme)
         appearance_card.append(theme_actions)
 
-        note = Gtk.Label(
-            label=(
-                "Theme packages are local data-only JSON: only allowlisted colors, spacing, radius and font scale "
-                "are accepted. Scripts, CSS injection, URLs and privileged code are rejected. "
-                "Low-contrast themes fail validation and the shell always falls back to SWIR Default."
-            ),
-            wrap=True,
-        )
+        note = Gtk.Label(label=self._t("theme.policy_note"), wrap=True)
         note.add_css_class("swir-muted")
         note.set_xalign(0)
         appearance_card.append(note)
@@ -302,31 +305,25 @@ class SwirSettings(Gtk.Application):
 
         defaults_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
         defaults_card.add_css_class("swir-card")
-        defaults_title = Gtk.Label(label="Default Apps")
+        defaults_title = Gtk.Label(label=self._t("section.default_apps"))
         defaults_title.add_css_class("swir-section")
         defaults_title.set_xalign(0)
         defaults_card.append(defaults_title)
-        defaults_note = Gtk.Label(
-            label=(
-                "Choose per-user handlers from installed applications that advertise every canonical type for the category. "
-                "Changes use the desktop application registry only; no root access, package mutation or application removal is performed."
-            ),
-            wrap=True,
-        )
+        defaults_note = Gtk.Label(label=self._t("default_apps.note"), wrap=True)
         defaults_note.add_css_class("swir-muted")
         defaults_note.set_xalign(0)
         defaults_card.append(defaults_note)
-        for category_id, label, _handler_types in DEFAULT_APP_CATEGORIES:
+        for category_id, _label, _handler_types in DEFAULT_APP_CATEGORIES:
             combo = Gtk.ComboBoxText()
             combo.set_hexpand(True)
             self.default_combos[category_id] = combo
             row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-            row_label = Gtk.Label(label=label)
+            row_label = Gtk.Label(label=self._t(f"category.{category_id}"))
             row_label.set_xalign(0)
             row_label.set_hexpand(True)
             row.append(row_label)
             row.append(combo)
-            apply_button = Gtk.Button(label="Apply")
+            apply_button = Gtk.Button(label=self._t("button.apply"))
             apply_button.add_css_class("swir-button")
             apply_button.connect("clicked", self._apply_default_clicked, category_id)
             row.append(apply_button)
@@ -335,15 +332,15 @@ class SwirSettings(Gtk.Application):
         content.append(defaults_card)
 
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        self.status = Gtk.Label(label="Per-user settings only — privileged system changes are not exposed here.")
+        self.status = Gtk.Label(label=self._t("status.user_scope"))
         self.status.add_css_class("swir-muted")
         self.status.set_xalign(0)
         self.status.set_hexpand(True)
         actions.append(self.status)
-        save = Gtk.Button(label="Save")
-        save.add_css_class("swir-button")
-        save.connect("clicked", self._save)
-        actions.append(save)
+        self.save_button = Gtk.Button(label=self._t("button.save"))
+        self.save_button.add_css_class("swir-button")
+        self.save_button.connect("clicked", self._save)
+        actions.append(self.save_button)
         content.append(actions)
         window.connect("map", self._on_mapped)
         window.present()
@@ -352,14 +349,14 @@ class SwirSettings(Gtk.Application):
         if self.window is None:
             return
         dialog = Gtk.FileChooserNative(
-            title="Import SWIR Theme",
+            title=self._t("dialog.import_theme_title"),
             transient_for=self.window,
             action=Gtk.FileChooserAction.OPEN,
-            accept_label="Import",
-            cancel_label="Cancel",
+            accept_label=self._t("dialog.import"),
+            cancel_label=self._t("dialog.cancel"),
         )
         file_filter = Gtk.FileFilter()
-        file_filter.set_name("SWIR Theme packages")
+        file_filter.set_name(self._t("dialog.theme_filter"))
         file_filter.add_pattern("*.swirtheme")
         dialog.add_filter(file_filter)
         dialog.connect("response", self._on_theme_file_response)
@@ -379,10 +376,10 @@ class SwirSettings(Gtk.Application):
             assert self.theme_combo is not None
             self._load_themes(str(theme["id"]))
             if self.status is not None:
-                self.status.set_text(f"Imported {theme['name']}. Save to activate it on the next shell start.")
+                self.status.set_text(self._t("status.theme_imported", name=theme["name"]))
         except (OSError, RuntimeError, ThemePolicyError) as exc:
             if self.status is not None:
-                self.status.set_text(f"Theme import rejected: {exc}")
+                self.status.set_text(self._t("status.theme_rejected", reason=exc))
         finally:
             dialog.destroy()
 
@@ -390,7 +387,7 @@ class SwirSettings(Gtk.Application):
         if self.theme_combo is not None:
             self.theme_combo.set_active_id(DEFAULT_THEME_ID)
         if self.status is not None:
-            self.status.set_text("SWIR Default selected. Save to activate it.")
+            self.status.set_text(self._t("status.theme_reset"))
 
     def _payload(self) -> dict[str, object]:
         assert self.language is not None and self.appearance is not None and self.clock24h is not None and self.theme_combo is not None
@@ -404,7 +401,7 @@ class SwirSettings(Gtk.Application):
     def _save(self, _button: Gtk.Button | None = None) -> dict[str, object]:
         payload = self.store.save(self._payload())
         if self.status is not None:
-            self.status.set_text("Saved securely to your SWIR user profile. Theme changes apply on the next shell start.")
+            self.status.set_text(self._t("status.saved"))
         return payload
 
     def _prepare_theme_e2e(self) -> None:
@@ -441,6 +438,14 @@ class SwirSettings(Gtk.Application):
         saved = self._save()
         installed_ids = [str(theme["id"]) for theme in self.theme_store.list_themes()]
         candidate_counts = {category_id: len(self.default_apps.get(category_id, {})) for category_id, _label, _types in DEFAULT_APP_CATEGORIES}
+        window_title = self.window.get_title() if self.window is not None else ""
+        language_section_label = self.regional_title.get_label() if self.regional_title is not None else ""
+        save_button_label = self.save_button.get_label() if self.save_button is not None else ""
+        localized_surface_verified = (
+            window_title == self._t("app.window_title")
+            and language_section_label == self._t("section.language_region")
+            and save_button_label == self._t("button.save")
+        )
         payload = {
             "schema": EVIDENCE_SCHEMA,
             "passed": True,
@@ -452,6 +457,13 @@ class SwirSettings(Gtk.Application):
             "settingsSchema": saved["schema"],
             "ownerOnlySettingsFile": (self.store.path.stat().st_mode & 0o777) == 0o600,
             "language": saved["language"],
+            "i18nCatalogLanguage": self.translator.catalog_language,
+            "i18nCatalogFallback": self.translator.uses_fallback,
+            "textDirection": self.translator.text_direction,
+            "windowTitle": window_title,
+            "languageSectionLabel": language_section_label,
+            "saveButtonLabel": save_button_label,
+            "localizedSurfaceVerified": localized_surface_verified,
             "clock24h": saved["clock24h"],
             "defaultAppsPanel": True,
             "defaultAppCategoryCount": len(DEFAULT_APP_CATEGORIES),
