@@ -3,6 +3,8 @@ name: Desktop Update Feed Security
 on:
   pull_request:
     paths:
+      - 'scripts/promote-desktop-update-feed.mjs'
+      - 'scripts/test-desktop-update-feed.mjs'
       - 'scripts/test-desktop-update-feed-security.mjs'
       - '.github/workflows/desktop-update-feed-security.yml'
       - '.github/workflows/desktop-update-feed.yml'
@@ -11,6 +13,8 @@ on:
   push:
     branches: [main]
     paths:
+      - 'scripts/promote-desktop-update-feed.mjs'
+      - 'scripts/test-desktop-update-feed.mjs'
       - 'scripts/test-desktop-update-feed-security.mjs'
       - '.github/workflows/desktop-update-feed-security.yml'
       - '.github/workflows/desktop-update-feed.yml'
@@ -33,6 +37,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
+
+      - name: Verify promotion signature and artifact trust boundary
+        run: node scripts/test-desktop-update-feed.mjs
 
       - name: Run signed update-feed security regressions
         run: node scripts/test-desktop-update-feed-security.mjs

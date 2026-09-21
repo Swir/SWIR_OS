@@ -19,6 +19,8 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ github.event.release.tag_name }}
+      UPDATE_KEY_ID: ${{ vars.SWIR_DESKTOP_UPDATE_KEY_ID }}
+      UPDATE_PUBLIC_KEY_PEM_B64: ${{ vars.SWIR_DESKTOP_UPDATE_PUBLIC_KEY_PEM_B64 }}
     steps:
       - name: Checkout current main without persisted credentials
         uses: actions/checkout@v4
@@ -48,26 +50,44 @@ jobs:
           git fetch origin main
           git checkout main
           git merge --ff-only origin/main
-      - name: Download signed update envelope from published Release
+      - name: Materialize pinned public update trust root
         shell: bash
-        env:
-          CHANNEL: ${{ steps.release.outputs.channel }}
         run: |
           set -euo pipefail
+          if [[ -z "${UPDATE_KEY_ID:-}" || -z "${UPDATE_PUBLIC_KEY_PEM_B64:-}" ]]; then
+            echo "Desktop update feed promotion is blocked: configure SWIR_DESKTOP_UPDATE_KEY_ID and SWIR_DESKTOP_UPDATE_PUBLIC_KEY_PEM_B64 repository variables." >&2
+            exit 1
+          fi
           mkdir -p "$RUNNER_TEMP/swir-update-feed"
-          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "desktop-update-${CHANNEL}.json" --dir "$RUNNER_TEMP/swir-update-feed"
-          test -s "$RUNNER_TEMP/swir-update-feed/desktop-update-${CHANNEL}.json"
-      - name: Promote signed envelope without downgrade
+          printf '%s' "$UPDATE_PUBLIC_KEY_PEM_B64" | base64 --decode > "$RUNNER_TEMP/swir-update-feed/update-public-key.pem"
+          test -s "$RUNNER_TEMP/swir-update-feed/update-public-key.pem"
+          openssl pkey -pubin -in "$RUNNER_TEMP/swir-update-feed/update-public-key.pem" -noout
+      - name: Download signed envelope and exact release package
         shell: bash
         env:
           CHANNEL: ${{ steps.release.outputs.channel }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "desktop-update-${CHANNEL}.json" --dir "$RUNNER_TEMP/swir-update-feed"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "SWIR-Desktop-${VERSION}-${CHANNEL}.zip" --dir "$RUNNER_TEMP/swir-update-feed"
+          test -s "$RUNNER_TEMP/swir-update-feed/desktop-update-${CHANNEL}.json"
+          test -s "$RUNNER_TEMP/swir-update-feed/SWIR-Desktop-${VERSION}-${CHANNEL}.zip"
+      - name: Cryptographically verify and promote signed envelope without downgrade
+        shell: bash
+        env:
+          CHANNEL: ${{ steps.release.outputs.channel }}
+          VERSION: ${{ steps.release.outputs.version }}
         run: |
           set -euo pipefail
           node scripts/promote-desktop-update-feed.mjs \
             --incoming "$RUNNER_TEMP/swir-update-feed/desktop-update-${CHANNEL}.json" \
             --output "updates/${CHANNEL}/desktop-update-${CHANNEL}.json" \
             --channel "$CHANNEL" \
-            --tag "$RELEASE_TAG"
+            --tag "$RELEASE_TAG" \
+            --public-key "$RUNNER_TEMP/swir-update-feed/update-public-key.pem" \
+            --key-id "$UPDATE_KEY_ID" \
+            --package "$RUNNER_TEMP/swir-update-feed/SWIR-Desktop-${VERSION}-${CHANNEL}.zip"
       - name: Commit feed only when it advanced
         shell: bash
         env:
