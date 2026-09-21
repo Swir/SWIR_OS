@@ -157,7 +157,7 @@ jobs:
           $store = Join-Path '${{ runner.temp }}' 'swir-store-artifacts'
           $packagePrivateKey = Join-Path '${{ runner.temp }}' 'swir-package-private.b64'
           $packageTrustRoots = Join-Path $store 'package-trust-roots.json'
-          $packageSigner = Join-Path (Get-Location) 'bin\Release\net8.0\SWIR.Desktop.PackageSignatureTool.dll'
+          $packageSigner = Join-Path (Get-Location) 'bin\Release\net8.0-windows\SWIR.Desktop.PackageSignatureTool.dll'
           [System.IO.File]::WriteAllText($packagePrivateKey, $env:SWIR_PACKAGE_SIGNING_PRIVATE_KEY_BASE64)
           & (Join-Path (Get-Location) 'build-store-packages.ps1') `
             -OutputDir $store `
@@ -272,7 +272,7 @@ jobs:
           $map = Get-Content (Join-Path $publish 'catalog-artifacts.json') -Raw | ConvertFrom-Json
           $signedCatalog = Get-Content (Join-Path $publish 'catalog.json') -Raw | ConvertFrom-Json
           $packageTrustRoots = Join-Path $publish 'package-trust-roots.json'
-          $packageSigner = Join-Path (Get-Location) 'bin\Release\net8.0\SWIR.Desktop.PackageSignatureTool.dll'
+          $packageSigner = Join-Path (Get-Location) 'bin\Release\net8.0-windows\SWIR.Desktop.PackageSignatureTool.dll'
           foreach ($artifact in @($map.artifacts)) {
             $record = @($signedCatalog | Where-Object { $_.packageId -eq $artifact.packageId -and $_.version -eq $artifact.version })
             if ($record.Count -ne 1) { throw "Signed catalog identity missing/duplicated: $($artifact.packageId)@$($artifact.version)" }
@@ -348,7 +348,7 @@ jobs:
             node scripts/verify-catalog-root-pin.mjs $trustPath $env:SWIR_CATALOG_EXPECTED_ROOT_SHA256 $env:SWIR_CATALOG_KEY_ID
             if ($LASTEXITCODE -ne 0) { throw "Final bundle catalog root pin verification failed with exit code $LASTEXITCODE" }
           }
-          $packageSigner = Join-Path '${{ github.workspace }}' 'desktop\windows\bin\Release\net8.0\SWIR.Desktop.PackageSignatureTool.dll'
+          $packageSigner = Join-Path '${{ github.workspace }}' 'desktop\windows\bin\Release\net8.0-windows\SWIR.Desktop.PackageSignatureTool.dll'
           $packageTrustRoots = Join-Path $bundle 'package-trust-roots.json'
           foreach ($package in @(Get-ChildItem -LiteralPath $bundle -Filter '*.swirapp' -File)) {
             dotnet $packageSigner verify $package.FullName $packageTrustRoots
@@ -390,7 +390,7 @@ jobs:
             if (-not (Test-Path $path -PathType Leaf) -or (Get-Item $path).Length -le 0) { throw "Missing/empty release artifact: $file" }
           }
           $map = Get-Content (Join-Path $bundle 'catalog-artifacts.json') -Raw | ConvertFrom-Json
-          $packageSigner = Join-Path (Get-Location) 'bin\Release\net8.0\SWIR.Desktop.PackageSignatureTool.dll'
+          $packageSigner = Join-Path (Get-Location) 'bin\Release\net8.0-windows\SWIR.Desktop.PackageSignatureTool.dll'
           $packageTrustRoots = Join-Path $bundle 'package-trust-roots.json'
           foreach ($artifact in @($map.artifacts)) {
             $fileName = [System.IO.Path]::GetFileName([string]$artifact.desktop.url)
