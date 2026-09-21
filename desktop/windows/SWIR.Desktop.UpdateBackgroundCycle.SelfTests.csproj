@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
-    <AssemblyName>SWIR.Desktop.UpdateCheckHost.SelfTests</AssemblyName>
+    <AssemblyName>SWIR.Desktop.UpdateBackgroundCycle.SelfTests</AssemblyName>
     <RootNamespace>Swir.Desktop.Host</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
@@ -25,6 +25,6 @@
     <Compile Include="DesktopInstalledBuildIdentity.cs" />
     <Compile Include="DesktopUpdateUserPolicy.cs" />
     <Compile Include="DesktopUpdatePreparationHostService.cs" />
-    <Compile Include="DesktopUpdateCheckHostServiceSelfTests.cs" />
+    <Compile Include="DesktopUpdateBackgroundCycleSelfTests.cs" />
   </ItemGroup>
 </Project>

@@ -5,12 +5,14 @@ const root = path.resolve(import.meta.dirname, '..', '..');
 const programPath = path.join(import.meta.dirname, 'Program.cs');
 const permissionsPath = path.join(import.meta.dirname, 'PermissionBroker.cs');
 const preparationHostPath = path.join(import.meta.dirname, 'DesktopUpdatePreparationHostService.cs');
+const userPolicyPath = path.join(import.meta.dirname, 'DesktopUpdateUserPolicy.cs');
 const updateCenterPath = path.join(root, 'swir-updates.html');
 const serviceWorkerPath = path.join(root, 'sw.js');
 
 const program = fs.readFileSync(programPath, 'utf8');
 const permissions = fs.readFileSync(permissionsPath, 'utf8');
 const preparationHost = fs.readFileSync(preparationHostPath, 'utf8');
+const userPolicy = fs.readFileSync(userPolicyPath, 'utf8');
 const updateCenter = fs.readFileSync(updateCenterPath, 'utf8');
 const serviceWorker = fs.readFileSync(serviceWorkerPath, 'utf8');
 
@@ -43,10 +45,28 @@ requireText(program, "new Set(['check','preparationStatus','prepare','cancelPrep
 requireText(program, "msg.name === 'updates.preparationCompleted'", 'Preparation completion must be forwarded as a native host event.');
 requireText(program, "msg.name === 'updates.preparationFailed'", 'Preparation failure must be forwarded as a native host event.');
 
-requireText(preparationHost, 'swir.desktop-update-preparation-host/0.4', 'Preparation host schema must describe the current build-identity-aware integrated bridge contract.');
+requireText(preparationHost, 'swir.desktop-update-preparation-host/0.5', 'Preparation host schema must describe the user-policy-aware build-identity contract.');
+requireText(preparationHost, 'swir.desktop-update-background-cycle/0.1', 'Preparation host must expose a versioned scheduler-safe background-cycle contract.');
 requireText(preparationHost, 'DesktopInstalledBuildIdentity.ResolveCurrentVersion', 'Preparation host must derive the installed release version from packaged build identity instead of a stale hard-coded updater version.');
+requireText(preparationHost, 'DesktopUpdateUserPolicyStore', 'Production preparation host must enforce persisted Desktop update user policy.');
+requireText(preparationHost, 'CheckInBackgroundAsync', 'Production host must distinguish background checks from explicit user checks.');
+requireText(preparationHost, 'RunBackgroundCycleAsync', 'Production host must provide one policy-aware signed background cycle for the scheduler.');
+requireText(preparationHost, 'background-check-disabled-by-user-policy', 'Manual mode must suppress scheduler network work before discovery.');
+requireText(preparationHost, 'policy-changed-during-signed-check', 'Background cycle must re-read policy after signed discovery before automatic preparation.');
+requireText(preparationHost, 'QueueAutomaticPrepare', 'Production host must distinguish automatic preparation from explicit user preparation.');
+requireText(preparationHost, 'automaticRestart = false', 'Background cycle must never silently restart after automatic preparation.');
+requireText(preparationHost, 'UPDATE_USER_POLICY_BLOCKED', 'Disallowed automatic/background update work must fail closed at the host boundary.');
+requireText(preparationHost, 'RevokeAutomaticPreparationAfterPolicyDowngrade', 'Policy downgrade must actively revoke queued/running automatic preparation.');
+requireText(preparationHost, '_automaticPreparationQueuedOrRunning', 'Host must track whether preparation was initiated automatically before applying downgrade cancellation.');
+requireText(preparationHost, 'automatic preparation execution', 'Queued automatic work must re-check current policy immediately before execution.');
 requireText(preparationHost, 'ResetTerminalState(bool trustedShell)', 'Host service reset must require a trusted-shell assertion.');
 requireText(preparationHost, 'UPDATE_BRIDGE_TRUST_REQUIRED', 'Preparation host must fail closed for untrusted reset callers.');
+
+requireText(userPolicy, 'DesktopUpdateUserMode.Manual', 'Desktop user policy must retain Manual mode.');
+requireText(userPolicy, 'DesktopUpdateUserMode.NotifyOnly', 'Desktop user policy must retain Notify only mode.');
+requireText(userPolicy, 'DesktopUpdateUserMode.Automatic', 'Desktop user policy must retain Automatic mode.');
+requireText(userPolicy, 'AutomaticRestart: false', 'Automatic policy must never silently restart the Desktop host.');
+requireText(userPolicy, 'return DesktopUpdateUserMode.NotifyOnly', 'Malformed/unreadable persisted policy must fail safe to Notify only.');
 
 requireText(permissions, '"updates.inspect"', 'Trusted shell must have an explicit updates.inspect permission.');
 requireText(permissions, '"updates.apply"', 'Trusted shell must have an explicit updates.apply permission.');
@@ -96,4 +116,4 @@ for (const [index, script] of scripts.entries()) {
   }
 }
 
-console.log('Update Center Desktop workflow validated (signed check + guarded preparation + cancel/reset + deferred mutation + guarded restart + packaged build identity).');
+console.log('Update Center Desktop workflow validated (signed check + policy-aware background cycle + guarded preparation + cancel/reset + deferred mutation + guarded restart + packaged build identity).');

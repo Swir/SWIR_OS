@@ -2,11 +2,15 @@ namespace Swir.Desktop.Host;
 
 /// <summary>
 /// Production composition root for the Desktop update preparation pipeline.
+/// User policy controls when checks/preparation may run, but never weakens the
+/// signed-release, source, integrity, transaction or restart security gates.
 /// </summary>
 internal sealed class DesktopUpdatePreparationHostService
 {
-    public const string HostServiceSchema = "swir.desktop-update-preparation-host/0.4";
+    public const string HostServiceSchema = "swir.desktop-update-preparation-host/0.5";
     public const string CheckSchema = "swir.desktop-update-check/0.1";
+    public const string UserPolicySchema = "swir.desktop-update-user-policy-state/0.1";
+    public const string BackgroundCycleSchema = "swir.desktop-update-background-cycle/0.1";
 
     private readonly string _policyPath;
     private readonly string _currentInstallRoot;
@@ -15,7 +19,10 @@ internal sealed class DesktopUpdatePreparationHostService
     private readonly string _transactionsRoot;
     private readonly Version _currentDesktopVersion;
     private readonly DesktopUpdatePreparationBridgeCoordinator _bridge;
+    private readonly DesktopUpdateUserPolicyStore _userPolicyStore;
     private readonly Func<UpdateBroker, Uri, IEnumerable<string>, UpdateManifestClient> _manifestClientFactory;
+    private readonly object _preparationPolicyGate = new();
+    private bool _automaticPreparationQueuedOrRunning;
 
     public DesktopUpdatePreparationHostService(
         string? policyPath = null,
@@ -24,7 +31,9 @@ internal sealed class DesktopUpdatePreparationHostService
         string? deploymentRoot = null,
         string? transactionsRoot = null,
         Func<UpdateBroker, Uri, IEnumerable<string>, UpdateManifestClient>? manifestClientFactory = null,
-        Version? currentDesktopVersion = null)
+        Version? currentDesktopVersion = null,
+        string? userPolicyPath = null,
+        Func<CancellationToken, Task<object?>>? preparationExecutor = null)
     {
         _policyPath = Path.GetFullPath(policyPath ?? Path.Combine(AppContext.BaseDirectory, "desktop-update-policy.json"));
         _deploymentRoot = Path.GetFullPath(deploymentRoot ?? DesktopUpdatePaths.DeploymentRoot);
@@ -35,7 +44,8 @@ internal sealed class DesktopUpdatePreparationHostService
         if (_currentDesktopVersion <= new Version(0, 0, 0))
             throw new UpdateSecurityException("UPDATE_CURRENT_VERSION_INVALID", "Desktop current version must be positive.");
         _manifestClientFactory = manifestClientFactory ?? ((broker, uri, hosts) => new UpdateManifestClient(broker, uri, hosts));
-        _bridge = new DesktopUpdatePreparationBridgeCoordinator(IsPreparationConfigured, PrepareCoreAsync);
+        _userPolicyStore = new DesktopUpdateUserPolicyStore(userPolicyPath);
+        _bridge = new DesktopUpdatePreparationBridgeCoordinator(IsPreparationConfigured, preparationExecutor ?? PrepareCoreAsync);
     }
 
     public object Describe()
@@ -47,19 +57,53 @@ internal sealed class DesktopUpdatePreparationHostService
             return new { schema = HostServiceSchema, configured = false, feedConfigured = false, failClosed = true,
                 currentVersion = _currentDesktopVersion.ToString(),
                 policy = new { enabled = false, invalid = true, code = ex.Code, message = ex.Message },
+                userPolicy = DescribeUserPolicyCore(),
                 environment = DescribeEnvironment(), preparation = _bridge.Describe() };
         }
 
         return new { schema = HostServiceSchema, configured = IsPreparationConfigured(policy),
             feedConfigured = IsReleaseFeedConfigured(policy), failClosed = true,
             currentVersion = _currentDesktopVersion.ToString(), policy = policy.Describe(),
+            userPolicy = DescribeUserPolicyCore(),
             environment = DescribeEnvironment(), preparation = _bridge.Describe() };
     }
 
-    public async Task<object> CheckAsync(bool trustedShell, CancellationToken cancellationToken = default)
+    public object DescribeUserPolicy(bool trustedShell)
     {
-        if (!trustedShell)
-            throw new DesktopUpdateBridgeCommandException("UPDATE_BRIDGE_TRUST_REQUIRED", "Only the trusted SWIR system shell may check Desktop release feeds.");
+        RequireTrustedShell(trustedShell, "inspect Desktop update user policy");
+        return DescribeUserPolicyCore();
+    }
+
+    public object SetUserPolicy(bool trustedShell, string persistedMode)
+    {
+        RequireTrustedShell(trustedShell, "change Desktop update user policy");
+        var mode = persistedMode?.Trim().ToLowerInvariant() switch
+        {
+            "manual" => DesktopUpdateUserMode.Manual,
+            "notify" or "notifyonly" or "notify-only" => DesktopUpdateUserMode.NotifyOnly,
+            "automatic" => DesktopUpdateUserMode.Automatic,
+            _ => throw new DesktopUpdateBridgeCommandException("UPDATE_USER_POLICY_INVALID",
+                "Desktop update policy must be manual, notify or automatic.")
+        };
+        _userPolicyStore.Save(mode);
+        if (mode != DesktopUpdateUserMode.Automatic)
+            RevokeAutomaticPreparationAfterPolicyDowngrade();
+        return DescribeUserPolicyCore();
+    }
+
+    public Task<object> CheckAsync(bool trustedShell, CancellationToken cancellationToken = default)
+        => CheckAsync(trustedShell, userInitiated: true, cancellationToken);
+
+    public Task<object> CheckInBackgroundAsync(bool trustedShell, CancellationToken cancellationToken = default)
+        => CheckAsync(trustedShell, userInitiated: false, cancellationToken);
+
+    public async Task<object> CheckAsync(bool trustedShell, bool userInitiated, CancellationToken cancellationToken = default)
+    {
+        RequireTrustedShell(trustedShell, "check Desktop release feeds");
+        var decision = DesktopUpdateUserPolicyStore.Evaluate(_userPolicyStore.Load());
+        if (userInitiated ? !decision.UserInitiatedCheck : !decision.BackgroundCheck)
+            throw UserPolicyBlocked(decision.Mode, userInitiated ? "user-initiated check" : "background check");
+
         var policy = DesktopUpdateReleasePolicy.Load(_policyPath);
         if (!IsReleaseFeedConfigured(policy))
             throw new DesktopUpdateBridgeCommandException("UPDATE_RELEASE_FEED_NOT_CONFIGURED", "Desktop update check requires an enabled signed release policy.");
@@ -71,28 +115,228 @@ internal sealed class DesktopUpdatePreparationHostService
             var update = await manifestClient.FetchAndVerifyAsync(_currentDesktopVersion, policy.Channel, cancellationToken).ConfigureAwait(false);
             return new { schema = CheckSchema, updateAvailable = true, currentVersion = _currentDesktopVersion.ToString(),
                 targetVersion = update.Version.ToString(), channel = update.Channel, publishedAt = update.PublishedAt,
-                package = new { host = update.PackageUri.Host, size = update.Size, sha256 = update.Sha256, keyId = update.KeyId }, verified = true };
+                package = new { host = update.PackageUri.Host, size = update.Size, sha256 = update.Sha256, keyId = update.KeyId },
+                verified = true, userPolicy = DescribeUserPolicyCore() };
         }
         catch (UpdateSecurityException ex) when (ex.Code == "UPDATE_NOT_NEWER")
         {
             return new { schema = CheckSchema, updateAvailable = false, currentVersion = _currentDesktopVersion.ToString(),
-                targetVersion = _currentDesktopVersion.ToString(), channel = policy.Channel, verified = true, status = "current" };
+                targetVersion = _currentDesktopVersion.ToString(), channel = policy.Channel, verified = true, status = "current",
+                userPolicy = DescribeUserPolicyCore() };
         }
     }
 
-    public object QueuePrepare(bool trustedShell) => _bridge.QueuePrepare(trustedShell);
-    public object Cancel(bool trustedShell) => _bridge.CancelActive(trustedShell);
-    public void CancelQueuedAfterResponseFailure() => _bridge.CancelQueuedAfterResponseFailure();
+    /// <summary>
+    /// Runs one scheduler-safe background cycle. Manual mode performs no network I/O,
+    /// Notify only verifies the signed feed without staging, and Automatic verifies,
+    /// queues and executes preparation. The user policy is re-read after feed verification
+    /// and again by the preparation bridge, so a downgrade cannot race into background work.
+    /// Automatic restart is intentionally never performed here.
+    /// </summary>
+    public async Task<object> RunBackgroundCycleAsync(bool trustedShell, CancellationToken cancellationToken = default)
+    {
+        RequireTrustedShell(trustedShell, "run the Desktop background update cycle");
+
+        var before = DesktopUpdateUserPolicyStore.Evaluate(_userPolicyStore.Load());
+        if (!before.BackgroundCheck)
+        {
+            return new
+            {
+                schema = BackgroundCycleSchema,
+                mode = DesktopUpdateUserPolicyStore.ToPersistedMode(before.Mode),
+                action = "suppressed",
+                updateAvailable = false,
+                automaticPreparation = false,
+                automaticRestart = false,
+                verified = false,
+                reason = "background-check-disabled-by-user-policy"
+            };
+        }
+
+        var check = await CheckAsync(trustedShell, userInitiated: false, cancellationToken).ConfigureAwait(false);
+        var checkJson = System.Text.Json.JsonSerializer.SerializeToElement(check);
+        var updateAvailable = checkJson.TryGetProperty("updateAvailable", out var updateAvailableElement)
+            && updateAvailableElement.ValueKind is System.Text.Json.JsonValueKind.True;
+
+        var afterCheck = DesktopUpdateUserPolicyStore.Evaluate(_userPolicyStore.Load());
+        if (!afterCheck.BackgroundCheck)
+        {
+            return new
+            {
+                schema = BackgroundCycleSchema,
+                mode = DesktopUpdateUserPolicyStore.ToPersistedMode(afterCheck.Mode),
+                action = "suppressed-after-check",
+                updateAvailable,
+                automaticPreparation = false,
+                automaticRestart = false,
+                verified = true,
+                check,
+                reason = "policy-changed-during-signed-check"
+            };
+        }
+
+        if (!updateAvailable)
+        {
+            return new
+            {
+                schema = BackgroundCycleSchema,
+                mode = DesktopUpdateUserPolicyStore.ToPersistedMode(afterCheck.Mode),
+                action = "current",
+                updateAvailable = false,
+                automaticPreparation = false,
+                automaticRestart = false,
+                verified = true,
+                check
+            };
+        }
+
+        if (!afterCheck.AutomaticPrepare)
+        {
+            return new
+            {
+                schema = BackgroundCycleSchema,
+                mode = DesktopUpdateUserPolicyStore.ToPersistedMode(afterCheck.Mode),
+                action = "notify",
+                updateAvailable = true,
+                automaticPreparation = false,
+                automaticRestart = false,
+                verified = true,
+                check
+            };
+        }
+
+        var queued = QueueAutomaticPrepare(trustedShell);
+        var prepared = await ExecuteQueuedAsync(cancellationToken).ConfigureAwait(false);
+        return new
+        {
+            schema = BackgroundCycleSchema,
+            mode = DesktopUpdateUserPolicyStore.ToPersistedMode(afterCheck.Mode),
+            action = "prepared",
+            updateAvailable = true,
+            automaticPreparation = true,
+            automaticRestart = false,
+            verified = true,
+            check,
+            queued,
+            prepared
+        };
+    }
+
+    public object QueuePrepare(bool trustedShell) => QueuePrepare(trustedShell, userInitiated: true);
+    public object QueueAutomaticPrepare(bool trustedShell) => QueuePrepare(trustedShell, userInitiated: false);
+
+    public object QueuePrepare(bool trustedShell, bool userInitiated)
+    {
+        RequireTrustedShell(trustedShell, "prepare a Desktop update");
+        var decision = DesktopUpdateUserPolicyStore.Evaluate(_userPolicyStore.Load());
+        if (userInitiated ? !decision.UserInitiatedPrepare : !decision.AutomaticPrepare)
+            throw UserPolicyBlocked(decision.Mode, userInitiated ? "user-initiated preparation" : "automatic preparation");
+
+        lock (_preparationPolicyGate)
+        {
+            var queued = _bridge.QueuePrepare(trustedShell);
+            _automaticPreparationQueuedOrRunning = !userInitiated;
+            return queued;
+        }
+    }
+
+    public object Cancel(bool trustedShell)
+    {
+        lock (_preparationPolicyGate)
+        {
+            var result = _bridge.CancelActive(trustedShell);
+            _automaticPreparationQueuedOrRunning = false;
+            return result;
+        }
+    }
+
+    public void CancelQueuedAfterResponseFailure()
+    {
+        lock (_preparationPolicyGate)
+        {
+            _bridge.CancelQueuedAfterResponseFailure();
+            _automaticPreparationQueuedOrRunning = false;
+        }
+    }
 
     public object ResetTerminalState(bool trustedShell)
     {
-        if (!trustedShell)
-            throw new DesktopUpdateBridgeCommandException("UPDATE_BRIDGE_TRUST_REQUIRED", "Only the trusted SWIR system shell may reset Desktop update preparation state.");
-        _bridge.ResetTerminalState();
+        RequireTrustedShell(trustedShell, "reset Desktop update preparation state");
+        lock (_preparationPolicyGate)
+        {
+            _bridge.ResetTerminalState();
+            _automaticPreparationQueuedOrRunning = false;
+        }
         return Describe();
     }
 
-    public Task<object?> ExecuteQueuedAsync(CancellationToken cancellationToken = default) => _bridge.ExecuteQueuedAsync(cancellationToken);
+    public async Task<object?> ExecuteQueuedAsync(CancellationToken cancellationToken = default)
+    {
+        lock (_preparationPolicyGate)
+        {
+            if (_automaticPreparationQueuedOrRunning)
+            {
+                var decision = DesktopUpdateUserPolicyStore.Evaluate(_userPolicyStore.Load());
+                if (!decision.AutomaticPrepare)
+                {
+                    _bridge.CancelQueuedAfterResponseFailure();
+                    _automaticPreparationQueuedOrRunning = false;
+                    throw UserPolicyBlocked(decision.Mode, "automatic preparation execution");
+                }
+            }
+        }
+
+        try
+        {
+            return await _bridge.ExecuteQueuedAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            lock (_preparationPolicyGate)
+                _automaticPreparationQueuedOrRunning = false;
+        }
+    }
+
+    private void RevokeAutomaticPreparationAfterPolicyDowngrade()
+    {
+        lock (_preparationPolicyGate)
+        {
+            if (!_automaticPreparationQueuedOrRunning)
+                return;
+
+            try
+            {
+                _ = _bridge.CancelActive(trustedShell: true);
+            }
+            catch (DesktopUpdateBridgeCommandException ex) when (ex.Code == "UPDATE_PREPARATION_NOT_CANCELLABLE")
+            {
+                // The operation already reached a terminal/idle state. The persisted
+                // user policy still takes effect for all subsequent background work.
+            }
+            finally
+            {
+                _automaticPreparationQueuedOrRunning = false;
+            }
+        }
+    }
+
+    private object DescribeUserPolicyCore()
+    {
+        var mode = _userPolicyStore.Load();
+        var decision = DesktopUpdateUserPolicyStore.Evaluate(mode);
+        return new
+        {
+            schema = UserPolicySchema,
+            mode = DesktopUpdateUserPolicyStore.ToPersistedMode(mode),
+            backgroundCheck = decision.BackgroundCheck,
+            automaticPrepare = decision.AutomaticPrepare,
+            automaticRestart = decision.AutomaticRestart,
+            userInitiatedCheck = decision.UserInitiatedCheck,
+            userInitiatedPrepare = decision.UserInitiatedPrepare,
+            userInitiatedRestart = decision.UserInitiatedRestart,
+            failClosedTrust = true
+        };
+    }
 
     private bool IsPreparationConfigured()
     {
@@ -132,6 +376,16 @@ internal sealed class DesktopUpdatePreparationHostService
     private object DescribeEnvironment() => new { currentInstallPresent = Directory.Exists(_currentInstallRoot),
         updaterWorkerPresent = File.Exists(_updaterWorkerPath), canonicalCurrentSlot = IsCanonicalCurrentSlot(_currentInstallRoot, _deploymentRoot),
         deploymentRoot = _deploymentRoot, transactionsRoot = _transactionsRoot };
+
+    private static void RequireTrustedShell(bool trustedShell, string operation)
+    {
+        if (!trustedShell)
+            throw new DesktopUpdateBridgeCommandException("UPDATE_BRIDGE_TRUST_REQUIRED", $"Only the trusted SWIR system shell may {operation}.");
+    }
+
+    private static DesktopUpdateBridgeCommandException UserPolicyBlocked(DesktopUpdateUserMode mode, string operation)
+        => new("UPDATE_USER_POLICY_BLOCKED",
+            $"Desktop update user policy '{DesktopUpdateUserPolicyStore.ToPersistedMode(mode)}' blocks {operation}.");
 
     private static bool IsCanonicalCurrentSlot(string currentInstallRoot, string deploymentRoot)
     {
