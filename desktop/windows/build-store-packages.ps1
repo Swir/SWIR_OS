@@ -2,7 +2,15 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$OutputDir,
 
-    [string]$SourceRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+    [string]$SourceRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
+
+    [string]$PackageSigningKeyId = '',
+
+    [string]$PackageSigningPrivateKeyFile = '',
+
+    [string]$PackageTrustRootsOutput = '',
+
+    [string]$PackageSignerDll = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -14,12 +22,55 @@ if (-not (Test-Path $source -PathType Container)) { throw "SWIR source root does
 if (-not (Test-Path (Join-Path $source 'swir-packages.js') -PathType Leaf)) { throw 'swir-packages.js is missing.' }
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) { throw 'Node.js is required to export the reviewed package catalog.' }
 
+# Refuse stale package output before any generated trust material is written into
+# the output tree. Controlled signed builds are allowed to place their public
+# package trust-root file inside the otherwise-empty output directory.
 if (Test-Path $output -PathType Container) {
     $existing = @(Get-ChildItem -LiteralPath $output -Force)
     if ($existing.Count -gt 0) { throw "Desktop Store package output must be empty: $output" }
 } else {
     New-Item -ItemType Directory -Path $output -Force | Out-Null
 }
+
+$signingRequested = (-not [string]::IsNullOrWhiteSpace($PackageSigningKeyId)) -or
+                    (-not [string]::IsNullOrWhiteSpace($PackageSigningPrivateKeyFile)) -or
+                    (-not [string]::IsNullOrWhiteSpace($PackageTrustRootsOutput))
+$packageSigner = $null
+$packagePrivateKey = $null
+$packageTrustRoots = $null
+if ($signingRequested) {
+    if ([string]::IsNullOrWhiteSpace($PackageSigningKeyId) -or
+        [string]::IsNullOrWhiteSpace($PackageSigningPrivateKeyFile) -or
+        [string]::IsNullOrWhiteSpace($PackageTrustRootsOutput)) {
+        throw 'Package signing requires PackageSigningKeyId, PackageSigningPrivateKeyFile and PackageTrustRootsOutput together.'
+    }
+    if ($PackageSigningKeyId -notmatch '^[A-Za-z0-9._-]{1,128}$') { throw 'PackageSigningKeyId is invalid.' }
+    if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) { throw '.NET is required to sign and verify Desktop Store packages.' }
+
+    $packagePrivateKey = [System.IO.Path]::GetFullPath($PackageSigningPrivateKeyFile)
+    if (-not (Test-Path $packagePrivateKey -PathType Leaf)) { throw "Package signing private-key file is missing: $packagePrivateKey" }
+    $packageTrustRoots = [System.IO.Path]::GetFullPath($PackageTrustRootsOutput)
+    $packageSigner = if ([string]::IsNullOrWhiteSpace($PackageSignerDll)) {
+        Join-Path $PSScriptRoot 'bin\Release\net8.0-windows\SWIR.Desktop.PackageSignatureTool.dll'
+    } else {
+        [System.IO.Path]::GetFullPath($PackageSignerDll)
+    }
+    if (-not (Test-Path $packageSigner -PathType Leaf)) { throw "Package signature utility is missing: $packageSigner" }
+
+    $trustDirectory = Split-Path $packageTrustRoots -Parent
+    if (-not [string]::IsNullOrWhiteSpace($trustDirectory)) { New-Item -ItemType Directory -Path $trustDirectory -Force | Out-Null }
+    & dotnet $packageSigner trust-root $PackageSigningKeyId $packagePrivateKey $packageTrustRoots
+    if ($LASTEXITCODE -ne 0) { throw "Package trust-root generation failed with exit code $LASTEXITCODE" }
+
+    $trust = Get-Content -LiteralPath $packageTrustRoots -Raw | ConvertFrom-Json
+    if ($trust.schema -ne 'swir.package-trust-roots/1.0' -or
+        $trust.requireSignedPackages -ne $true -or
+        @($trust.roots).Count -ne 1 -or
+        [string]$trust.roots[0].keyId -ne $PackageSigningKeyId) {
+        throw 'Generated package trust-root policy is not fail-closed or does not match PackageSigningKeyId.'
+    }
+}
+
 $packagesDir = Join-Path $output 'packages'
 New-Item -ItemType Directory -Path $packagesDir -Force | Out-Null
 
@@ -68,9 +119,9 @@ function Copy-PackageAsset([string]$RelativePath, [string]$StageRoot, [System.Co
 
 foreach ($pkg in ($catalog | Sort-Object packageId, version)) {
     if ($pkg.desktop -ne $true) { continue }
-    $packageId = [string]$pkg.packageId
-    $version = [string]$pkg.version
-    $entryRaw = [string]$pkg.entry
+    [string]$packageId = $pkg.packageId
+    [string]$version = $pkg.version
+    [string]$entryRaw = $pkg.entry
     if ($pkg.schema -ne 'swir.app/1.0') { throw "Unsupported package schema for ${packageId}: $($pkg.schema)" }
     if ($packageId -notmatch '^swir\.[a-z0-9][a-z0-9._-]{1,126}$') { throw "Invalid packageId: $packageId" }
     if ($version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$') { throw "Invalid package version for ${packageId}: $version" }
@@ -110,6 +161,13 @@ foreach ($pkg in ($catalog | Sort-Object packageId, version)) {
         Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zipPath -CompressionLevel Optimal -Force
         Move-Item -LiteralPath $zipPath -Destination $artifactPath -Force
 
+        if ($signingRequested) {
+            & dotnet $packageSigner sign $artifactPath $PackageSigningKeyId $packagePrivateKey
+            if ($LASTEXITCODE -ne 0) { throw "Package signing failed for $identity with exit code $LASTEXITCODE" }
+            & dotnet $packageSigner verify $artifactPath $packageTrustRoots
+            if ($LASTEXITCODE -ne 0) { throw "Package signature verification failed for $identity with exit code $LASTEXITCODE" }
+        }
+
         $archive = [System.IO.Compression.ZipFile]::OpenRead($artifactPath)
         try {
             $rootManifests = @($archive.Entries | Where-Object { $_.FullName.Replace('\\','/') -ceq 'swir-package.json' })
@@ -119,8 +177,14 @@ foreach ($pkg in ($catalog | Sort-Object packageId, version)) {
             if ($builtManifest.packageId -ne $packageId -or $builtManifest.version -ne $version) { throw "Built package identity mismatch: $identity" }
             $entryInZip = $archive.GetEntry($entry.Replace('\\','/'))
             if ($null -eq $entryInZip) { throw "Built package is missing entry file $entry for $identity" }
+            if ($signingRequested) {
+                $signatureEntries = @($archive.Entries | Where-Object { $_.FullName.Replace('\\','/') -ceq 'swir-package-signature.json' })
+                if ($signatureEntries.Count -ne 1) { throw "Signed package must contain exactly one swir-package-signature.json: $identity" }
+            }
         } finally { $archive.Dispose() }
 
+        # The signed bytes are authoritative. Catalog hashes are calculated only after
+        # the embedded signature has been written and independently verified.
         $sha = (Get-FileHash -LiteralPath $artifactPath -Algorithm SHA256).Hash.ToLowerInvariant()
         $artifactRecords.Add([ordered]@{
             packageId = $packageId
@@ -150,6 +214,8 @@ $map = [ordered]@{
 $mapPath = Join-Path $output 'catalog-artifacts.json'
 [System.IO.File]::WriteAllText($mapPath, ($map | ConvertTo-Json -Depth 10), [System.Text.UTF8Encoding]::new($false))
 
-Write-Host "Built $($artifactRecords.Count) reviewed Desktop Store package artifacts."
+$mode = if ($signingRequested) { "signed:$PackageSigningKeyId" } else { 'unsigned-compatible' }
+Write-Host "Built $($artifactRecords.Count) reviewed Desktop Store package artifacts ($mode)."
 Write-Host "Artifact map: $mapPath"
 Write-Host "Package directory: $packagesDir"
+if ($signingRequested) { Write-Host "Package trust roots: $packageTrustRoots" }

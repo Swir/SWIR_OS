@@ -5,17 +5,30 @@ const read = (path) => fs.readFileSync(path, 'utf8');
 
 const workflow = read('.github/workflows/desktop-release.yml');
 const roots = JSON.parse(read('desktop/windows/catalog-trust-roots.json'));
+const packageRoots = JSON.parse(read('desktop/windows/package-trust-roots.json'));
 const lifecycle = read('desktop/windows/DesktopSignedPackageLifecycleSelfTests.cs');
 const cutover = read('.github/workflows/desktop-catalog-cutover-contract.yml');
 const runtimeStage = read('desktop/windows/stage-desktop-runtime.ps1');
 const packageBridge = read('desktop/windows/DesktopPackageBridge.cs');
 const packageInstaller = read('desktop/windows/DesktopAppPackageInstaller.cs');
+const packageSignatureVerifier = read('desktop/windows/DesktopPackageSignatureVerifier.cs');
+const packageSignatureTool = read('desktop/windows/DesktopPackageSignatureTool.cs');
+const storeBuilder = read('desktop/windows/build-store-packages.ps1');
 
 const requiredWorkflowFragments = [
   'SWIR_CATALOG_SIGNING_PRIVATE_KEY_PEM: ${{ secrets.SWIR_CATALOG_SIGNING_PRIVATE_KEY_PEM }}',
   'SWIR_CATALOG_EXPECTED_ROOT_SHA256: ${{ secrets.SWIR_CATALOG_SIGNING_PUBLIC_KEY_SHA256 }}',
   'SWIR_CATALOG_SEQUENCE: ${{ inputs.catalog_sequence }}',
   'SWIR_CATALOG_KEY_ID: ${{ inputs.catalog_key_id }}',
+  'SWIR_PACKAGE_KEY_ID: ${{ inputs.package_key_id }}',
+  'SWIR_PACKAGE_SIGNING_PRIVATE_KEY_BASE64: ${{ secrets.SWIR_PACKAGE_SIGNING_PRIVATE_KEY_BASE64 }}',
+  'Build signed reviewed Desktop Store swirapp artifacts',
+  '-PackageSigningKeyId $env:SWIR_PACKAGE_KEY_ID',
+  '-PackageSigningPrivateKeyFile $packagePrivateKey',
+  '-PackageTrustRootsOutput $packageTrustRoots',
+  'package-trust-roots.json',
+  'requireSignedPackages -ne $true',
+  'dotnet $packageSigner verify',
   'build-signed-catalog-release.mjs',
   'verify-catalog-root-pin.mjs',
   'requireSignedCatalog -ne $true',
@@ -26,14 +39,35 @@ for (const fragment of requiredWorkflowFragments) {
   if (!workflow.includes(fragment)) fail(`Desktop release trust-chain wiring missing: ${fragment}`);
 }
 
-const privateKeyAssignments = workflow
+const packageSignerTfmPath = 'bin\\Release\\net8.0-windows\\SWIR.Desktop.PackageSignatureTool.dll';
+if (!workflow.includes(packageSignerTfmPath)) {
+  fail('Desktop release workflow must invoke the package signer from its net8.0-windows build output.');
+}
+if (workflow.includes('bin\\Release\\net8.0\\SWIR.Desktop.PackageSignatureTool.dll')) {
+  fail('Desktop release workflow contains the stale net8.0 package-signer path.');
+}
+if (!storeBuilder.includes("bin\\Release\\net8.0-windows\\SWIR.Desktop.PackageSignatureTool.dll")) {
+  fail('Reviewed Store builder default package-signer path must match the net8.0-windows tool target framework.');
+}
+
+const catalogPrivateKeyAssignments = workflow
   .split(/\r?\n/)
   .map((line) => line.trim())
   .filter((line) => line.startsWith('SWIR_CATALOG_SIGNING_PRIVATE_KEY_PEM:'));
-const expectedPrivateKeyAssignment =
+const expectedCatalogPrivateKeyAssignment =
   'SWIR_CATALOG_SIGNING_PRIVATE_KEY_PEM: ${{ secrets.SWIR_CATALOG_SIGNING_PRIVATE_KEY_PEM }}';
-if (privateKeyAssignments.length === 0 || privateKeyAssignments.some((line) => line !== expectedPrivateKeyAssignment)) {
+if (catalogPrivateKeyAssignments.length === 0 || catalogPrivateKeyAssignments.some((line) => line !== expectedCatalogPrivateKeyAssignment)) {
   fail('Catalog signing private key must only enter the release workflow through GitHub Actions secrets.');
+}
+
+const packagePrivateKeyAssignments = workflow
+  .split(/\r?\n/)
+  .map((line) => line.trim())
+  .filter((line) => line.startsWith('SWIR_PACKAGE_SIGNING_PRIVATE_KEY_BASE64:'));
+const expectedPackagePrivateKeyAssignment =
+  'SWIR_PACKAGE_SIGNING_PRIVATE_KEY_BASE64: ${{ secrets.SWIR_PACKAGE_SIGNING_PRIVATE_KEY_BASE64 }}';
+if (packagePrivateKeyAssignments.length === 0 || packagePrivateKeyAssignments.some((line) => line !== expectedPackagePrivateKeyAssignment)) {
+  fail('Package signing private key must only enter the release workflow through GitHub Actions secrets.');
 }
 if (/BEGIN (?:ED25519 |EC |RSA )?PRIVATE KEY/.test(workflow)) {
   fail('Private signing-key material must never be embedded in the release workflow.');
@@ -42,6 +76,10 @@ if (/BEGIN (?:ED25519 |EC |RSA )?PRIVATE KEY/.test(workflow)) {
 if (roots.schema !== 'swir.catalog-trust-roots/1.0') fail('Unexpected checked-in catalog trust-root schema.');
 if (roots.requireSignedCatalog !== false || !Array.isArray(roots.roots) || roots.roots.length !== 0) {
   fail('The source-tree preview trust store must remain empty/fail-neutral; production roots are staged only by the controlled release pipeline.');
+}
+if (packageRoots.schema !== 'swir.package-trust-roots/1.0') fail('Unexpected checked-in package trust-root schema.');
+if (packageRoots.requireSignedPackages !== false || !Array.isArray(packageRoots.roots) || packageRoots.roots.length !== 0) {
+  fail('The source-tree package trust store must remain empty/fail-neutral; production package roots must be provisioned by a controlled signing pipeline.');
 }
 
 for (const fragment of [
@@ -57,7 +95,11 @@ for (const fragment of [
   'legacySha256Fallback = _catalogTrust is null',
   'trustMode = _catalogTrust is null ? "LEGACY_SHA_UNTIL_ROOT_PROVISIONED" : "SIGNED_CATALOG_REQUIRED"',
   'persistedTrustProvenance = true',
+  'packageSignatureVerification = true',
+  'packageSignatureRequired = _requireSignedPackages',
+  'packageSignatureTrustedRoots = _packageSignatures.TrustedRootCount',
   'CATALOG_AUTHORIZATION_REQUIRED',
+  '_packageSignatures.Verify(path, _requireSignedPackages)',
   '_installer.Install(path, trust.Sha256, ToTrustProof(trust))',
   'DesktopPackageTrustProof.SignedCatalog',
   'trust.CatalogSequence.Value',
@@ -96,21 +138,61 @@ if (hashCheck < 0 || archiveOpen < 0 || hashCheck > archiveOpen) {
 }
 
 for (const fragment of [
+  'SignatureSchema = "swir.package-signature/1.0"',
+  'PACKAGE_SIGNATURE_REQUIRED',
+  'PACKAGE_CONTENT_DIGEST_MISMATCH',
+  'PACKAGE_SIGNATURE_UNKNOWN_KEY',
+  'SignatureAlgorithm.Ed25519.Verify',
+  'CryptographicOperations.FixedTimeEquals'
+]) {
+  if (!packageSignatureVerifier.includes(fragment)) fail(`Embedded package signature verifier invariant missing: ${fragment}`);
+}
+
+for (const fragment of [
+  'trust-root',
+  'verify',
+  'requireSignedPackages = true',
+  'DesktopPackageTrustRootStore.LoadProvisioned()',
+  'Verify(bundlePath, requireSignature: true)',
+  'CryptographicOperations.ZeroMemory'
+]) {
+  if (!packageSignatureTool.includes(fragment)) fail(`Package signing utility release guard missing: ${fragment}`);
+}
+
+for (const fragment of [
+  'PackageSigningKeyId',
+  'PackageSigningPrivateKeyFile',
+  'PackageTrustRootsOutput',
+  'PackageSignerDll',
+  'dotnet $packageSigner sign',
+  'dotnet $packageSigner verify',
+  'The signed bytes are authoritative',
+  'Get-FileHash -LiteralPath $artifactPath -Algorithm SHA256'
+]) {
+  if (!storeBuilder.includes(fragment)) fail(`Reviewed Store package signing pipeline missing: ${fragment}`);
+}
+
+for (const fragment of [
   'requireSignedCatalog = true',
+  'requireSignedPackages = true',
   'SignatureAlgorithm.Ed25519',
+  'PACKAGE_SIGNATURE_REQUIRED',
+  'PACKAGE_CONTENT_DIGEST_MISMATCH',
   'CATALOG_ROLLBACK_DETECTED',
   'persistedTrustProvenance',
+  'packageSignatureRequired',
+  'packageSignatureTrustedRoots',
   'trustMode',
   'signatureVerified',
   'signerKeyId',
   'catalogSequence',
   'catalogVersion',
   'trustExpiresAt',
-  'signed package status must preserve signed trust mode',
+  'signed package status must preserve signed catalog trust mode',
   'rollback should restore v1 catalog sequence',
   'Rolling the payload back must never roll the catalog trust high-water mark back.'
 ]) {
-  if (!lifecycle.includes(fragment)) fail(`Signed package lifecycle/provenance coverage missing: ${fragment}`);
+  if (!lifecycle.includes(fragment)) fail(`Signed catalog + package lifecycle/provenance coverage missing: ${fragment}`);
 }
 
 for (const fragment of [

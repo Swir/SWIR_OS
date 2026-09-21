@@ -11,6 +11,7 @@
   <ItemGroup>
     <Compile Include="DesktopAppPackageInstaller.cs" />
     <Compile Include="DesktopPackageSignatureVerifier.cs" />
+    <Compile Include="DesktopPackageTrustRootStore.cs" />
     <Compile Include="DesktopPackageSignatureTool.cs" />
   </ItemGroup>
   <ItemGroup>
