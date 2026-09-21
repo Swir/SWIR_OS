@@ -91,6 +91,24 @@ try {
   expect(result.changed && result.version === '0.5.8', 'newer verified release advances feed');
   expectThrow(() => promote(candidate57, output), 'Refusing feed downgrade');
 
+  const trustedCurrent = fs.readFileSync(output, 'utf8');
+  const candidate59ForCurrentTrust = writeCandidate('0.5.9');
+  const tamperedCurrent = JSON.parse(trustedCurrent);
+  const tamperedCurrentPayload = JSON.parse(Buffer.from(tamperedCurrent.Payload, 'base64').toString('utf8'));
+  tamperedCurrentPayload.PublishedAt = '2026-09-18T00:00:00Z';
+  tamperedCurrent.Payload = Buffer.from(JSON.stringify(tamperedCurrentPayload)).toString('base64');
+  fs.writeFileSync(output, `${JSON.stringify(tamperedCurrent)}\n`);
+  const tamperedCurrentSnapshot = fs.readFileSync(output, 'utf8');
+  expectThrow(() => promote(candidate59ForCurrentTrust, output), 'Existing published feed trust verification failed');
+  expect(fs.readFileSync(output, 'utf8') === tamperedCurrentSnapshot, 'tampered existing feed is never overwritten automatically');
+  fs.writeFileSync(output, trustedCurrent);
+
+  fs.writeFileSync(output, '{"Schema":"broken-current-feed"}\n');
+  const malformedCurrentSnapshot = fs.readFileSync(output, 'utf8');
+  expectThrow(() => promote(candidate59ForCurrentTrust, output), 'Existing published feed is invalid');
+  expect(fs.readFileSync(output, 'utf8') === malformedCurrentSnapshot, 'malformed existing feed is never overwritten automatically');
+  fs.writeFileSync(output, trustedCurrent);
+
   const conflict = writeCandidate('0.5.8', { publishedAt: '2026-09-16T12:01:00Z' });
   expectThrow(() => promote(conflict, output), 'Refusing conflicting envelope');
 
