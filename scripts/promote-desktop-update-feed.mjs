@@ -17,7 +17,7 @@ function decodeBase64(value, label) {
   return Buffer.from(value, 'base64');
 }
 
-export function parseEnvelope(text, expectedChannel, expectedTag) {
+export function parseEnvelope(text, expectedChannel, expectedTag = null) {
   let envelope;
   try { envelope = JSON.parse(text); } catch { throw new Error('Incoming update envelope is not valid JSON.'); }
   if (!envelope || envelope.Schema !== ENVELOPE_SCHEMA || envelope.Algorithm !== ALGORITHM) throw new Error('Incoming update envelope schema/algorithm mismatch.');
@@ -32,7 +32,7 @@ export function parseEnvelope(text, expectedChannel, expectedTag) {
   if (!match) throw new Error('Incoming update version must be a three-part numeric version.');
   const version = match.slice(1).map(Number);
   const tag = `desktop-v${payload.Version}-${expectedChannel}`;
-  if (tag !== expectedTag) throw new Error(`Release tag ${expectedTag} does not match signed payload ${tag}.`);
+  if (expectedTag !== null && tag !== expectedTag) throw new Error(`Release tag ${expectedTag} does not match signed payload ${tag}.`);
   const expectedPackage = `https://github.com/Swir/SWIR_OS/releases/download/${tag}/SWIR-Desktop-${payload.Version}-${expectedChannel}.zip`;
   if (payload.Package?.Url !== expectedPackage) throw new Error('Signed package URL does not match the immutable SWIR_OS GitHub Release asset.');
   if (!SHA256_RE.test(payload.Package?.Sha256 ?? '')) throw new Error('Signed package SHA-256 is invalid.');
@@ -83,13 +83,13 @@ export function promoteFeed({ incomingPath, outputPath, channel, tag, publicKeyP
 
   if (fs.existsSync(outputPath)) {
     const currentText = fs.readFileSync(outputPath, 'utf8').trim();
-    const currentEnvelope = JSON.parse(currentText);
-    const currentPayload = JSON.parse(Buffer.from(currentEnvelope.Payload ?? '', 'base64').toString('utf8'));
-    const currentMatch = VERSION_RE.exec(currentPayload.Version ?? '');
-    if (!currentMatch) throw new Error('Existing feed has an invalid version and must be repaired manually.');
-    const currentVersion = currentMatch.slice(1).map(Number);
-    const ordering = compareVersions(incoming.version, currentVersion);
-    if (ordering < 0) throw new Error(`Refusing feed downgrade ${currentPayload.Version} -> ${incoming.payload.Version}.`);
+    let current;
+    try { current = parseEnvelope(currentText, channel); }
+    catch (error) { throw new Error(`Existing published feed is invalid: ${error instanceof Error ? error.message : String(error)}`); }
+    try { verifyEnvelopeSignature(current, publicKeyPem, expectedKeyId); }
+    catch (error) { throw new Error(`Existing published feed trust verification failed: ${error instanceof Error ? error.message : String(error)}`); }
+    const ordering = compareVersions(incoming.version, current.version);
+    if (ordering < 0) throw new Error(`Refusing feed downgrade ${current.payload.Version} -> ${incoming.payload.Version}.`);
     if (ordering === 0 && currentText !== incomingText) throw new Error(`Refusing conflicting envelope for already-published version ${incoming.payload.Version}.`);
     if (ordering === 0) return { changed: false, version: incoming.payload.Version, keyId: incoming.envelope.KeyId, sha256: artifact.sha256 };
   }
