@@ -39,6 +39,17 @@ for (const fragment of requiredWorkflowFragments) {
   if (!workflow.includes(fragment)) fail(`Desktop release trust-chain wiring missing: ${fragment}`);
 }
 
+const packageSignerTfmPath = 'bin\\Release\\net8.0-windows\\SWIR.Desktop.PackageSignatureTool.dll';
+if (!workflow.includes(packageSignerTfmPath)) {
+  fail('Desktop release workflow must invoke the package signer from its net8.0-windows build output.');
+}
+if (workflow.includes('bin\\Release\\net8.0\\SWIR.Desktop.PackageSignatureTool.dll')) {
+  fail('Desktop release workflow contains the stale net8.0 package-signer path.');
+}
+if (!storeBuilder.includes("bin\\Release\\net8.0-windows\\SWIR.Desktop.PackageSignatureTool.dll")) {
+  fail('Reviewed Store builder default package-signer path must match the net8.0-windows tool target framework.');
+}
+
 const catalogPrivateKeyAssignments = workflow
   .split(/\r?\n/)
   .map((line) => line.trim())
