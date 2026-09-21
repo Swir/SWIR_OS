@@ -20,6 +20,15 @@ const requiredWorkflowFragments = [
   'SWIR_CATALOG_EXPECTED_ROOT_SHA256: ${{ secrets.SWIR_CATALOG_SIGNING_PUBLIC_KEY_SHA256 }}',
   'SWIR_CATALOG_SEQUENCE: ${{ inputs.catalog_sequence }}',
   'SWIR_CATALOG_KEY_ID: ${{ inputs.catalog_key_id }}',
+  'SWIR_PACKAGE_KEY_ID: ${{ inputs.package_key_id }}',
+  'SWIR_PACKAGE_SIGNING_PRIVATE_KEY_BASE64: ${{ secrets.SWIR_PACKAGE_SIGNING_PRIVATE_KEY_BASE64 }}',
+  'Build signed reviewed Desktop Store swirapp artifacts',
+  '-PackageSigningKeyId $env:SWIR_PACKAGE_KEY_ID',
+  '-PackageSigningPrivateKeyFile $packagePrivateKey',
+  '-PackageTrustRootsOutput $packageTrustRoots',
+  'package-trust-roots.json',
+  'requireSignedPackages -ne $true',
+  'dotnet $packageSigner verify',
   'build-signed-catalog-release.mjs',
   'verify-catalog-root-pin.mjs',
   'requireSignedCatalog -ne $true',
@@ -30,14 +39,24 @@ for (const fragment of requiredWorkflowFragments) {
   if (!workflow.includes(fragment)) fail(`Desktop release trust-chain wiring missing: ${fragment}`);
 }
 
-const privateKeyAssignments = workflow
+const catalogPrivateKeyAssignments = workflow
   .split(/\r?\n/)
   .map((line) => line.trim())
   .filter((line) => line.startsWith('SWIR_CATALOG_SIGNING_PRIVATE_KEY_PEM:'));
-const expectedPrivateKeyAssignment =
+const expectedCatalogPrivateKeyAssignment =
   'SWIR_CATALOG_SIGNING_PRIVATE_KEY_PEM: ${{ secrets.SWIR_CATALOG_SIGNING_PRIVATE_KEY_PEM }}';
-if (privateKeyAssignments.length === 0 || privateKeyAssignments.some((line) => line !== expectedPrivateKeyAssignment)) {
+if (catalogPrivateKeyAssignments.length === 0 || catalogPrivateKeyAssignments.some((line) => line !== expectedCatalogPrivateKeyAssignment)) {
   fail('Catalog signing private key must only enter the release workflow through GitHub Actions secrets.');
+}
+
+const packagePrivateKeyAssignments = workflow
+  .split(/\r?\n/)
+  .map((line) => line.trim())
+  .filter((line) => line.startsWith('SWIR_PACKAGE_SIGNING_PRIVATE_KEY_BASE64:'));
+const expectedPackagePrivateKeyAssignment =
+  'SWIR_PACKAGE_SIGNING_PRIVATE_KEY_BASE64: ${{ secrets.SWIR_PACKAGE_SIGNING_PRIVATE_KEY_BASE64 }}';
+if (packagePrivateKeyAssignments.length === 0 || packagePrivateKeyAssignments.some((line) => line !== expectedPackagePrivateKeyAssignment)) {
+  fail('Package signing private key must only enter the release workflow through GitHub Actions secrets.');
 }
 if (/BEGIN (?:ED25519 |EC |RSA )?PRIVATE KEY/.test(workflow)) {
   fail('Private signing-key material must never be embedded in the release workflow.');
