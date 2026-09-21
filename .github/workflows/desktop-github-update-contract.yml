@@ -9,6 +9,8 @@ on:
       - 'desktop/windows/DesktopUpdateUserPolicy.cs'
       - 'desktop/windows/DesktopUpdateUserPolicyIntegrationSelfTests.cs'
       - 'desktop/windows/SWIR.Desktop.UpdateUserPolicyIntegration.SelfTests.csproj'
+      - 'desktop/windows/DesktopUpdateBackgroundCycleSelfTests.cs'
+      - 'desktop/windows/SWIR.Desktop.UpdateBackgroundCycle.SelfTests.csproj'
       - 'desktop/windows/DesktopGitHubUpdatePolicy.cs'
       - 'desktop/windows/DesktopReleaseBundleBuilder.cs'
       - 'desktop/windows/DesktopReleaseBundleSelfTests.cs'
@@ -29,6 +31,8 @@ on:
       - 'desktop/windows/DesktopUpdateUserPolicy.cs'
       - 'desktop/windows/DesktopUpdateUserPolicyIntegrationSelfTests.cs'
       - 'desktop/windows/SWIR.Desktop.UpdateUserPolicyIntegration.SelfTests.csproj'
+      - 'desktop/windows/DesktopUpdateBackgroundCycleSelfTests.cs'
+      - 'desktop/windows/SWIR.Desktop.UpdateBackgroundCycle.SelfTests.csproj'
       - 'desktop/windows/DesktopGitHubUpdatePolicy.cs'
       - 'desktop/windows/DesktopReleaseBundleBuilder.cs'
       - 'desktop/windows/DesktopReleaseBundleSelfTests.cs'
@@ -73,6 +77,9 @@ jobs:
       - name: Verify update user policy integration
         working-directory: desktop/windows
         run: dotnet run --project SWIR.Desktop.UpdateUserPolicyIntegration.SelfTests.csproj --configuration Release
+      - name: Verify policy-aware background update cycle
+        working-directory: desktop/windows
+        run: dotnet run --project SWIR.Desktop.UpdateBackgroundCycle.SelfTests.csproj --configuration Release
       - name: Verify release bundle integration
         working-directory: desktop/windows
         run: dotnet run --project SWIR.Desktop.ReleaseBundle.SelfTests.csproj --configuration Release
