@@ -88,7 +88,7 @@ for (const fragment of [
   'packageSignatureRequired = _requireSignedPackages',
   'packageSignatureTrustedRoots = _packageSignatures.TrustedRootCount',
   'CATALOG_AUTHORIZATION_REQUIRED',
-  '_packageSignatureVerifier.Verify(path, _requireSignedPackages)',
+  '_packageSignatures.Verify(path, _requireSignedPackages)',
   '_installer.Install(path, trust.Sha256, ToTrustProof(trust))',
   'DesktopPackageTrustProof.SignedCatalog',
   'trust.CatalogSequence.Value',
