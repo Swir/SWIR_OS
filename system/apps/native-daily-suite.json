@@ -11,6 +11,7 @@
     {"id":"hardware","source":"system/apps/swir-hardware-center.py","stage":"/usr/local/bin/swir-hardware-center","launcher":"Hardware","evidenceWorkflow":".github/workflows/system-native-hardware-center.yml"},
     {"id":"network","source":"system/apps/swir-network-center.py","stage":"/usr/local/bin/swir-network-center","launcher":"Network","evidenceWorkflow":".github/workflows/system-native-core-apps-contract.yml"},
     {"id":"browser","source":"system/apps/swir-browser.py","stage":"/usr/local/bin/swir-browser","launcher":"Browser","evidenceWorkflow":".github/workflows/system-native-browser.yml"},
+    {"id":"text-editor","source":"system/apps/swir-text-editor.py","stage":"/usr/local/bin/swir-text-editor","launcher":"Text Editor","desktop":"system/apps/swir-text-editor.desktop","reachability":{"kind":"default-app","category":"text"},"evidenceWorkflow":".github/workflows/system-native-text-editor.yml"},
     {"id":"notes","source":"system/apps/swir-notes.py","stage":"/usr/local/bin/swir-notes","launcher":"Notes","evidenceWorkflow":".github/workflows/system-native-core-apps-contract.yml"},
     {"id":"player","source":"system/apps/swir-player.py","stage":"/usr/local/bin/swir-player","launcher":"Player","evidenceWorkflow":".github/workflows/system-native-player.yml"},
     {"id":"photo-studio","source":"system/apps/swir-photo-studio.py","stage":"/usr/local/bin/swir-photo-studio","launcher":"Photo Studio","evidenceWorkflow":".github/workflows/system-native-photo-studio.yml"},
