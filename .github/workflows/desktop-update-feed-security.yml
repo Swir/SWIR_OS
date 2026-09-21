@@ -1,0 +1,38 @@
+name: Desktop Update Feed Security
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/test-desktop-update-feed-security.mjs'
+      - '.github/workflows/desktop-update-feed-security.yml'
+      - '.github/workflows/desktop-update-feed.yml'
+      - '.github/workflows/desktop-github-update-contract.yml'
+      - 'desktop/windows/**'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/test-desktop-update-feed-security.mjs'
+      - '.github/workflows/desktop-update-feed-security.yml'
+      - '.github/workflows/desktop-update-feed.yml'
+      - '.github/workflows/desktop-github-update-contract.yml'
+      - 'desktop/windows/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  signed-update-feed-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run signed update-feed security regressions
+        run: node scripts/test-desktop-update-feed-security.mjs
