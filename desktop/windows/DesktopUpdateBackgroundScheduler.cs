@@ -8,7 +8,7 @@ namespace Swir.Desktop.Host;
 /// </summary>
 internal sealed class DesktopUpdateBackgroundScheduler : IAsyncDisposable
 {
-    public const string SchedulerSchema = "swir.desktop-update-background-scheduler/0.1";
+    public const string SchedulerSchema = "swir.desktop-update-background-scheduler/0.2";
     public static readonly TimeSpan DefaultInterval = TimeSpan.FromHours(6);
     public static readonly TimeSpan DefaultInitialDelay = TimeSpan.FromMinutes(2);
 
@@ -23,7 +23,12 @@ internal sealed class DesktopUpdateBackgroundScheduler : IAsyncDisposable
     private Task? _runner;
     private DateTimeOffset? _lastStartedAt;
     private DateTimeOffset? _lastCompletedAt;
+    private DateTimeOffset? _nextScheduledAt;
     private string _lastOutcome = "never";
+    private long _completedCycles;
+    private long _failedCycles;
+    private long _cancelledCycles;
+    private long _skippedOverlapCycles;
     private bool _disposed;
 
     public DesktopUpdateBackgroundScheduler(
@@ -56,7 +61,12 @@ internal sealed class DesktopUpdateBackgroundScheduler : IAsyncDisposable
                 initialDelaySeconds = _initialDelay.TotalSeconds,
                 lastStartedAt = _lastStartedAt,
                 lastCompletedAt = _lastCompletedAt,
+                nextScheduledAt = _nextScheduledAt,
                 lastOutcome = _lastOutcome,
+                completedCycles = _completedCycles,
+                failedCycles = _failedCycles,
+                cancelledCycles = _cancelledCycles,
+                skippedOverlapCycles = _skippedOverlapCycles,
                 overlappingCyclesAllowed = false,
                 automaticRestart = false
             };
@@ -87,7 +97,10 @@ internal sealed class DesktopUpdateBackgroundScheduler : IAsyncDisposable
             lifetime = _lifetime;
             runner = _runner;
             if (lifetime is null || runner is null)
+            {
+                _nextScheduledAt = null;
                 return;
+            }
             lifetime.Cancel();
         }
 
@@ -105,6 +118,7 @@ internal sealed class DesktopUpdateBackgroundScheduler : IAsyncDisposable
             {
                 _runner = null;
                 _lifetime = null;
+                _nextScheduledAt = null;
                 lifetime.Dispose();
             }
         }
@@ -120,11 +134,16 @@ internal sealed class DesktopUpdateBackgroundScheduler : IAsyncDisposable
     private async Task RunLoopAsync(CancellationToken cancellationToken)
     {
         if (_initialDelay > TimeSpan.Zero)
+        {
+            SetNextScheduledAt(DateTimeOffset.UtcNow + _initialDelay);
             await Task.Delay(_initialDelay, cancellationToken).ConfigureAwait(false);
+        }
 
         while (!cancellationToken.IsCancellationRequested)
         {
+            SetNextScheduledAt(null);
             _ = await ExecuteCycleAsync(cancellationToken).ConfigureAwait(false);
+            SetNextScheduledAt(DateTimeOffset.UtcNow + _interval);
             await Task.Delay(_interval, cancellationToken).ConfigureAwait(false);
         }
     }
@@ -132,7 +151,16 @@ internal sealed class DesktopUpdateBackgroundScheduler : IAsyncDisposable
     private async Task<DesktopUpdateBackgroundSchedulerCycle> ExecuteCycleAsync(CancellationToken cancellationToken)
     {
         if (!await _executionGate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
+        {
+            var skippedAt = DateTimeOffset.UtcNow;
+            lock (_stateGate)
+            {
+                _skippedOverlapCycles++;
+                _lastOutcome = "skipped-overlap";
+            }
+            Publish(new DesktopUpdateBackgroundSchedulerEvent(SchedulerSchema, "skipped-overlap", skippedAt, null));
             return new DesktopUpdateBackgroundSchedulerCycle(false, "skipped-overlap", null);
+        }
 
         var startedAt = DateTimeOffset.UtcNow;
         lock (_stateGate)
@@ -149,6 +177,7 @@ internal sealed class DesktopUpdateBackgroundScheduler : IAsyncDisposable
             {
                 _lastCompletedAt = completedAt;
                 _lastOutcome = "completed";
+                _completedCycles++;
             }
             Publish(new DesktopUpdateBackgroundSchedulerEvent(SchedulerSchema, "completed", completedAt, result));
             return new DesktopUpdateBackgroundSchedulerCycle(true, "completed", result);
@@ -160,6 +189,7 @@ internal sealed class DesktopUpdateBackgroundScheduler : IAsyncDisposable
             {
                 _lastCompletedAt = cancelledAt;
                 _lastOutcome = "cancelled";
+                _cancelledCycles++;
             }
             Publish(new DesktopUpdateBackgroundSchedulerEvent(SchedulerSchema, "cancelled", cancelledAt, null));
             throw;
@@ -171,6 +201,7 @@ internal sealed class DesktopUpdateBackgroundScheduler : IAsyncDisposable
             {
                 _lastCompletedAt = failedAt;
                 _lastOutcome = "failed";
+                _failedCycles++;
             }
             Publish(new DesktopUpdateBackgroundSchedulerEvent(
                 SchedulerSchema,
@@ -183,6 +214,12 @@ internal sealed class DesktopUpdateBackgroundScheduler : IAsyncDisposable
         {
             _executionGate.Release();
         }
+    }
+
+    private void SetNextScheduledAt(DateTimeOffset? value)
+    {
+        lock (_stateGate)
+            _nextScheduledAt = value;
     }
 
     private void Publish(DesktopUpdateBackgroundSchedulerEvent schedulerEvent)
