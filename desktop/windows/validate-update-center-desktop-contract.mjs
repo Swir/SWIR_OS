@@ -46,10 +46,15 @@ requireText(program, "msg.name === 'updates.preparationCompleted'", 'Preparation
 requireText(program, "msg.name === 'updates.preparationFailed'", 'Preparation failure must be forwarded as a native host event.');
 
 requireText(preparationHost, 'swir.desktop-update-preparation-host/0.5', 'Preparation host schema must describe the user-policy-aware build-identity contract.');
+requireText(preparationHost, 'swir.desktop-update-background-cycle/0.1', 'Preparation host must expose a versioned scheduler-safe background-cycle contract.');
 requireText(preparationHost, 'DesktopInstalledBuildIdentity.ResolveCurrentVersion', 'Preparation host must derive the installed release version from packaged build identity instead of a stale hard-coded updater version.');
 requireText(preparationHost, 'DesktopUpdateUserPolicyStore', 'Production preparation host must enforce persisted Desktop update user policy.');
 requireText(preparationHost, 'CheckInBackgroundAsync', 'Production host must distinguish background checks from explicit user checks.');
+requireText(preparationHost, 'RunBackgroundCycleAsync', 'Production host must provide one policy-aware signed background cycle for the scheduler.');
+requireText(preparationHost, 'background-check-disabled-by-user-policy', 'Manual mode must suppress scheduler network work before discovery.');
+requireText(preparationHost, 'policy-changed-during-signed-check', 'Background cycle must re-read policy after signed discovery before automatic preparation.');
 requireText(preparationHost, 'QueueAutomaticPrepare', 'Production host must distinguish automatic preparation from explicit user preparation.');
+requireText(preparationHost, 'automaticRestart = false', 'Background cycle must never silently restart after automatic preparation.');
 requireText(preparationHost, 'UPDATE_USER_POLICY_BLOCKED', 'Disallowed automatic/background update work must fail closed at the host boundary.');
 requireText(preparationHost, 'RevokeAutomaticPreparationAfterPolicyDowngrade', 'Policy downgrade must actively revoke queued/running automatic preparation.');
 requireText(preparationHost, '_automaticPreparationQueuedOrRunning', 'Host must track whether preparation was initiated automatically before applying downgrade cancellation.');
@@ -111,4 +116,4 @@ for (const [index, script] of scripts.entries()) {
   }
 }
 
-console.log('Update Center Desktop workflow validated (signed check + user-policy-aware host + guarded preparation + cancel/reset + deferred mutation + guarded restart + packaged build identity).');
+console.log('Update Center Desktop workflow validated (signed check + policy-aware background cycle + guarded preparation + cancel/reset + deferred mutation + guarded restart + packaged build identity).');
