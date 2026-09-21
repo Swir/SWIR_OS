@@ -20,6 +20,8 @@ internal sealed class DesktopUpdatePreparationHostService
     private readonly DesktopUpdatePreparationBridgeCoordinator _bridge;
     private readonly DesktopUpdateUserPolicyStore _userPolicyStore;
     private readonly Func<UpdateBroker, Uri, IEnumerable<string>, UpdateManifestClient> _manifestClientFactory;
+    private readonly object _preparationPolicyGate = new();
+    private bool _automaticPreparationQueuedOrRunning;
 
     public DesktopUpdatePreparationHostService(
         string? policyPath = null,
@@ -82,6 +84,8 @@ internal sealed class DesktopUpdatePreparationHostService
                 "Desktop update policy must be manual, notify or automatic.")
         };
         _userPolicyStore.Save(mode);
+        if (mode != DesktopUpdateUserMode.Automatic)
+            RevokeAutomaticPreparationAfterPolicyDowngrade();
         return DescribeUserPolicyCore();
     }
 
@@ -129,20 +133,94 @@ internal sealed class DesktopUpdatePreparationHostService
         var decision = DesktopUpdateUserPolicyStore.Evaluate(_userPolicyStore.Load());
         if (userInitiated ? !decision.UserInitiatedPrepare : !decision.AutomaticPrepare)
             throw UserPolicyBlocked(decision.Mode, userInitiated ? "user-initiated preparation" : "automatic preparation");
-        return _bridge.QueuePrepare(trustedShell);
+
+        lock (_preparationPolicyGate)
+        {
+            var queued = _bridge.QueuePrepare(trustedShell);
+            _automaticPreparationQueuedOrRunning = !userInitiated;
+            return queued;
+        }
     }
 
-    public object Cancel(bool trustedShell) => _bridge.CancelActive(trustedShell);
-    public void CancelQueuedAfterResponseFailure() => _bridge.CancelQueuedAfterResponseFailure();
+    public object Cancel(bool trustedShell)
+    {
+        lock (_preparationPolicyGate)
+        {
+            var result = _bridge.CancelActive(trustedShell);
+            _automaticPreparationQueuedOrRunning = false;
+            return result;
+        }
+    }
+
+    public void CancelQueuedAfterResponseFailure()
+    {
+        lock (_preparationPolicyGate)
+        {
+            _bridge.CancelQueuedAfterResponseFailure();
+            _automaticPreparationQueuedOrRunning = false;
+        }
+    }
 
     public object ResetTerminalState(bool trustedShell)
     {
         RequireTrustedShell(trustedShell, "reset Desktop update preparation state");
-        _bridge.ResetTerminalState();
+        lock (_preparationPolicyGate)
+        {
+            _bridge.ResetTerminalState();
+            _automaticPreparationQueuedOrRunning = false;
+        }
         return Describe();
     }
 
-    public Task<object?> ExecuteQueuedAsync(CancellationToken cancellationToken = default) => _bridge.ExecuteQueuedAsync(cancellationToken);
+    public async Task<object?> ExecuteQueuedAsync(CancellationToken cancellationToken = default)
+    {
+        lock (_preparationPolicyGate)
+        {
+            if (_automaticPreparationQueuedOrRunning)
+            {
+                var decision = DesktopUpdateUserPolicyStore.Evaluate(_userPolicyStore.Load());
+                if (!decision.AutomaticPrepare)
+                {
+                    _bridge.CancelQueuedAfterResponseFailure();
+                    _automaticPreparationQueuedOrRunning = false;
+                    throw UserPolicyBlocked(decision.Mode, "automatic preparation execution");
+                }
+            }
+        }
+
+        try
+        {
+            return await _bridge.ExecuteQueuedAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            lock (_preparationPolicyGate)
+                _automaticPreparationQueuedOrRunning = false;
+        }
+    }
+
+    private void RevokeAutomaticPreparationAfterPolicyDowngrade()
+    {
+        lock (_preparationPolicyGate)
+        {
+            if (!_automaticPreparationQueuedOrRunning)
+                return;
+
+            try
+            {
+                _ = _bridge.CancelActive(trustedShell: true);
+            }
+            catch (DesktopUpdateBridgeCommandException ex) when (ex.Code == "UPDATE_PREPARATION_NOT_CANCELLABLE")
+            {
+                // The operation already reached a terminal/idle state. The persisted
+                // user policy still takes effect for all subsequent background work.
+            }
+            finally
+            {
+                _automaticPreparationQueuedOrRunning = false;
+            }
+        }
+    }
 
     private object DescribeUserPolicyCore()
     {
