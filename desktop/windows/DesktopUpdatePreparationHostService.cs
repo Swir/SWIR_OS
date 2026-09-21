@@ -10,6 +10,7 @@ internal sealed class DesktopUpdatePreparationHostService
     public const string HostServiceSchema = "swir.desktop-update-preparation-host/0.5";
     public const string CheckSchema = "swir.desktop-update-check/0.1";
     public const string UserPolicySchema = "swir.desktop-update-user-policy-state/0.1";
+    public const string BackgroundCycleSchema = "swir.desktop-update-background-cycle/0.1";
 
     private readonly string _policyPath;
     private readonly string _currentInstallRoot;
@@ -31,7 +32,8 @@ internal sealed class DesktopUpdatePreparationHostService
         string? transactionsRoot = null,
         Func<UpdateBroker, Uri, IEnumerable<string>, UpdateManifestClient>? manifestClientFactory = null,
         Version? currentDesktopVersion = null,
-        string? userPolicyPath = null)
+        string? userPolicyPath = null,
+        Func<CancellationToken, Task<object?>>? preparationExecutor = null)
     {
         _policyPath = Path.GetFullPath(policyPath ?? Path.Combine(AppContext.BaseDirectory, "desktop-update-policy.json"));
         _deploymentRoot = Path.GetFullPath(deploymentRoot ?? DesktopUpdatePaths.DeploymentRoot);
@@ -43,7 +45,7 @@ internal sealed class DesktopUpdatePreparationHostService
             throw new UpdateSecurityException("UPDATE_CURRENT_VERSION_INVALID", "Desktop current version must be positive.");
         _manifestClientFactory = manifestClientFactory ?? ((broker, uri, hosts) => new UpdateManifestClient(broker, uri, hosts));
         _userPolicyStore = new DesktopUpdateUserPolicyStore(userPolicyPath);
-        _bridge = new DesktopUpdatePreparationBridgeCoordinator(IsPreparationConfigured, PrepareCoreAsync);
+        _bridge = new DesktopUpdatePreparationBridgeCoordinator(IsPreparationConfigured, preparationExecutor ?? PrepareCoreAsync);
     }
 
     public object Describe()
@@ -122,6 +124,102 @@ internal sealed class DesktopUpdatePreparationHostService
                 targetVersion = _currentDesktopVersion.ToString(), channel = policy.Channel, verified = true, status = "current",
                 userPolicy = DescribeUserPolicyCore() };
         }
+    }
+
+    /// <summary>
+    /// Runs one scheduler-safe background cycle. Manual mode performs no network I/O,
+    /// Notify only verifies the signed feed without staging, and Automatic verifies,
+    /// queues and executes preparation. The user policy is re-read after feed verification
+    /// and again by the preparation bridge, so a downgrade cannot race into background work.
+    /// Automatic restart is intentionally never performed here.
+    /// </summary>
+    public async Task<object> RunBackgroundCycleAsync(bool trustedShell, CancellationToken cancellationToken = default)
+    {
+        RequireTrustedShell(trustedShell, "run the Desktop background update cycle");
+
+        var before = DesktopUpdateUserPolicyStore.Evaluate(_userPolicyStore.Load());
+        if (!before.BackgroundCheck)
+        {
+            return new
+            {
+                schema = BackgroundCycleSchema,
+                mode = DesktopUpdateUserPolicyStore.ToPersistedMode(before.Mode),
+                action = "suppressed",
+                updateAvailable = false,
+                automaticPreparation = false,
+                automaticRestart = false,
+                verified = false,
+                reason = "background-check-disabled-by-user-policy"
+            };
+        }
+
+        var check = await CheckAsync(trustedShell, userInitiated: false, cancellationToken).ConfigureAwait(false);
+        var checkJson = System.Text.Json.JsonSerializer.SerializeToElement(check);
+        var updateAvailable = checkJson.TryGetProperty("updateAvailable", out var updateAvailableElement)
+            && updateAvailableElement.ValueKind is System.Text.Json.JsonValueKind.True;
+
+        var afterCheck = DesktopUpdateUserPolicyStore.Evaluate(_userPolicyStore.Load());
+        if (!afterCheck.BackgroundCheck)
+        {
+            return new
+            {
+                schema = BackgroundCycleSchema,
+                mode = DesktopUpdateUserPolicyStore.ToPersistedMode(afterCheck.Mode),
+                action = "suppressed-after-check",
+                updateAvailable,
+                automaticPreparation = false,
+                automaticRestart = false,
+                verified = true,
+                check,
+                reason = "policy-changed-during-signed-check"
+            };
+        }
+
+        if (!updateAvailable)
+        {
+            return new
+            {
+                schema = BackgroundCycleSchema,
+                mode = DesktopUpdateUserPolicyStore.ToPersistedMode(afterCheck.Mode),
+                action = "current",
+                updateAvailable = false,
+                automaticPreparation = false,
+                automaticRestart = false,
+                verified = true,
+                check
+            };
+        }
+
+        if (!afterCheck.AutomaticPrepare)
+        {
+            return new
+            {
+                schema = BackgroundCycleSchema,
+                mode = DesktopUpdateUserPolicyStore.ToPersistedMode(afterCheck.Mode),
+                action = "notify",
+                updateAvailable = true,
+                automaticPreparation = false,
+                automaticRestart = false,
+                verified = true,
+                check
+            };
+        }
+
+        var queued = QueueAutomaticPrepare(trustedShell);
+        var prepared = await ExecuteQueuedAsync(cancellationToken).ConfigureAwait(false);
+        return new
+        {
+            schema = BackgroundCycleSchema,
+            mode = DesktopUpdateUserPolicyStore.ToPersistedMode(afterCheck.Mode),
+            action = "prepared",
+            updateAvailable = true,
+            automaticPreparation = true,
+            automaticRestart = false,
+            verified = true,
+            check,
+            queued,
+            prepared
+        };
     }
 
     public object QueuePrepare(bool trustedShell) => QueuePrepare(trustedShell, userInitiated: true);
