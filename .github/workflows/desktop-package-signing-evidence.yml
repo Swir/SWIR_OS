@@ -23,7 +23,7 @@ on:
   workflow_dispatch:
     inputs:
       production:
-        description: 'Use the protected production package-signing environment/key and emit production evidence (main only)'
+        description: 'Use protected production package signing and emit production evidence (main only)'
         required: true
         default: false
         type: boolean
@@ -68,7 +68,7 @@ jobs:
       - name: Build package signing verifier
         run: dotnet build SWIR.Desktop.PackageSignatureTool.csproj --configuration Release
 
-      - name: Build, verify and record ephemeral signed package evidence
+      - name: Prepare ephemeral evidence paths and key
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -77,46 +77,62 @@ jobs:
           $trust = Join-Path $store 'package-trust-roots.json'
           $evidence = Join-Path $store 'package-signing-evidence.json'
           $signer = Join-Path (Get-Location) 'bin\Release\net8.0-windows\SWIR.Desktop.PackageSignatureTool.dll'
-          $keyId = 'ci-package-evidence-root'
-
+          "SWIR_EVIDENCE_STORE=$store" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SWIR_EVIDENCE_PRIVATE_KEY=$privateKey" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SWIR_EVIDENCE_TRUST=$trust" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SWIR_EVIDENCE_FILE=$evidence" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SWIR_EVIDENCE_SIGNER=$signer" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SWIR_EVIDENCE_KEY_ID=ci-package-evidence-root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           node -e "const fs=require('fs'),crypto=require('crypto'); const {privateKey}=crypto.generateKeyPairSync('ed25519'); const jwk=privateKey.export({format:'jwk'}); const raw=Buffer.from(jwk.d,'base64url'); if(raw.length!==32) throw new Error('Expected 32-byte Ed25519 raw private key'); fs.writeFileSync(process.argv[1], raw.toString('base64'));" $privateKey
-          if ($LASTEXITCODE -ne 0) { throw 'Could not generate ephemeral Ed25519 package signing key.' }
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $privateKey -PathType Leaf)) { throw 'Could not generate ephemeral Ed25519 package signing key.' }
 
-          try {
-            & (Join-Path (Get-Location) 'build-store-packages.ps1') `
-              -OutputDir $store `
-              -SourceRoot '${{ github.workspace }}' `
-              -PackageSigningKeyId $keyId `
-              -PackageSigningPrivateKeyFile $privateKey `
-              -PackageTrustRootsOutput $trust `
-              -PackageSignerDll $signer
-            if ($LASTEXITCODE -ne 0) { throw "Signed Store package build failed with exit code $LASTEXITCODE" }
+      - name: Build and independently verify ephemeral signed Store packages
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & (Join-Path (Get-Location) 'build-store-packages.ps1') `
+            -OutputDir $env:SWIR_EVIDENCE_STORE `
+            -SourceRoot '${{ github.workspace }}' `
+            -PackageSigningKeyId $env:SWIR_EVIDENCE_KEY_ID `
+            -PackageSigningPrivateKeyFile $env:SWIR_EVIDENCE_PRIVATE_KEY `
+            -PackageTrustRootsOutput $env:SWIR_EVIDENCE_TRUST `
+            -PackageSignerDll $env:SWIR_EVIDENCE_SIGNER
+          if ($LASTEXITCODE -ne 0) { throw "Signed Store package build failed with exit code $LASTEXITCODE" }
 
-            & (Join-Path (Get-Location) 'New-PackageSigningEvidence.ps1') `
-              -StoreDir $store `
-              -TrustRootsPath $trust `
-              -SignerDll $signer `
-              -SourceCommit '${{ github.sha }}' `
-              -ExpectedKeyId $keyId `
-              -OutputPath $evidence `
-              -EvidenceKind contract `
-              -GitHubRepository '${{ github.repository }}' `
-              -GitHubRunId '${{ github.run_id }}' `
-              -GitHubRunAttempt '${{ github.run_attempt }}'
-            if ($LASTEXITCODE -ne 0) { throw "Package signing evidence generation failed with exit code $LASTEXITCODE" }
+      - name: Generate package signing contract evidence
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & (Join-Path (Get-Location) 'New-PackageSigningEvidence.ps1') `
+            -StoreDir $env:SWIR_EVIDENCE_STORE `
+            -TrustRootsPath $env:SWIR_EVIDENCE_TRUST `
+            -SignerDll $env:SWIR_EVIDENCE_SIGNER `
+            -SourceCommit '${{ github.sha }}' `
+            -ExpectedKeyId $env:SWIR_EVIDENCE_KEY_ID `
+            -OutputPath $env:SWIR_EVIDENCE_FILE `
+            -EvidenceKind contract `
+            -GitHubRepository '${{ github.repository }}' `
+            -GitHubRunId '${{ github.run_id }}' `
+            -GitHubRunAttempt '${{ github.run_attempt }}'
+          if ($LASTEXITCODE -ne 0) { throw "Package signing evidence generation failed with exit code $LASTEXITCODE" }
 
-            node '${{ github.workspace }}\scripts\validate-package-signing-evidence.mjs' $evidence $store $trust contract
-            if ($LASTEXITCODE -ne 0) { throw "Package signing evidence validation failed with exit code $LASTEXITCODE" }
+      - name: Independently validate package signing contract evidence
+        shell: pwsh
+        run: |
+          node '${{ github.workspace }}\scripts\validate-package-signing-evidence.mjs' $env:SWIR_EVIDENCE_FILE $env:SWIR_EVIDENCE_STORE $env:SWIR_EVIDENCE_TRUST contract
+          if ($LASTEXITCODE -ne 0) { throw "Package signing evidence validation failed with exit code $LASTEXITCODE" }
+
+      - name: Destroy ephemeral signing key
+        if: always()
+        shell: pwsh
+        run: |
+          $path = $env:SWIR_EVIDENCE_PRIVATE_KEY
+          if (-not [string]::IsNullOrWhiteSpace($path) -and (Test-Path $path -PathType Leaf)) {
+            $length = [int](Get-Item -LiteralPath $path).Length
+            if ($length -gt 0) { [System.IO.File]::WriteAllBytes($path, [byte[]]::new($length)) }
+            Remove-Item -LiteralPath $path -Force
           }
-          finally {
-            if (Test-Path $privateKey -PathType Leaf) {
-              $length = (Get-Item -LiteralPath $privateKey).Length
-              if ($length -gt 0) { [System.IO.File]::WriteAllBytes($privateKey, (New-Object byte[] $length)) }
-              Remove-Item -LiteralPath $privateKey -Force -ErrorAction SilentlyContinue
-            }
-          }
-
-          if (Test-Path $privateKey) { throw 'Ephemeral package signing key file survived cleanup.' }
+          if (-not [string]::IsNullOrWhiteSpace($path) -and (Test-Path $path)) { throw 'Ephemeral package signing key file survived cleanup.' }
 
       - name: Upload non-secret contract evidence
         uses: actions/upload-artifact@v4
@@ -170,58 +186,74 @@ jobs:
             if ($raw.Length -ne 32) { throw 'Protected Ed25519 package signing private key must be exactly 32 bytes.' }
             if ([Convert]::ToBase64String($raw) -cne $env:SWIR_PACKAGE_SIGNING_PRIVATE_KEY_BASE64.Trim()) { throw 'Protected package signing private key must use canonical base64.' }
           }
-          finally { [System.Security.Cryptography.CryptographicOperations]::ZeroMemory($raw) }
+          finally { if ($null -ne $raw) { [System.Security.Cryptography.CryptographicOperations]::ZeroMemory($raw) } }
 
       - name: Build package signing verifier
         run: dotnet build SWIR.Desktop.PackageSignatureTool.csproj --configuration Release
 
-      - name: Build, verify and record protected production package evidence
+      - name: Prepare protected evidence paths
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
           $store = Join-Path '${{ runner.temp }}' 'swir-package-evidence-production'
           $privateKey = Join-Path '${{ runner.temp }}' 'swir-package-evidence-production-private.b64'
           $trust = Join-Path $store 'package-trust-roots.json'
           $evidence = Join-Path $store 'package-signing-evidence.json'
           $signer = Join-Path (Get-Location) 'bin\Release\net8.0-windows\SWIR.Desktop.PackageSignatureTool.dll'
+          "SWIR_EVIDENCE_STORE=$store" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SWIR_EVIDENCE_PRIVATE_KEY=$privateKey" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SWIR_EVIDENCE_TRUST=$trust" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SWIR_EVIDENCE_FILE=$evidence" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SWIR_EVIDENCE_SIGNER=$signer" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Output '::add-mask::${{ secrets.SWIR_PACKAGE_SIGNING_PRIVATE_KEY_BASE64 }}'
           [System.IO.File]::WriteAllText($privateKey, $env:SWIR_PACKAGE_SIGNING_PRIVATE_KEY_BASE64, [System.Text.UTF8Encoding]::new($false))
 
-          try {
-            & (Join-Path (Get-Location) 'build-store-packages.ps1') `
-              -OutputDir $store `
-              -SourceRoot '${{ github.workspace }}' `
-              -PackageSigningKeyId $env:SWIR_PACKAGE_KEY_ID `
-              -PackageSigningPrivateKeyFile $privateKey `
-              -PackageTrustRootsOutput $trust `
-              -PackageSignerDll $signer
-            if ($LASTEXITCODE -ne 0) { throw "Production signed Store package build failed with exit code $LASTEXITCODE" }
+      - name: Build and independently verify protected signed Store packages
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & (Join-Path (Get-Location) 'build-store-packages.ps1') `
+            -OutputDir $env:SWIR_EVIDENCE_STORE `
+            -SourceRoot '${{ github.workspace }}' `
+            -PackageSigningKeyId $env:SWIR_PACKAGE_KEY_ID `
+            -PackageSigningPrivateKeyFile $env:SWIR_EVIDENCE_PRIVATE_KEY `
+            -PackageTrustRootsOutput $env:SWIR_EVIDENCE_TRUST `
+            -PackageSignerDll $env:SWIR_EVIDENCE_SIGNER
+          if ($LASTEXITCODE -ne 0) { throw "Production signed Store package build failed with exit code $LASTEXITCODE" }
 
-            & (Join-Path (Get-Location) 'New-PackageSigningEvidence.ps1') `
-              -StoreDir $store `
-              -TrustRootsPath $trust `
-              -SignerDll $signer `
-              -SourceCommit '${{ github.sha }}' `
-              -ExpectedKeyId $env:SWIR_PACKAGE_KEY_ID `
-              -OutputPath $evidence `
-              -EvidenceKind production `
-              -GitHubRepository '${{ github.repository }}' `
-              -GitHubRunId '${{ github.run_id }}' `
-              -GitHubRunAttempt '${{ github.run_attempt }}'
-            if ($LASTEXITCODE -ne 0) { throw "Production signing evidence generation failed with exit code $LASTEXITCODE" }
+      - name: Generate protected production signing evidence
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & (Join-Path (Get-Location) 'New-PackageSigningEvidence.ps1') `
+            -StoreDir $env:SWIR_EVIDENCE_STORE `
+            -TrustRootsPath $env:SWIR_EVIDENCE_TRUST `
+            -SignerDll $env:SWIR_EVIDENCE_SIGNER `
+            -SourceCommit '${{ github.sha }}' `
+            -ExpectedKeyId $env:SWIR_PACKAGE_KEY_ID `
+            -OutputPath $env:SWIR_EVIDENCE_FILE `
+            -EvidenceKind production `
+            -GitHubRepository '${{ github.repository }}' `
+            -GitHubRunId '${{ github.run_id }}' `
+            -GitHubRunAttempt '${{ github.run_attempt }}'
+          if ($LASTEXITCODE -ne 0) { throw "Production signing evidence generation failed with exit code $LASTEXITCODE" }
 
-            node '${{ github.workspace }}\scripts\validate-package-signing-evidence.mjs' $evidence $store $trust production
-            if ($LASTEXITCODE -ne 0) { throw "Production signing evidence validation failed with exit code $LASTEXITCODE" }
+      - name: Independently validate production signing evidence
+        shell: pwsh
+        run: |
+          node '${{ github.workspace }}\scripts\validate-package-signing-evidence.mjs' $env:SWIR_EVIDENCE_FILE $env:SWIR_EVIDENCE_STORE $env:SWIR_EVIDENCE_TRUST production
+          if ($LASTEXITCODE -ne 0) { throw "Production signing evidence validation failed with exit code $LASTEXITCODE" }
+
+      - name: Destroy protected signing key material
+        if: always()
+        shell: pwsh
+        run: |
+          $path = $env:SWIR_EVIDENCE_PRIVATE_KEY
+          if (-not [string]::IsNullOrWhiteSpace($path) -and (Test-Path $path -PathType Leaf)) {
+            $length = [int](Get-Item -LiteralPath $path).Length
+            if ($length -gt 0) { [System.IO.File]::WriteAllBytes($path, [byte[]]::new($length)) }
+            Remove-Item -LiteralPath $path -Force
           }
-          finally {
-            if (Test-Path $privateKey -PathType Leaf) {
-              $length = (Get-Item -LiteralPath $privateKey).Length
-              if ($length -gt 0) { [System.IO.File]::WriteAllBytes($privateKey, (New-Object byte[] $length)) }
-              Remove-Item -LiteralPath $privateKey -Force -ErrorAction SilentlyContinue
-            }
-          }
-
-          if (Test-Path $privateKey) { throw 'Production package signing key file survived cleanup.' }
+          if (-not [string]::IsNullOrWhiteSpace($path) -and (Test-Path $path)) { throw 'Production package signing key file survived cleanup.' }
 
       - name: Upload public production signing evidence
         uses: actions/upload-artifact@v4
