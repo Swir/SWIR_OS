@@ -51,6 +51,9 @@ requireText(preparationHost, 'DesktopUpdateUserPolicyStore', 'Production prepara
 requireText(preparationHost, 'CheckInBackgroundAsync', 'Production host must distinguish background checks from explicit user checks.');
 requireText(preparationHost, 'QueueAutomaticPrepare', 'Production host must distinguish automatic preparation from explicit user preparation.');
 requireText(preparationHost, 'UPDATE_USER_POLICY_BLOCKED', 'Disallowed automatic/background update work must fail closed at the host boundary.');
+requireText(preparationHost, 'RevokeAutomaticPreparationAfterPolicyDowngrade', 'Policy downgrade must actively revoke queued/running automatic preparation.');
+requireText(preparationHost, '_automaticPreparationQueuedOrRunning', 'Host must track whether preparation was initiated automatically before applying downgrade cancellation.');
+requireText(preparationHost, 'automatic preparation execution', 'Queued automatic work must re-check current policy immediately before execution.');
 requireText(preparationHost, 'ResetTerminalState(bool trustedShell)', 'Host service reset must require a trusted-shell assertion.');
 requireText(preparationHost, 'UPDATE_BRIDGE_TRUST_REQUIRED', 'Preparation host must fail closed for untrusted reset callers.');
 
