@@ -15,6 +15,7 @@ on:
       - 'desktop/windows/DesktopPackageSignatureTool.cs'
       - 'desktop/windows/DesktopPackageSignatureSelfTests.cs'
       - 'desktop/windows/package-trust-roots.json'
+      - 'desktop/windows/build-store-packages.ps1'
       - 'desktop/windows/DesktopPackageDependencyResolver.cs'
       - 'desktop/windows/DesktopPackageDependencyResolverSelfTests.cs'
       - 'desktop/windows/DesktopCatalogTrustVerifier.cs'
@@ -34,6 +35,7 @@ on:
       - 'desktop/windows/SWIR.Desktop.Host.csproj'
       - 'contracts/swir-dependency-vectors.json'
       - 'swir-package-resolver.js'
+      - 'swir-packages.js'
       - 'swir-runtime.js'
       - 'swir-store-desktop.js'
       - 'swir-store.html'
@@ -55,6 +57,7 @@ on:
       - 'desktop/windows/DesktopPackageSignatureTool.cs'
       - 'desktop/windows/DesktopPackageSignatureSelfTests.cs'
       - 'desktop/windows/package-trust-roots.json'
+      - 'desktop/windows/build-store-packages.ps1'
       - 'desktop/windows/DesktopPackageDependencyResolver.cs'
       - 'desktop/windows/DesktopPackageDependencyResolverSelfTests.cs'
       - 'desktop/windows/DesktopCatalogTrustVerifier.cs'
@@ -74,6 +77,7 @@ on:
       - 'desktop/windows/SWIR.Desktop.Host.csproj'
       - 'contracts/swir-dependency-vectors.json'
       - 'swir-package-resolver.js'
+      - 'swir-packages.js'
       - 'swir-runtime.js'
       - 'swir-store-desktop.js'
       - 'swir-store.html'
@@ -93,7 +97,7 @@ concurrency:
 jobs:
   contract:
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: desktop/windows
@@ -105,6 +109,11 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
 
       - name: Assert pinned .NET SDK line
         shell: pwsh
@@ -142,6 +151,48 @@ jobs:
       - name: Build package signing utility
         run: dotnet build SWIR.Desktop.PackageSignatureTool.csproj --configuration Release
 
+      - name: Build and independently verify signed reviewed Store packages
+        shell: pwsh
+        working-directory: .
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $store = Join-Path '${{ runner.temp }}' 'swir-signed-store-contract'
+          $privateKey = Join-Path '${{ runner.temp }}' 'swir-package-signing-private.b64'
+          $trustRoots = Join-Path '${{ runner.temp }}' 'swir-package-trust-roots.json'
+          $signer = Join-Path '${{ github.workspace }}' 'desktop\windows\bin\Release\net8.0\SWIR.Desktop.PackageSignatureTool.dll'
+          node -e "const fs=require('fs'),crypto=require('crypto'); const {privateKey}=crypto.generateKeyPairSync('ed25519'); const jwk=privateKey.export({format:'jwk'}); const raw=Buffer.from(jwk.d,'base64url'); if(raw.length!==32) throw new Error('Expected 32-byte Ed25519 raw private key'); fs.writeFileSync(process.argv[1], raw.toString('base64'));" $privateKey
+          if ($LASTEXITCODE -ne 0) { throw 'Could not generate ephemeral raw Ed25519 package signing key.' }
+
+          & '${{ github.workspace }}\desktop\windows\build-store-packages.ps1' `
+            -OutputDir $store `
+            -SourceRoot '${{ github.workspace }}' `
+            -PackageSigningKeyId 'ci-store-package-root' `
+            -PackageSigningPrivateKeyFile $privateKey `
+            -PackageTrustRootsOutput $trustRoots `
+            -PackageSignerDll $signer
+          if ($LASTEXITCODE -ne 0) { throw "Signed Store package builder failed with exit code $LASTEXITCODE" }
+
+          $map = Get-Content (Join-Path $store 'catalog-artifacts.json') -Raw | ConvertFrom-Json
+          if ($map.schema -ne 'swir.catalog-artifacts/1.0' -or @($map.artifacts).Count -lt 1) { throw 'Signed Store artifact map is invalid or empty.' }
+          if ($map.generatedFrom -ne $env:GITHUB_SHA.ToLowerInvariant()) { throw 'Signed Store artifact map source commit mismatch.' }
+          $trust = Get-Content $trustRoots -Raw | ConvertFrom-Json
+          if ($trust.schema -ne 'swir.package-trust-roots/1.0' -or $trust.requireSignedPackages -ne $true -or @($trust.roots).Count -ne 1 -or $trust.roots[0].keyId -ne 'ci-store-package-root') {
+            throw 'Signed Store package trust policy is not fail-closed.'
+          }
+
+          foreach ($artifact in @($map.artifacts)) {
+            $relative = [string]$artifact.desktop.url
+            if ($relative -notmatch '^packages/[A-Za-z0-9._-]+\.swirapp$') { throw "Unsafe signed Store artifact URL: $relative" }
+            $path = Join-Path $store $relative
+            if (-not (Test-Path $path -PathType Leaf)) { throw "Signed Store artifact missing: $relative" }
+            $actual = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne [string]$artifact.desktop.sha256) { throw "Signed Store artifact SHA mismatch: $relative" }
+            dotnet $signer verify $path $trustRoots
+            if ($LASTEXITCODE -ne 0) { throw "Independent signed Store artifact verification failed: $relative" }
+          }
+
+          Remove-Item -LiteralPath $privateKey -Force -ErrorAction SilentlyContinue
+
       - name: Run hardened swirapp payload self-tests
         run: dotnet run --project SWIR.Desktop.AppPackage.SelfTests.csproj --configuration Release
 
@@ -151,7 +202,7 @@ jobs:
       - name: Run embedded package signature and tamper self-tests
         run: dotnet run --project SWIR.Desktop.PackageSignature.SelfTests.csproj --configuration Release
 
-      - name: Run signed package install-update-restart-rollback lifecycle
+      - name: Run signed catalog + package install-update-restart-rollback lifecycle
         run: dotnet run --project SWIR.Desktop.SignedPackageLifecycle.SelfTests.csproj --configuration Release
 
       - name: Run Desktop dependency resolver shared-vector self-tests
