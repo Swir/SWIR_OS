@@ -45,16 +45,18 @@ jobs:
           python3 - "${RUNNER_TEMP}/native-daily-suite.json" <<'PY'
           import json, sys
           data = json.load(open(sys.argv[1], encoding='utf-8'))
-          assert data['schema'] == 'swir.native-daily-suite-verification/1.0'
+          assert data['schema'] == 'swir.native-daily-suite-verification/1.1'
           assert data['passed'] is True
-          assert data['capabilityCount'] == 19
-          assert data['baselineCapabilityCount'] == 19
+          assert data['capabilityCount'] == 20
+          assert data['explicitImplementationCapabilityCount'] == 20
           assert data['nativeSourceOnly'] is True
           assert data['graphicalImageStagingVerified'] is True
-          assert data['nativeShellReachabilityVerified'] is True
+          assert data['nativeReachabilityVerified'] is True
+          assert data['fixedShellReachabilityCount'] == 19
+          assert data['defaultAppReachabilityCount'] == 1
           assert data['runtimeEvidenceCoverageVerified'] is True
-          assert data['runtimeEvidenceCapabilityCount'] == 19
-          assert data['runtimeEvidenceWorkflowCount'] == 15
+          assert data['runtimeEvidenceCapabilityCount'] == 20
+          assert data['runtimeEvidenceWorkflowCount'] == 16
           assert data['photoStudioBaselineDepthMarkersVerified'] is True
           assert data['roadmapCompletionClaimed'] is False
           PY

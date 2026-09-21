@@ -16,7 +16,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
 
 APP_ID: Final = "dev.swir.TextEditor"
-EVIDENCE_SCHEMA: Final = "swir.native-text-editor-runtime-evidence/0.1"
+EVIDENCE_SCHEMA: Final = "swir.native-text-editor-runtime-evidence/0.2"
 MAX_DOCUMENT_BYTES: Final = 4 * 1024 * 1024
 
 CSS = b"""
@@ -33,6 +33,14 @@ class DocumentError(RuntimeError):
     pass
 
 
+def _absolute_local_path(value: str | os.PathLike[str]) -> pathlib.Path:
+    raw_text = os.fspath(value)
+    if "://" in raw_text or raw_text.startswith(("data:", "file:")):
+        raise DocumentError("remote/URI document input is not accepted")
+    raw = pathlib.Path(value).expanduser()
+    return raw if raw.is_absolute() else pathlib.Path.cwd() / raw
+
+
 def _has_symlink(path: pathlib.Path) -> bool:
     absolute = path if path.is_absolute() else pathlib.Path.cwd() / path
     current = pathlib.Path(absolute.anchor)
@@ -47,13 +55,15 @@ def _has_symlink(path: pathlib.Path) -> bool:
     return False
 
 
+def _encode_document(text: str) -> bytes:
+    payload = text.encode("utf-8")
+    if b"\0" in payload or len(payload) > MAX_DOCUMENT_BYTES:
+        raise DocumentError("document output violates the UTF-8/size policy")
+    return payload
+
+
 def load_document(value: str | os.PathLike[str]) -> tuple[pathlib.Path, str, tuple[int, int]]:
-    raw_text = os.fspath(value)
-    if "://" in raw_text or raw_text.startswith(("data:", "file:")):
-        raise DocumentError("remote/URI document input is not accepted")
-    raw = pathlib.Path(value).expanduser()
-    if not raw.is_absolute():
-        raw = pathlib.Path.cwd() / raw
+    raw = _absolute_local_path(value)
     if _has_symlink(raw):
         raise DocumentError("symbolic-link document paths are not accepted")
     info = os.lstat(raw)
@@ -73,9 +83,7 @@ def load_document(value: str | os.PathLike[str]) -> tuple[pathlib.Path, str, tup
 
 
 def save_document(path: pathlib.Path, text: str, identity: tuple[int, int]) -> tuple[int, int]:
-    payload = text.encode("utf-8")
-    if b"\0" in payload or len(payload) > MAX_DOCUMENT_BYTES:
-        raise DocumentError("document output violates the UTF-8/size policy")
+    payload = _encode_document(text)
     if _has_symlink(path):
         raise DocumentError("symbolic-link document paths are not accepted")
     before = os.lstat(path)
@@ -114,6 +122,45 @@ def save_document(path: pathlib.Path, text: str, identity: tuple[int, int]) -> t
     return current.st_dev, current.st_ino
 
 
+def create_document(value: str | os.PathLike[str], text: str) -> tuple[pathlib.Path, tuple[int, int]]:
+    """Create a new local document without following links or replacing data."""
+    payload = _encode_document(text)
+    raw = _absolute_local_path(value)
+    if _has_symlink(raw):
+        raise DocumentError("symbolic-link document paths are not accepted")
+    parent = raw.parent.resolve(strict=True)
+    if _has_symlink(parent) or not parent.is_dir():
+        raise DocumentError("document parent is not a canonical directory")
+    if not os.access(parent, os.W_OK | os.X_OK):
+        raise DocumentError("document parent is not writable by the current user")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(raw, flags, 0o600)
+    except FileExistsError as exc:
+        raise DocumentError("Save As refuses to replace an existing file") from exc
+    try:
+        with os.fdopen(fd, "wb", closefd=True) as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except BaseException:
+        try:
+            raw.unlink()
+        except OSError:
+            pass
+        raise
+    dfd = os.open(parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(dfd)
+    finally:
+        os.close(dfd)
+    path = raw.resolve(strict=True)
+    info = os.lstat(path)
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+        raise DocumentError("new document did not resolve to a single-link regular file")
+    return path, (info.st_dev, info.st_ino)
+
+
 def self_test() -> int:
     with tempfile.TemporaryDirectory(prefix="swir-text-editor-") as temp_text:
         root = pathlib.Path(temp_text)
@@ -124,6 +171,18 @@ def self_test() -> int:
         identity = save_document(path, text + "# saved\n", identity)
         assert load_document(path)[1].endswith("# saved\n")
         assert identity == load_document(path)[2]
+
+        created, created_identity = create_document(root / "new.txt", "new document\n")
+        assert created.read_text(encoding="utf-8") == "new document\n"
+        assert stat.S_IMODE(created.stat().st_mode) == 0o600
+        assert created_identity == load_document(created)[2]
+        try:
+            create_document(created, "replace\n")
+        except DocumentError:
+            pass
+        else:
+            raise AssertionError("Save As replaced an existing file")
+
         binary = root / "binary.txt"
         binary.write_bytes(b"x\0y")
         try:
@@ -132,6 +191,49 @@ def self_test() -> int:
             pass
         else:
             raise AssertionError("binary file was accepted")
+
+        symlink = root / "symlink.txt"
+        symlink.symlink_to(sample.name)
+        try:
+            load_document(symlink)
+        except DocumentError:
+            pass
+        else:
+            raise AssertionError("symlink document was accepted")
+
+        hard_source = root / "hard-source.txt"
+        hard_source.write_text("hard\n", encoding="utf-8")
+        hard_link = root / "hard-link.txt"
+        os.link(hard_source, hard_link)
+        try:
+            load_document(hard_source)
+        except DocumentError:
+            pass
+        else:
+            raise AssertionError("multi-link document was accepted")
+
+        race = root / "race.txt"
+        race.write_text("original\n", encoding="utf-8")
+        race_path, race_text, race_identity = load_document(race)
+        replacement = root / "replacement.txt"
+        replacement.write_text("replacement\n", encoding="utf-8")
+        os.replace(replacement, race)
+        try:
+            save_document(race_path, race_text + "changed\n", race_identity)
+        except DocumentError:
+            pass
+        else:
+            raise AssertionError("replaced document identity was overwritten")
+
+        oversized = root / "oversized.txt"
+        oversized.write_bytes(b"x" * (MAX_DOCUMENT_BYTES + 1))
+        try:
+            load_document(oversized)
+        except DocumentError:
+            pass
+        else:
+            raise AssertionError("oversized document was accepted")
+
         try:
             load_document("https://example.invalid/file.txt")
         except DocumentError:
@@ -150,6 +252,7 @@ class SwirTextEditor(Gtk.Application):
         self.status: Gtk.Label | None = None
         self.path: pathlib.Path | None = None
         self.identity: tuple[int, int] | None = None
+        self.file_dialog: Gtk.FileChooserNative | None = None
         self.e2e = os.environ.get("SWIR_APP_E2E", "0") == "1"
         self.evidence_path = os.environ.get("SWIR_APP_EVIDENCE_PATH", "")
         self.e2e_input = os.environ.get("SWIR_TEXT_E2E_INPUT", "")
@@ -181,21 +284,30 @@ class SwirTextEditor(Gtk.Application):
         brand.set_hexpand(True)
         brand.set_xalign(0)
         header.append(brand)
-        save = Gtk.Button(label="Save")
-        save.add_css_class("swir-button")
-        save.connect("clicked", self._save_clicked)
-        header.append(save)
+        for label, handler in (("New", self._new_clicked), ("Open", self._open_clicked), ("Save", self._save_clicked), ("Save As", self._save_as_clicked)):
+            button = Gtk.Button(label=label)
+            button.add_css_class("swir-button")
+            button.set_tooltip_text(f"{label} local UTF-8 document")
+            button.connect("clicked", handler)
+            header.append(button)
         root.append(header)
         scroller = Gtk.ScrolledWindow()
         scroller.set_hexpand(True)
         scroller.set_vexpand(True)
         view = Gtk.TextView()
+        view.set_wrap_mode(Gtk.WrapMode.NONE)
+        view.set_monospace(True)
+        view.set_tooltip_text("Local UTF-8 text editor")
         self.buffer = view.get_buffer()
         scroller.set_child(view)
         root.append(scroller)
-        self.status = Gtk.Label(label="Open a local UTF-8 text/code file.")
+        self.status = Gtk.Label(label="Create or open a local UTF-8 text/code file.")
         self.status.add_css_class("swir-muted")
         self.status.set_xalign(0)
+        self.status.set_margin_start(12)
+        self.status.set_margin_end(12)
+        self.status.set_margin_top(6)
+        self.status.set_margin_bottom(8)
         root.append(self.status)
         if self.e2e and self.e2e_input:
             self._load(self.e2e_input)
@@ -230,9 +342,43 @@ class SwirTextEditor(Gtk.Application):
         start, end = self.buffer.get_bounds()
         return self.buffer.get_text(start, end, True)
 
+    def _new_clicked(self, _button: Gtk.Button) -> None:
+        assert self.buffer is not None
+        self.buffer.set_text("")
+        self.path = None
+        self.identity = None
+        if self.window is not None:
+            self.window.set_title("Untitled — SWIR Text Editor")
+        self._set_status("New unsaved local UTF-8 document.")
+
+    def _open_clicked(self, _button: Gtk.Button) -> None:
+        if self.window is None or self.file_dialog is not None:
+            return
+        dialog = Gtk.FileChooserNative.new("Open local document", self.window, Gtk.FileChooserAction.OPEN, "Open", "Cancel")
+        dialog.set_select_multiple(False)
+        dialog.connect("response", self._open_response)
+        self.file_dialog = dialog
+        dialog.show()
+
+    def _open_response(self, dialog: Gtk.FileChooserNative, response: int) -> None:
+        try:
+            if response != Gtk.ResponseType.ACCEPT:
+                return
+            selected = dialog.get_file()
+            if selected is None or not selected.is_native() or not selected.get_path():
+                self._set_status("Only local files are accepted.")
+                return
+            try:
+                self._load(selected.get_path())
+            except (OSError, DocumentError) as exc:
+                self._set_status(f"Could not open document: {exc}")
+        finally:
+            dialog.hide()
+            self.file_dialog = None
+
     def _save(self) -> bool:
         if self.path is None or self.identity is None:
-            self._set_status("No document is open.")
+            self._set_status("Choose Save As to create this document.")
             return False
         try:
             self.identity = save_document(self.path, self._text(), self.identity)
@@ -243,7 +389,43 @@ class SwirTextEditor(Gtk.Application):
         return True
 
     def _save_clicked(self, _button: Gtk.Button) -> None:
-        self._save()
+        if self.path is None:
+            self._show_save_as()
+        else:
+            self._save()
+
+    def _save_as_clicked(self, _button: Gtk.Button) -> None:
+        self._show_save_as()
+
+    def _show_save_as(self) -> None:
+        if self.window is None or self.file_dialog is not None:
+            return
+        dialog = Gtk.FileChooserNative.new("Save new local document", self.window, Gtk.FileChooserAction.SAVE, "Save", "Cancel")
+        dialog.set_current_name(self.path.name if self.path is not None else "untitled.txt")
+        dialog.connect("response", self._save_as_response)
+        self.file_dialog = dialog
+        dialog.show()
+
+    def _save_as_response(self, dialog: Gtk.FileChooserNative, response: int) -> None:
+        try:
+            if response != Gtk.ResponseType.ACCEPT:
+                return
+            selected = dialog.get_file()
+            if selected is None or not selected.is_native() or not selected.get_path():
+                self._set_status("Only local Save As targets are accepted.")
+                return
+            try:
+                path, identity = create_document(selected.get_path(), self._text())
+            except (OSError, DocumentError) as exc:
+                self._set_status(f"Save As refused: {exc}")
+                return
+            self.path, self.identity = path, identity
+            if self.window is not None:
+                self.window.set_title(f"{path.name} — SWIR Text Editor")
+            self._set_status(f"Created securely • {path.name}")
+        finally:
+            dialog.hide()
+            self.file_dialog = None
 
     def _set_status(self, text: str) -> None:
         if self.status is not None:
@@ -259,9 +441,10 @@ class SwirTextEditor(Gtk.Application):
         self.buffer.set_text(self._text() + "# SWIR Text Editor E2E saved\n")
         saved = self._save()
         reloaded = load_document(self.path)[1]
+        create_probe, _ = create_document(runtime / "swir-text-editor-created.txt", "created by E2E\n")
         payload = {
             "schema": EVIDENCE_SCHEMA,
-            "passed": saved and reloaded.endswith("# SWIR Text Editor E2E saved\n"),
+            "passed": saved and reloaded.endswith("# SWIR Text Editor E2E saved\n") and create_probe.is_file(),
             "applicationId": APP_ID,
             "nativeToolkit": "gtk4",
             "displayProtocol": "wayland",
@@ -270,7 +453,13 @@ class SwirTextEditor(Gtk.Application):
             "localFilesOnly": True,
             "remoteUriInputAccepted": False,
             "symlinkInputAccepted": False,
-            "atomicSave": True,
+            "hardlinkInputAccepted": False,
+            "atomicOverwrite": True,
+            "exclusiveCreate": True,
+            "existingSaveAsTargetReplaced": False,
+            "interactiveOpen": True,
+            "interactiveNew": True,
+            "interactiveSaveAs": True,
             "maxDocumentBytes": MAX_DOCUMENT_BYTES,
         }
         evidence.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")

@@ -159,7 +159,7 @@ jobs:
 
           timeout --signal=TERM --kill-after=5s 30s \
             dbus-run-session -- \
-            env LIBGL_ALWAYS_SOFTWARE=1 \
+            env LIBGL_ALWAYS_SOFTWARE=1 GTK_A11Y=none \
                 SWIR_APP_E2E=1 \
                 SWIR_DEFAULT_APPS_E2E=1 \
                 SWIR_APP_EVIDENCE_PATH="$RUNTIME/default-apps.json" \
@@ -257,15 +257,23 @@ jobs:
           assert evidence.is_file(), 'archive default handler did not produce runtime evidence'
           PY
 
-          python3 - "$RUNTIME/text-default-open.json" "$RUNTIME/archive-default-open.json" "$RUNTIME/default-open.py" "$ARCHIVE_DEST" <<'PY'
-          import json, pathlib, sys
+          python3 - "$RUNTIME/text-default-open.json" "$RUNTIME/archive-default-open.json" "$RUNTIME/default-open.py" "$RUNTIME/swir-text-editor-created.txt" "$ARCHIVE_DEST" <<'PY'
+          import json, pathlib, stat, sys
           text = json.load(open(sys.argv[1], encoding='utf-8'))
           archive = json.load(open(sys.argv[2], encoding='utf-8'))
           source = pathlib.Path(sys.argv[3])
-          destination = pathlib.Path(sys.argv[4]).resolve()
-          assert text['schema'] == 'swir.native-text-editor-runtime-evidence/0.1'
+          created = pathlib.Path(sys.argv[4])
+          destination = pathlib.Path(sys.argv[5]).resolve()
+          assert text['schema'] == 'swir.native-text-editor-runtime-evidence/0.2'
           assert text['passed'] is True and text['applicationId'] == 'dev.swir.TextEditor'
+          assert text['localFilesOnly'] is True and text['remoteUriInputAccepted'] is False
+          assert text['symlinkInputAccepted'] is False and text['hardlinkInputAccepted'] is False
+          assert text['atomicOverwrite'] is True and text['exclusiveCreate'] is True
+          assert text['existingSaveAsTargetReplaced'] is False
+          assert text['interactiveOpen'] is True and text['interactiveNew'] is True and text['interactiveSaveAs'] is True
           assert source.read_text(encoding='utf-8').endswith('# SWIR Text Editor E2E saved\n')
+          assert created.read_text(encoding='utf-8') == 'created by E2E\n'
+          assert stat.S_IMODE(created.stat().st_mode) == 0o600
           assert archive['schema'] == 'swir.native-archive-manager-runtime-evidence/0.1'
           assert archive['passed'] is True and archive['applicationId'] == 'dev.swir.ArchiveManager'
           root = pathlib.Path(archive['extractionRoot'])

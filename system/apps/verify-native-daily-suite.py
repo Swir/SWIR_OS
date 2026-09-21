@@ -3,10 +3,10 @@
 
 This verifies that every Product Baseline 1.0 essential-utility capability is
 represented by trusted native source, staged into the graphical image,
-reachable from the native shell, and explicitly bound to an in-repository
-runtime-evidence workflow. It deliberately does not declare the umbrella
-roadmap deliverable complete: per-application product-depth requirements remain
-separate gates.
+reachable through an explicitly verified native entry point, and bound to an
+in-repository runtime-evidence workflow. It deliberately does not declare the
+umbrella roadmap deliverable complete: per-application product-depth
+requirements remain separate gates.
 """
 from __future__ import annotations
 
@@ -20,9 +20,9 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 EXPECTED_IDS: Final = frozenset(
     {
         "files", "settings", "terminal", "software", "updates", "hardware",
-        "network", "browser", "notes", "player", "photo-studio", "pdf-viewer",
-        "archive-manager", "calculator", "screenshot", "clock", "system-monitor",
-        "logs-diagnostics", "backup-restore",
+        "network", "browser", "text-editor", "notes", "player", "photo-studio",
+        "pdf-viewer", "archive-manager", "calculator", "screenshot", "clock",
+        "system-monitor", "logs-diagnostics", "backup-restore",
     }
 )
 
@@ -30,6 +30,14 @@ EXPECTED_IDS: Final = frozenset(
 # implementation rather than merely finding files with matching names.
 REQUIRED_MARKERS: Final = {
     "browser": ("gi.require_version(\"Gtk\", \"4.0\")", "WebKit"),
+    "text-editor": (
+        "Gio.ApplicationFlags.HANDLES_OPEN",
+        "os.O_EXCL",
+        "O_NOFOLLOW",
+        "os.replace(temp, path)",
+        "Gtk.FileChooserNative",
+        "swir.native-text-editor-runtime-evidence/0.2",
+    ),
     "player": ("gi.require_version(\"Gtk\", \"4.0\")", "Gst"),
     "photo-studio": (
         "GdkPixbuf", "EditHistory", "_atomic_export", "def _crop_pixbuf(",
@@ -54,6 +62,15 @@ RUNTIME_EVIDENCE_MARKERS: Final = (
     "--archive-self-test",
     "selftest",
 )
+DEFAULT_APP_TYPES: Final = {
+    "text": (
+        "text/plain",
+        "text/markdown",
+        "application/json",
+        "text/x-python",
+    ),
+}
+DEFAULT_APP_FIRST_PARTY_IDS: Final = {"text": "swir-text-editor.desktop"}
 
 
 def fail(message: str) -> None:
@@ -186,25 +203,70 @@ def verify_source(capability: dict) -> str:
     return verify_evidence_workflow(capability)
 
 
-def verify_image_and_shell_integration(capabilities: list[dict]) -> None:
+def verify_default_app_reachability(capability: dict, provision: str, settings: str) -> None:
+    ident = capability["id"]
+    reachability = capability.get("reachability")
+    if not isinstance(reachability, dict) or set(reachability) != {"kind", "category"}:
+        fail(f"{ident}: malformed explicit reachability policy")
+    if reachability.get("kind") != "default-app":
+        fail(f"{ident}: unsupported reachability kind")
+    category = reachability.get("category")
+    if category not in DEFAULT_APP_TYPES:
+        fail(f"{ident}: unsupported Default Apps category: {category!r}")
+
+    desktop = capability.get("desktop")
+    if not isinstance(desktop, str) or pathlib.PurePosixPath(desktop).parent != pathlib.PurePosixPath("system/apps"):
+        fail(f"{ident}: native desktop registration is missing")
+    desktop_path = trusted_repo_file(desktop)
+    desktop_name = desktop_path.name
+    if DEFAULT_APP_FIRST_PARTY_IDS[category] != desktop_name:
+        fail(f"{ident}: unexpected first-party desktop id for {category}")
+    desktop_text = desktop_path.read_text(encoding="utf-8")
+    stage = capability["stage"]
+    if f"Exec={stage} %f" not in desktop_text or f"TryExec={stage}" not in desktop_text:
+        fail(f"{ident}: desktop registration is not bound to the staged executable")
+    if f"Name=SWIR {capability['launcher']}" not in desktop_text:
+        fail(f"{ident}: desktop registration lost its first-party display identity")
+    for mime in DEFAULT_APP_TYPES[category]:
+        if mime not in desktop_text:
+            fail(f"{ident}: desktop registration lost required handler type {mime}")
+
+    if desktop not in provision or f"safe_target /usr/share/applications/{desktop_name}" not in provision:
+        fail(f"{ident}: graphical image does not stage the desktop registration")
+    settings_binding = f'"{category}": "{desktop_name}"'
+    if settings_binding not in settings:
+        fail(f"{ident}: Settings no longer binds the first-party Default Apps handler")
+    for mime in DEFAULT_APP_TYPES[category]:
+        if mime not in settings:
+            fail(f"{ident}: Settings lost required Default Apps handler type {mime}")
+
+
+def verify_image_and_shell_integration(capabilities: list[dict]) -> int:
     provision = trusted_repo_file("system/session/provision-graphical-session.sh").read_text(encoding="utf-8")
     shell = trusted_repo_file("system/session/swir-shell.py").read_text(encoding="utf-8")
+    settings = trusted_repo_file("system/apps/swir-settings.py").read_text(encoding="utf-8")
     if "set -euo pipefail" not in provision:
         fail("graphical provisioning no longer uses fail-closed shell flags")
     if "LAUNCHERS: Final" not in shell:
         fail("native shell launcher allowlist is missing")
 
     unique_pairs: set[tuple[str, str]] = set()
+    default_app_reachability = 0
     for cap in capabilities:
         source = cap["source"]
         stage = cap["stage"]
         unique_pairs.add((source, stage))
-        expected_launcher = f'(\"{cap["launcher"]}\",'
-        if expected_launcher not in shell or stage not in shell:
-            fail(f'{cap["id"]}: fixed native shell launcher is missing')
-        mode_arg = cap.get("modeArg")
-        if mode_arg and mode_arg not in shell:
-            fail(f'{cap["id"]}: launcher mode argument is missing')
+        reachability = cap.get("reachability")
+        if reachability is None:
+            expected_launcher = f'(\"{cap["launcher"]}\",'
+            if expected_launcher not in shell or stage not in shell:
+                fail(f'{cap["id"]}: fixed native shell launcher is missing')
+            mode_arg = cap.get("modeArg")
+            if mode_arg and mode_arg not in shell:
+                fail(f'{cap["id"]}: launcher mode argument is missing')
+        else:
+            verify_default_app_reachability(cap, provision, settings)
+            default_app_reachability += 1
 
     for source, stage in unique_pairs:
         source_token = f'$SOURCE_ROOT/{source}'
@@ -216,6 +278,7 @@ def verify_image_and_shell_integration(capabilities: list[dict]) -> None:
 
     if "native-apps=" not in provision:
         fail("graphical provisioning evidence summary lost native app inventory")
+    return default_app_reachability
 
 
 def verify_no_web_app_sources(capabilities: list[dict]) -> None:
@@ -233,16 +296,18 @@ def main() -> int:
     for capability in caps:
         evidence_workflows.add(verify_source(capability))
     verify_no_web_app_sources(caps)
-    verify_image_and_shell_integration(caps)
+    default_reachability = verify_image_and_shell_integration(caps)
     summary = {
-        "schema": "swir.native-daily-suite-verification/1.0",
+        "schema": "swir.native-daily-suite-verification/1.1",
         "passed": True,
         "scope": data["scope"],
         "capabilityCount": len(caps),
-        "baselineCapabilityCount": len(EXPECTED_IDS),
+        "explicitImplementationCapabilityCount": len(EXPECTED_IDS),
         "nativeSourceOnly": True,
         "graphicalImageStagingVerified": True,
-        "nativeShellReachabilityVerified": True,
+        "nativeReachabilityVerified": True,
+        "fixedShellReachabilityCount": len(caps) - default_reachability,
+        "defaultAppReachabilityCount": default_reachability,
         "runtimeEvidenceCoverageVerified": True,
         "runtimeEvidenceCapabilityCount": len(caps),
         "runtimeEvidenceWorkflowCount": len(evidence_workflows),
