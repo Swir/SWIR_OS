@@ -14,7 +14,9 @@ function decodeBase64(value, label) {
   if (typeof value !== 'string' || value.length === 0 || !BASE64_RE.test(value)) {
     throw new Error(`${label} is not valid canonical base64.`);
   }
-  return Buffer.from(value, 'base64');
+  const decoded = Buffer.from(value, 'base64');
+  if (decoded.toString('base64') !== value) throw new Error(`${label} is not valid canonical base64.`);
+  return decoded;
 }
 
 export function parseEnvelope(text, expectedChannel, expectedTag = null) {
@@ -58,15 +60,16 @@ export function verifyEnvelopeSignature(incoming, publicKeyPem, expectedKeyId) {
 export function verifyPackageArtifact(payload, packagePath) {
   const expectedName = path.posix.basename(new URL(payload.Package.Url).pathname);
   if (path.basename(packagePath) !== expectedName) throw new Error(`Release package filename does not match signed payload: expected ${expectedName}.`);
-  const stat = fs.statSync(packagePath);
+  const stat = fs.lstatSync(packagePath);
   if (!stat.isFile()) throw new Error('Release package path is not a regular file.');
-  if (stat.size !== payload.Package.Size) throw new Error(`Release package size does not match signed payload: expected ${payload.Package.Size}, got ${stat.size}.`);
-  const actualSha256 = crypto.createHash('sha256').update(fs.readFileSync(packagePath)).digest('hex');
+  const packageBytes = fs.readFileSync(packagePath);
+  if (packageBytes.length !== payload.Package.Size) throw new Error(`Release package size does not match signed payload: expected ${payload.Package.Size}, got ${packageBytes.length}.`);
+  const actualSha256 = crypto.createHash('sha256').update(packageBytes).digest('hex');
   const expectedSha256 = payload.Package.Sha256;
   if (!crypto.timingSafeEqual(Buffer.from(actualSha256, 'ascii'), Buffer.from(expectedSha256, 'ascii'))) {
     throw new Error('Release package SHA-256 does not match signed payload.');
   }
-  return { sha256: actualSha256, size: stat.size };
+  return { sha256: actualSha256, size: packageBytes.length };
 }
 
 export function compareVersions(a, b) {
