@@ -17,6 +17,8 @@ on:
       - 'desktop/windows/DesktopUpdateBackgroundHostController.cs'
       - 'desktop/windows/DesktopUpdateBackgroundHostControllerSelfTests.cs'
       - 'desktop/windows/SWIR.Desktop.UpdateBackgroundHostController.SelfTests.csproj'
+      - 'desktop/windows/DesktopUpdateBackgroundHostRuntime.cs'
+      - 'desktop/windows/validate-update-background-host-runtime.mjs'
       - 'desktop/windows/DesktopGitHubUpdatePolicy.cs'
       - 'desktop/windows/DesktopReleaseBundleBuilder.cs'
       - 'desktop/windows/DesktopReleaseBundleSelfTests.cs'
@@ -45,6 +47,8 @@ on:
       - 'desktop/windows/DesktopUpdateBackgroundHostController.cs'
       - 'desktop/windows/DesktopUpdateBackgroundHostControllerSelfTests.cs'
       - 'desktop/windows/SWIR.Desktop.UpdateBackgroundHostController.SelfTests.csproj'
+      - 'desktop/windows/DesktopUpdateBackgroundHostRuntime.cs'
+      - 'desktop/windows/validate-update-background-host-runtime.mjs'
       - 'desktop/windows/DesktopGitHubUpdatePolicy.cs'
       - 'desktop/windows/DesktopReleaseBundleBuilder.cs'
       - 'desktop/windows/DesktopReleaseBundleSelfTests.cs'
@@ -98,6 +102,9 @@ jobs:
       - name: Verify Desktop host scheduler policy controller
         working-directory: desktop/windows
         run: dotnet run --project SWIR.Desktop.UpdateBackgroundHostController.SelfTests.csproj --configuration Release
+      - name: Verify Desktop Host background runtime binding
+        working-directory: desktop/windows
+        run: node validate-update-background-host-runtime.mjs
       - name: Verify release bundle integration
         working-directory: desktop/windows
         run: dotnet run --project SWIR.Desktop.ReleaseBundle.SelfTests.csproj --configuration Release
