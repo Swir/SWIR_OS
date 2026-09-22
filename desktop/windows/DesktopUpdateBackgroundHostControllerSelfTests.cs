@@ -12,6 +12,7 @@ internal static class DesktopUpdateBackgroundHostControllerSelfTests
         Run("policy downgrade stops scheduler", DowngradeStopsScheduler, failures);
         Run("automatic policy restarts scheduler without restart permission", AutomaticRestartsSchedulerSafely, failures);
         Run("malformed policy shape fails closed", MalformedPolicyFailsClosed, failures);
+        Run("policy read failure stops stale scheduler", PolicyReadFailureStopsStaleScheduler, failures);
         Run("untrusted policy access is preserved", UntrustedAccessIsRejected, failures);
 
         if (failures.Count == 0)
@@ -68,6 +69,27 @@ internal static class DesktopUpdateBackgroundHostControllerSelfTests
         Expect(state.GetProperty("failClosedPolicy").GetBoolean(), "controller must advertise fail-closed policy handling");
     }
 
+    private static void PolicyReadFailureStopsStaleScheduler()
+    {
+        using var f = new Fixture("notify");
+        var running = Json(f.Controller.StartAsync(true).GetAwaiter().GetResult());
+        Expect(running.GetProperty("scheduler").GetProperty("running").GetBoolean(), "precondition: scheduler must be running");
+
+        f.ThrowOnDescribe = true;
+        try
+        {
+            _ = f.Controller.StartAsync(true).GetAwaiter().GetResult();
+            throw new InvalidOperationException("Expected policy-read-failed.");
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "policy-read-failed")
+        {
+        }
+
+        f.ThrowOnDescribe = false;
+        var after = Json(f.Controller.Describe(true));
+        Expect(!after.GetProperty("scheduler").GetProperty("running").GetBoolean(), "policy read failure must stop stale scheduler state");
+    }
+
     private static void UntrustedAccessIsRejected()
     {
         using var f = new Fixture("notify");
@@ -99,6 +121,7 @@ internal static class DesktopUpdateBackgroundHostControllerSelfTests
         private string _mode;
         public int Cycles { get; private set; }
         public bool ReturnMalformedPolicy { get; set; }
+        public bool ThrowOnDescribe { get; set; }
         public DesktopUpdateBackgroundHostController Controller { get; }
 
         public Fixture(string initialMode)
@@ -114,6 +137,7 @@ internal static class DesktopUpdateBackgroundHostControllerSelfTests
                 trustedShell =>
                 {
                     RequireTrusted(trustedShell);
+                    if (ThrowOnDescribe) throw new InvalidOperationException("policy-read-failed");
                     return ReturnMalformedPolicy ? new { mode = _mode } : Policy(_mode);
                 },
                 (trustedShell, mode) =>
