@@ -45,6 +45,7 @@ jobs:
             system/apps/swir-system-monitor.py \
             system/apps/swir-terminal.py
           PYTHONPATH=system/apps python3 system/apps/core_runtime.selftest.py
+          PYTHONPATH=system/apps python3 system/apps/swir-notes.py --self-test
           ! grep -RE 'shell *= *True|os\.system\(|subprocess\.(run|Popen)\([^\n]*shell *= *True' system/apps
           # Mentioning sudo/pkexec in documentation is allowed; invoking their
           # absolute production paths from first-party app code is not.
@@ -53,6 +54,8 @@ jobs:
           grep -F 'fileOpenDelegationEnabled": False' system/apps/swir-files.py >/dev/null
           grep -F 'mutationControlsExposed": False' system/apps/swir-network-center.py >/dev/null
           grep -F 'ownerOnlyNotesFile' system/apps/swir-notes.py >/dev/null
+          grep -F 'UserSettingsStore' system/apps/swir-notes.py >/dev/null
+          grep -F 'localizedTooltips' system/apps/swir-notes.py >/dev/null
           grep -F 'ownerOnlySettingsFile' system/apps/swir-settings.py >/dev/null
           grep -F 'defaultAppCategoryCount' system/apps/swir-settings.py >/dev/null
           grep -F 'processRowsBounded' system/apps/swir-system-monitor.py >/dev/null
@@ -78,9 +81,20 @@ jobs:
           set -euo pipefail
           RUNTIME="${{ runner.temp }}/swir-runtime"
           CONFIG="${{ runner.temp }}/swir-config"
+          NOTES_CONFIG="${{ runner.temp }}/swir-notes-config"
           DATA="${{ runner.temp }}/swir-data"
-          mkdir -p "$RUNTIME" "$CONFIG" "$DATA"
-          chmod 0700 "$RUNTIME" "$CONFIG" "$DATA"
+          mkdir -p "$RUNTIME" "$CONFIG" "$NOTES_CONFIG/swir" "$DATA"
+          chmod 0700 "$RUNTIME" "$CONFIG" "$NOTES_CONFIG" "$NOTES_CONFIG/swir" "$DATA"
+          cat > "$NOTES_CONFIG/swir/settings.json" <<'JSON'
+          {
+            "schema": "swir.user-settings/0.1",
+            "appearance": "dark",
+            "language": "pl-PL",
+            "clock24h": true,
+            "themeId": "builtin.swir-dark"
+          }
+          JSON
+          chmod 0600 "$NOTES_CONFIG/swir/settings.json"
           export XDG_RUNTIME_DIR="$RUNTIME"
           export XDG_CONFIG_HOME="$CONFIG"
           export XDG_DATA_HOME="$DATA"
@@ -112,7 +126,10 @@ jobs:
 
           run_app "SWIR Files" "$RUNTIME/files.json" system/apps/swir-files.py
           run_app "SWIR Network Center" "$RUNTIME/network.json" system/apps/swir-network-center.py
-          run_app "SWIR Notes" "$RUNTIME/notes.json" system/apps/swir-notes.py
+          echo "Running SWIR Notes localized runtime evidence"
+          timeout --signal=TERM --kill-after=5s 25s \
+            env XDG_CONFIG_HOME="$NOTES_CONFIG" SWIR_APP_E2E=1 SWIR_APP_EVIDENCE_PATH="$RUNTIME/notes.json" \
+            python3 system/apps/swir-notes.py
           run_app "SWIR Settings" "$RUNTIME/settings.json" system/apps/swir-settings.py
           run_app "SWIR System Monitor" "$RUNTIME/system-monitor.json" system/apps/swir-system-monitor.py
           run_app "SWIR Terminal" "$RUNTIME/terminal.json" system/apps/swir-terminal.py
@@ -142,11 +159,18 @@ jobs:
           assert network['nmcliPresent'] is True and network['deviceRowsBounded'] == 100
           assert network['queryTimeoutSeconds'] == 4
 
-          assert notes['schema'] == 'swir.native-notes-runtime-evidence/0.1'
+          assert notes['schema'] == 'swir.native-notes-runtime-evidence/0.2'
           assert notes['passed'] is True and notes['applicationId'] == 'dev.swir.Notes'
           assert notes['nativeToolkit'] == 'gtk4' and notes['displayProtocol'] == 'wayland'
           assert notes['windowMapped'] is True and notes['privilegedOperations'] is False
           assert notes['atomicPersistence'] is True and notes['ownerOnlyNotesFile'] is True
+          assert notes['requestedLanguage'] == 'pl-PL' and notes['catalogLanguage'] == 'pl-PL'
+          assert notes['translationFallback'] is False and notes['textDirection'] == 'ltr'
+          assert notes['localizedWindowTitle'] == 'Notatki SWIR'
+          assert notes['localizedSaveLabel'] == 'Zapisz'
+          assert notes['localizedSurfaceVerified'] is True
+          assert notes['saveButtonFocusable'] is True and notes['editorFocusable'] is True
+          assert notes['localizedTooltips'] is True
           assert notes_path.read_text(encoding='utf-8') == 'SWIR Notes E2E\n'
           assert stat.S_IMODE(notes_path.stat().st_mode) == 0o600
 

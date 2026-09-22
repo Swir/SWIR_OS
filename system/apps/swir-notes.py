@@ -8,15 +8,22 @@ import os
 import pathlib
 import sys
 import tempfile
-from typing import Final
+from dataclasses import dataclass
+from typing import Final, Mapping
 
 import gi
 
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
+LIBDIR = pathlib.Path("/usr/local/lib/swir")
+if LIBDIR.is_dir() and str(LIBDIR) not in sys.path:
+    sys.path.insert(0, str(LIBDIR))
+
+from core_runtime import UserSettingsStore, normalize_language_tag  # noqa: E402
+
 APP_ID: Final = "dev.swir.Notes"
-EVIDENCE_SCHEMA: Final = "swir.native-notes-runtime-evidence/0.1"
+EVIDENCE_SCHEMA: Final = "swir.native-notes-runtime-evidence/0.2"
 MAX_NOTE_BYTES: Final = 1024 * 1024
 
 CSS = b"""
@@ -28,6 +35,67 @@ window.swir-app { background: #02050A; color: #F4FAFF; }
 .swir-button:hover { border-color: #62E5FF; }
 textview { background: #07111C; color: #F4FAFF; padding: 16px; }
 """
+
+_TRANSLATIONS: Final[Mapping[str, Mapping[str, str]]] = {
+    "en": {
+        "window_title": "SWIR Notes",
+        "brand": "◆  SWIR Notes",
+        "save": "Save",
+        "ready": "Ready • personal note stored locally",
+        "load_failed": "Could not load note: {reason}",
+        "save_failed": "Could not save note: {reason}",
+        "saved": "Saved",
+        "editor_tooltip": "Personal note editor",
+        "save_tooltip": "Save this personal note locally",
+    },
+    "pl-PL": {
+        "window_title": "Notatki SWIR",
+        "brand": "◆  Notatki SWIR",
+        "save": "Zapisz",
+        "ready": "Gotowe • osobista notatka jest przechowywana lokalnie",
+        "load_failed": "Nie udało się wczytać notatki: {reason}",
+        "save_failed": "Nie udało się zapisać notatki: {reason}",
+        "saved": "Zapisano",
+        "editor_tooltip": "Edytor osobistej notatki",
+        "save_tooltip": "Zapisz tę osobistą notatkę lokalnie",
+    },
+    "nb-NO": {
+        "window_title": "SWIR-notater",
+        "brand": "◆  SWIR-notater",
+        "save": "Lagre",
+        "ready": "Klar • personlig notat lagres lokalt",
+        "load_failed": "Kunne ikke laste notatet: {reason}",
+        "save_failed": "Kunne ikke lagre notatet: {reason}",
+        "saved": "Lagret",
+        "editor_tooltip": "Rediger personlig notat",
+        "save_tooltip": "Lagre dette personlige notatet lokalt",
+    },
+}
+
+
+@dataclass(frozen=True)
+class NotesLocale:
+    requested_language: str
+    catalog_language: str
+    strings: Mapping[str, str]
+
+    @property
+    def fallback(self) -> bool:
+        return self.requested_language != self.catalog_language
+
+    @property
+    def text_direction(self) -> str:
+        return "rtl" if self.catalog_language.split("-", 1)[0] in {"ar", "he"} else "ltr"
+
+    def text(self, key: str, **values: object) -> str:
+        template = self.strings[key]
+        return template.format(**values) if values else template
+
+
+def notes_locale(language: object) -> NotesLocale:
+    requested = normalize_language_tag(language) or "en"
+    catalog = requested if requested in _TRANSLATIONS else "en"
+    return NotesLocale(requested, catalog, _TRANSLATIONS[catalog])
 
 
 class NotesStore:
@@ -96,9 +164,23 @@ class SwirNotes(Gtk.Application):
         self.window: Gtk.ApplicationWindow | None = None
         self.buffer: Gtk.TextBuffer | None = None
         self.status: Gtk.Label | None = None
+        self.save_button: Gtk.Button | None = None
+        self.editor: Gtk.TextView | None = None
         self.store = NotesStore()
+        self.settings_store = UserSettingsStore()
+        self.locale = self._load_locale()
         self.e2e = os.environ.get("SWIR_APP_E2E", "0") == "1"
         self.evidence_path = os.environ.get("SWIR_APP_EVIDENCE_PATH", "")
+
+    def _load_locale(self) -> NotesLocale:
+        try:
+            language = self.settings_store.load().get("language", "en")
+        except (OSError, RuntimeError, UnicodeError, ValueError):
+            language = "en"
+        return notes_locale(language)
+
+    def _t(self, key: str, **values: object) -> str:
+        return self.locale.text(key, **values)
 
     def do_startup(self) -> None:
         Gtk.Application.do_startup(self)
@@ -115,9 +197,11 @@ class SwirNotes(Gtk.Application):
             return
 
         window = Gtk.ApplicationWindow(application=self)
-        window.set_title("SWIR Notes")
+        window.set_title(self._t("window_title"))
         window.set_default_size(900, 650)
         window.add_css_class("swir-app")
+        direction = Gtk.TextDirection.RTL if self.locale.text_direction == "rtl" else Gtk.TextDirection.LTR
+        window.set_direction(direction)
         self.window = window
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -125,17 +209,20 @@ class SwirNotes(Gtk.Application):
 
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         header.add_css_class("swir-header")
-        brand = Gtk.Label(label="◆  SWIR Notes")
+        brand = Gtk.Label(label=self._t("brand"))
         brand.add_css_class("swir-brand")
         brand.set_xalign(0)
         header.append(brand)
         spacer = Gtk.Box()
         spacer.set_hexpand(True)
         header.append(spacer)
-        save = Gtk.Button(label="Save")
+        save = Gtk.Button(label=self._t("save"))
         save.add_css_class("swir-button")
+        save.set_focusable(True)
+        save.set_tooltip_text(self._t("save_tooltip"))
         save.connect("clicked", self._save_clicked)
         header.append(save)
+        self.save_button = save
         root.append(header)
 
         scroller = Gtk.ScrolledWindow()
@@ -143,6 +230,10 @@ class SwirNotes(Gtk.Application):
         scroller.set_vexpand(True)
         text = Gtk.TextView()
         text.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        text.set_focusable(True)
+        text.set_direction(direction)
+        text.set_tooltip_text(self._t("editor_tooltip"))
+        self.editor = text
         self.buffer = text.get_buffer()
         scroller.set_child(text)
         root.append(scroller)
@@ -154,9 +245,9 @@ class SwirNotes(Gtk.Application):
 
         try:
             self.buffer.set_text(self.store.load())
-            self.status.set_text("Ready • personal note stored locally")
+            self.status.set_text(self._t("ready"))
         except (OSError, UnicodeError, RuntimeError, ValueError) as exc:
-            self.status.set_text(f"Could not load note: {exc}")
+            self.status.set_text(self._t("load_failed", reason=str(exc)))
 
         window.connect("map", self._on_mapped)
         window.present()
@@ -171,10 +262,10 @@ class SwirNotes(Gtk.Application):
             self.store.save(self._buffer_text())
         except (OSError, RuntimeError, TypeError, ValueError) as exc:
             if self.status is not None:
-                self.status.set_text(f"Could not save note: {exc}")
+                self.status.set_text(self._t("save_failed", reason=str(exc)))
             return False
         if self.status is not None:
-            self.status.set_text("Saved")
+            self.status.set_text(self._t("saved"))
         return True
 
     def _save_clicked(self, _button: Gtk.Button) -> None:
@@ -193,9 +284,16 @@ class SwirNotes(Gtk.Application):
         saved = self._save_current()
         reloaded = self.store.load()
         note_mode = self.store.path.stat().st_mode & 0o777 if self.store.path.exists() else 0
+        localized_surface_verified = bool(
+            self.window
+            and self.window.get_title() == self._t("window_title")
+            and self.save_button
+            and self.save_button.get_label() == self._t("save")
+            and self.editor
+        )
         payload = {
             "schema": EVIDENCE_SCHEMA,
-            "passed": saved and reloaded == "SWIR Notes E2E\n",
+            "passed": saved and reloaded == "SWIR Notes E2E\n" and localized_surface_verified,
             "applicationId": APP_ID,
             "nativeToolkit": "gtk4",
             "displayProtocol": "wayland",
@@ -204,6 +302,21 @@ class SwirNotes(Gtk.Application):
             "atomicPersistence": True,
             "ownerOnlyNotesFile": note_mode == 0o600,
             "maxNoteBytes": MAX_NOTE_BYTES,
+            "requestedLanguage": self.locale.requested_language,
+            "catalogLanguage": self.locale.catalog_language,
+            "translationFallback": self.locale.fallback,
+            "textDirection": self.locale.text_direction,
+            "localizedWindowTitle": self._t("window_title"),
+            "localizedSaveLabel": self._t("save"),
+            "localizedSurfaceVerified": localized_surface_verified,
+            "saveButtonFocusable": bool(self.save_button and self.save_button.get_focusable()),
+            "editorFocusable": bool(self.editor and self.editor.get_focusable()),
+            "localizedTooltips": bool(
+                self.save_button
+                and self.save_button.get_tooltip_text() == self._t("save_tooltip")
+                and self.editor
+                and self.editor.get_tooltip_text() == self._t("editor_tooltip")
+            ),
         }
         path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
         path.chmod(0o600)
@@ -214,5 +327,21 @@ class SwirNotes(Gtk.Application):
         return False
 
 
+def _self_test() -> int:
+    assert notes_locale("pl_PL.UTF-8").text("save") == "Zapisz"
+    assert notes_locale("nb-NO").text("saved") == "Lagret"
+    unsupported = notes_locale("de-DE")
+    assert unsupported.catalog_language == "en" and unsupported.fallback is True
+    assert unsupported.text_direction == "ltr"
+    print("SWIR Notes locale self-test: OK")
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    if "--self-test" in argv:
+        return _self_test()
+    return int(SwirNotes().run(argv))
+
+
 if __name__ == "__main__":
-    raise SystemExit(SwirNotes().run(sys.argv))
+    raise SystemExit(main(sys.argv))
