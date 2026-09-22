@@ -45,7 +45,6 @@ jobs:
             system/apps/swir-system-monitor.py \
             system/apps/swir-terminal.py
           PYTHONPATH=system/apps python3 system/apps/core_runtime.selftest.py
-          PYTHONPATH=system/apps python3 system/apps/swir-notes.py --self-test
           ! grep -RE 'shell *= *True|os\.system\(|subprocess\.(run|Popen)\([^\n]*shell *= *True' system/apps
           # Mentioning sudo/pkexec in documentation is allowed; invoking their
           # absolute production paths from first-party app code is not.
@@ -101,6 +100,7 @@ jobs:
           export WAYLAND_DISPLAY=wayland-swir-apps
           export GDK_BACKEND=wayland
           export PYTHONPATH="$GITHUB_WORKSPACE/system/apps"
+          python3 system/apps/swir-notes.py --self-test
 
           weston --backend=headless-backend.so --socket="$WAYLAND_DISPLAY" --idle-time=0 --log="$RUNTIME/weston.log" &
           WESTON_PID=$!
