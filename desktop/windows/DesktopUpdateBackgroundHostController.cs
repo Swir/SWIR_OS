@@ -44,7 +44,19 @@ internal sealed class DesktopUpdateBackgroundHostController : IAsyncDisposable
         await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var policy = _describePolicy(trustedShell);
+            object policy;
+            try
+            {
+                policy = _describePolicy(trustedShell);
+            }
+            catch
+            {
+                // A controller that cannot establish current policy must not leave a
+                // previously-running scheduler alive on stale permissions.
+                await _scheduler.StopAsync().ConfigureAwait(false);
+                throw;
+            }
+
             await ReconcileSchedulerAsync(policy).ConfigureAwait(false);
             return DescribeCore(policy);
         }
