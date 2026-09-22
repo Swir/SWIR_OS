@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'system/apps/swir-clock.py'
+      - 'system/apps/core_runtime.py'
       - 'system/apps/swir-clock.desktop'
       - 'system/session/swir-shell.py'
       - 'system/session/swir-session-launcher.sh'
@@ -14,6 +15,7 @@ on:
   pull_request:
     paths:
       - 'system/apps/swir-clock.py'
+      - 'system/apps/core_runtime.py'
       - 'system/apps/swir-clock.desktop'
       - 'system/session/swir-shell.py'
       - 'system/session/swir-session-launcher.sh'
@@ -40,11 +42,11 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends desktop-file-utils python3-gi gir1.2-gtk-4.0
-      - name: Compile and verify Clock safety contract
+      - name: Compile and verify Clock safety, locale and accessibility contract
         run: |
           set -euo pipefail
-          python3 -m py_compile system/apps/swir-clock.py system/session/swir-shell.py
-          python3 system/apps/swir-clock.py --self-test
+          python3 -m py_compile system/apps/core_runtime.py system/apps/swir-clock.py system/session/swir-shell.py
+          PYTHONPATH="$GITHUB_WORKSPACE/system/apps" python3 system/apps/swir-clock.py --self-test
           desktop-file-validate system/apps/swir-clock.desktop
           bash -n system/session/swir-session-launcher.sh
           bash -n system/session/provision-graphical-session.sh
@@ -57,6 +59,11 @@ jobs:
           grep -F 'MAX_LABEL_CHARS: Final = 80' system/apps/swir-clock.py >/dev/null
           grep -F 'MAX_ALARM_STATE_BYTES: Final = 64 * 1024' system/apps/swir-clock.py >/dev/null
           grep -F 'SERVICE_POLL_SECONDS: Final = 10' system/apps/swir-clock.py >/dev/null
+          grep -F 'UserSettingsStore' system/apps/swir-clock.py >/dev/null
+          grep -F 'normalize_language_tag' system/apps/swir-clock.py >/dev/null
+          grep -F 'translationFallback' system/apps/swir-clock.py >/dev/null
+          grep -F 'clock24h' system/apps/swir-clock.py >/dev/null
+          grep -F 'set_tooltip_text' system/apps/swir-clock.py >/dev/null
           grep -F 'fcntl.flock' system/apps/swir-clock.py >/dev/null
           grep -F 'O_NOFOLLOW' system/apps/swir-clock.py >/dev/null
           grep -F 'os.replace(tmp_name, path)' system/apps/swir-clock.py >/dev/null
@@ -75,16 +82,30 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends weston dbus-daemon desktop-file-utils python3-gi gir1.2-gtk-4.0
           sudo install -m 0755 system/apps/swir-clock.py /usr/local/bin/swir-clock
+          sudo install -d -m 0755 /usr/local/lib/swir
+          sudo install -m 0644 system/apps/core_runtime.py /usr/local/lib/swir/core_runtime.py
           sudo install -m 0644 system/apps/swir-clock.desktop /usr/share/applications/swir-clock.desktop
           sudo update-desktop-database /usr/share/applications
-          python3 system/apps/swir-clock.py --self-test
-      - name: Map Clock and background alarm service on Wayland
+          PYTHONPATH="$GITHUB_WORKSPACE/system/apps" python3 system/apps/swir-clock.py --self-test
+      - name: Map localized Clock and background alarm service on Wayland
         run: |
           set -euo pipefail
           RUNTIME="${{ runner.temp }}/swir-clock-runtime"
-          mkdir -p "$RUNTIME"
-          chmod 0700 "$RUNTIME"
+          CONFIG="${{ runner.temp }}/swir-clock-config"
+          mkdir -p "$RUNTIME" "$CONFIG/swir"
+          chmod 0700 "$RUNTIME" "$CONFIG" "$CONFIG/swir"
+          cat > "$CONFIG/swir/settings.json" <<'JSON'
+          {
+            "schema": "swir.user-settings/0.1",
+            "appearance": "dark",
+            "language": "pl-PL",
+            "clock24h": false,
+            "themeId": "builtin.swir-dark"
+          }
+          JSON
+          chmod 0600 "$CONFIG/swir/settings.json"
           export XDG_RUNTIME_DIR="$RUNTIME"
+          export XDG_CONFIG_HOME="$CONFIG"
           export WAYLAND_DISPLAY=wayland-swir-clock
           export GDK_BACKEND=wayland
 
@@ -100,14 +121,16 @@ jobs:
           [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]]
 
           timeout --signal=TERM --kill-after=5s 25s dbus-run-session -- \
-            env LIBGL_ALWAYS_SOFTWARE=1 GTK_A11Y=none SWIR_APP_E2E=1 \
+            env LIBGL_ALWAYS_SOFTWARE=1 GTK_A11Y=none \
+                XDG_CONFIG_HOME="$CONFIG" \
+                SWIR_APP_E2E=1 \
                 SWIR_APP_EVIDENCE_PATH="$RUNTIME/clock.json" \
             python3 system/apps/swir-clock.py
 
           python3 - "$RUNTIME/clock.json" <<'PY'
           import json, sys
           evidence = json.load(open(sys.argv[1], encoding='utf-8'))
-          assert evidence['schema'] == 'swir.native-clock-runtime-evidence/0.3'
+          assert evidence['schema'] == 'swir.native-clock-runtime-evidence/0.4'
           assert evidence['passed'] is True
           assert evidence['applicationId'] == 'dev.swir.Clock'
           assert evidence['nativeToolkit'] == 'gtk4'
@@ -122,6 +145,18 @@ jobs:
           assert evidence['alarmSleepWakeClaimed'] is False and evidence['alarmPreLoginClaimed'] is False
           assert evidence['networkAccess'] is False and evidence['privilegedOperations'] is False
           assert evidence['selfUpdater'] is False
+          assert evidence['requestedLanguage'] == 'pl-PL'
+          assert evidence['catalogLanguage'] == 'pl-PL'
+          assert evidence['translationFallback'] is False
+          assert evidence['textDirection'] == 'ltr'
+          assert evidence['clock24h'] is False
+          assert evidence['localizedWindowTitle'] == 'Zegar SWIR'
+          assert evidence['localizedAddAlarmLabel'] == 'Dodaj alarm'
+          assert evidence['localizedSurfaceVerified'] is True
+          assert evidence['keyboardFocusControls'] is True
+          assert evidence['localDateLanguageVerified'] is True
+          assert evidence['timePreferenceVerified'] is True
+          assert 'środa' in evidence['localizedDateSample']
           PY
 
           STORE="$RUNTIME/alarms.json"
@@ -146,6 +181,7 @@ jobs:
 
           timeout --signal=TERM --kill-after=5s 25s dbus-run-session -- \
             env LIBGL_ALWAYS_SOFTWARE=1 GTK_A11Y=none \
+                XDG_CONFIG_HOME="$CONFIG" \
                 SWIR_CLOCK_ALARM_STORE="$STORE" \
                 SWIR_CLOCK_SERVICE_E2E=1 \
                 SWIR_CLOCK_SERVICE_EVIDENCE_PATH="$RUNTIME/service.json" \
@@ -155,7 +191,7 @@ jobs:
           import datetime as dt, json, sys
           evidence = json.load(open(sys.argv[1], encoding='utf-8'))
           state = json.load(open(sys.argv[2], encoding='utf-8'))
-          assert evidence['schema'] == 'swir.clock-alarm-service-evidence/0.1'
+          assert evidence['schema'] == 'swir.clock-alarm-service-evidence/0.2'
           assert evidence['passed'] is True
           assert evidence['applicationId'] == 'dev.swir.ClockAlarmService'
           assert evidence['nativeToolkit'] == 'gtk4'
@@ -165,6 +201,13 @@ jobs:
           assert evidence['sleepWakeClaimed'] is False and evidence['preLoginClaimed'] is False
           assert evidence['networkAccess'] is False and evidence['privilegedOperations'] is False
           assert evidence['selfUpdater'] is False
+          assert evidence['requestedLanguage'] == 'pl-PL'
+          assert evidence['catalogLanguage'] == 'pl-PL'
+          assert evidence['translationFallback'] is False
+          assert evidence['textDirection'] == 'ltr'
+          assert evidence['localizedWindowTitle'] == 'Alarm SWIR'
+          assert evidence['localizedDismissLabel'] == 'Zamknij'
+          assert evidence['localizedSurfaceVerified'] is True
           assert state['alarms'][0]['lastFiredDate'] == dt.datetime.now().astimezone().date().isoformat()
           PY
 
@@ -180,7 +223,7 @@ jobs:
           set -euo pipefail
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends desktop-file-utils python3 python3-gi gir1.2-gtk-4.0
-          python3 system/apps/swir-clock.py --self-test
+          PYTHONPATH="$GITHUB_WORKSPACE/system/apps" python3 system/apps/swir-clock.py --self-test
           desktop-file-validate system/apps/swir-clock.desktop
           python3 - <<'PY'
           import gi
