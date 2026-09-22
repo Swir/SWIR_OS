@@ -8,12 +8,19 @@ import pathlib
 import stat
 import sys
 import tempfile
-from typing import Final
+from dataclasses import dataclass
+from typing import Final, Mapping
 
 import gi
 
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
+
+LIBDIR = pathlib.Path("/usr/local/lib/swir")
+if LIBDIR.is_dir() and str(LIBDIR) not in sys.path:
+    sys.path.insert(0, str(LIBDIR))
+
+from core_runtime import UserSettingsStore, normalize_language_tag  # noqa: E402
 
 APP_ID: Final = "dev.swir.TextEditor"
 EVIDENCE_SCHEMA: Final = "swir.native-text-editor-runtime-evidence/0.2"
@@ -27,6 +34,121 @@ window.swir-app { background:#02050A; color:#F4FAFF; }
 .swir-button { background:#07111C; color:#F4FAFF; border:1px solid #0088FF; border-radius:10px; padding:7px 12px; }
 textview { background:#07111C; color:#F4FAFF; padding:16px; font-family:monospace; }
 """
+
+_TRANSLATIONS: Final[Mapping[str, Mapping[str, str]]] = {
+    "en": {
+        "window_title": "SWIR Text Editor",
+        "brand": "◆  SWIR Text Editor",
+        "new": "New",
+        "open": "Open",
+        "save": "Save",
+        "save_as": "Save As",
+        "new_tooltip": "Create a new local UTF-8 document",
+        "open_tooltip": "Open a local UTF-8 document",
+        "save_tooltip": "Save the current local UTF-8 document",
+        "save_as_tooltip": "Save as a new local UTF-8 document",
+        "editor_tooltip": "Local UTF-8 text editor",
+        "ready": "Create or open a local UTF-8 text/code file.",
+        "only_local": "Only local files are accepted.",
+        "path_failed": "Could not resolve local path.",
+        "open_failed": "Could not open document: {reason}",
+        "opened": "Opened local UTF-8 document • {name}",
+        "untitled": "Untitled — SWIR Text Editor",
+        "new_unsaved": "New unsaved local UTF-8 document.",
+        "open_dialog": "Open local document",
+        "cancel": "Cancel",
+        "choose_save_as": "Choose Save As to create this document.",
+        "save_refused": "Save refused: {reason}",
+        "saved": "Saved atomically.",
+        "save_as_dialog": "Save new local document",
+        "save_target_local": "Only local Save As targets are accepted.",
+        "save_as_refused": "Save As refused: {reason}",
+        "created": "Created securely • {name}",
+    },
+    "pl-PL": {
+        "window_title": "Edytor tekstu SWIR",
+        "brand": "◆  Edytor tekstu SWIR",
+        "new": "Nowy",
+        "open": "Otwórz",
+        "save": "Zapisz",
+        "save_as": "Zapisz jako",
+        "new_tooltip": "Utwórz nowy lokalny dokument UTF-8",
+        "open_tooltip": "Otwórz lokalny dokument UTF-8",
+        "save_tooltip": "Zapisz bieżący lokalny dokument UTF-8",
+        "save_as_tooltip": "Zapisz jako nowy lokalny dokument UTF-8",
+        "editor_tooltip": "Lokalny edytor tekstu UTF-8",
+        "ready": "Utwórz lub otwórz lokalny plik tekstowy/kodu UTF-8.",
+        "only_local": "Akceptowane są tylko pliki lokalne.",
+        "path_failed": "Nie udało się ustalić lokalnej ścieżki.",
+        "open_failed": "Nie udało się otworzyć dokumentu: {reason}",
+        "opened": "Otwarto lokalny dokument UTF-8 • {name}",
+        "untitled": "Bez tytułu — Edytor tekstu SWIR",
+        "new_unsaved": "Nowy niezapisany lokalny dokument UTF-8.",
+        "open_dialog": "Otwórz lokalny dokument",
+        "cancel": "Anuluj",
+        "choose_save_as": "Wybierz Zapisz jako, aby utworzyć ten dokument.",
+        "save_refused": "Odmówiono zapisu: {reason}",
+        "saved": "Zapisano atomowo.",
+        "save_as_dialog": "Zapisz nowy lokalny dokument",
+        "save_target_local": "Akceptowane są tylko lokalne cele Zapisz jako.",
+        "save_as_refused": "Odmówiono operacji Zapisz jako: {reason}",
+        "created": "Utworzono bezpiecznie • {name}",
+    },
+    "nb-NO": {
+        "window_title": "SWIR tekstredigering",
+        "brand": "◆  SWIR tekstredigering",
+        "new": "Ny",
+        "open": "Åpne",
+        "save": "Lagre",
+        "save_as": "Lagre som",
+        "new_tooltip": "Opprett et nytt lokalt UTF-8-dokument",
+        "open_tooltip": "Åpne et lokalt UTF-8-dokument",
+        "save_tooltip": "Lagre det gjeldende lokale UTF-8-dokumentet",
+        "save_as_tooltip": "Lagre som et nytt lokalt UTF-8-dokument",
+        "editor_tooltip": "Lokal UTF-8-tekstredigering",
+        "ready": "Opprett eller åpne en lokal UTF-8 tekst-/kodefil.",
+        "only_local": "Bare lokale filer godtas.",
+        "path_failed": "Kunne ikke finne lokal filsti.",
+        "open_failed": "Kunne ikke åpne dokumentet: {reason}",
+        "opened": "Åpnet lokalt UTF-8-dokument • {name}",
+        "untitled": "Uten tittel — SWIR tekstredigering",
+        "new_unsaved": "Nytt ulagret lokalt UTF-8-dokument.",
+        "open_dialog": "Åpne lokalt dokument",
+        "cancel": "Avbryt",
+        "choose_save_as": "Velg Lagre som for å opprette dokumentet.",
+        "save_refused": "Lagring avvist: {reason}",
+        "saved": "Lagret atomisk.",
+        "save_as_dialog": "Lagre nytt lokalt dokument",
+        "save_target_local": "Bare lokale Lagre som-mål godtas.",
+        "save_as_refused": "Lagre som avvist: {reason}",
+        "created": "Opprettet sikkert • {name}",
+    },
+}
+
+
+@dataclass(frozen=True)
+class TextEditorLocale:
+    requested_language: str
+    catalog_language: str
+    strings: Mapping[str, str]
+
+    @property
+    def fallback(self) -> bool:
+        return self.requested_language != self.catalog_language
+
+    @property
+    def text_direction(self) -> str:
+        return "rtl" if self.catalog_language.split("-", 1)[0] in {"ar", "he"} else "ltr"
+
+    def text(self, key: str, **values: object) -> str:
+        template = self.strings[key]
+        return template.format(**values) if values else template
+
+
+def text_editor_locale(language: object) -> TextEditorLocale:
+    requested = normalize_language_tag(language) or "en"
+    catalog = requested if requested in _TRANSLATIONS else "en"
+    return TextEditorLocale(requested, catalog, _TRANSLATIONS[catalog])
 
 
 class DocumentError(RuntimeError):
@@ -87,11 +209,7 @@ def save_document(path: pathlib.Path, text: str, identity: tuple[int, int]) -> t
     if _has_symlink(path):
         raise DocumentError("symbolic-link document paths are not accepted")
     before = os.lstat(path)
-    if (
-        not stat.S_ISREG(before.st_mode)
-        or before.st_nlink != 1
-        or (before.st_dev, before.st_ino) != identity
-    ):
+    if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or (before.st_dev, before.st_ino) != identity:
         raise DocumentError("document changed since it was opened; refusing overwrite")
     if not os.access(path, os.W_OK):
         raise DocumentError("document is not writable by the current user")
@@ -162,6 +280,12 @@ def create_document(value: str | os.PathLike[str], text: str) -> tuple[pathlib.P
 
 
 def self_test() -> int:
+    assert text_editor_locale("pl-PL").text("save_as") == "Zapisz jako"
+    assert text_editor_locale("nb-NO").text("open") == "Åpne"
+    fallback = text_editor_locale("fr-FR")
+    assert fallback.catalog_language == "en" and fallback.fallback is True
+    assert fallback.text_direction == "ltr"
+
     with tempfile.TemporaryDirectory(prefix="swir-text-editor-") as temp_text:
         root = pathlib.Path(temp_text)
         sample = root / "sample.py"
@@ -253,9 +377,23 @@ class SwirTextEditor(Gtk.Application):
         self.path: pathlib.Path | None = None
         self.identity: tuple[int, int] | None = None
         self.file_dialog: Gtk.FileChooserNative | None = None
+        self.settings_store = UserSettingsStore()
+        self.locale = self._load_locale()
+        self.buttons: dict[str, Gtk.Button] = {}
+        self.editor: Gtk.TextView | None = None
         self.e2e = os.environ.get("SWIR_APP_E2E", "0") == "1"
         self.evidence_path = os.environ.get("SWIR_APP_EVIDENCE_PATH", "")
         self.e2e_input = os.environ.get("SWIR_TEXT_E2E_INPUT", "")
+
+    def _load_locale(self) -> TextEditorLocale:
+        try:
+            language = self.settings_store.load().get("language", "en")
+        except (OSError, RuntimeError, UnicodeError, ValueError):
+            language = "en"
+        return text_editor_locale(language)
+
+    def _t(self, key: str, **values: object) -> str:
+        return self.locale.text(key, **values)
 
     def do_startup(self) -> None:
         Gtk.Application.do_startup(self)
@@ -271,25 +409,35 @@ class SwirTextEditor(Gtk.Application):
             self.window.present()
             return
         window = Gtk.ApplicationWindow(application=self)
-        window.set_title("SWIR Text Editor")
+        window.set_title(self._t("window_title"))
         window.set_default_size(960, 700)
         window.add_css_class("swir-app")
+        direction = Gtk.TextDirection.RTL if self.locale.text_direction == "rtl" else Gtk.TextDirection.LTR
+        window.set_direction(direction)
         self.window = window
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         window.set_child(root)
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         header.add_css_class("swir-header")
-        brand = Gtk.Label(label="◆  SWIR Text Editor")
+        brand = Gtk.Label(label=self._t("brand"))
         brand.add_css_class("swir-brand")
         brand.set_hexpand(True)
         brand.set_xalign(0)
         header.append(brand)
-        for label, handler in (("New", self._new_clicked), ("Open", self._open_clicked), ("Save", self._save_clicked), ("Save As", self._save_as_clicked)):
-            button = Gtk.Button(label=label)
+        actions = (
+            ("new", "new", "new_tooltip", self._new_clicked),
+            ("open", "open", "open_tooltip", self._open_clicked),
+            ("save", "save", "save_tooltip", self._save_clicked),
+            ("save_as", "save_as", "save_as_tooltip", self._save_as_clicked),
+        )
+        for name, label_key, tooltip_key, handler in actions:
+            button = Gtk.Button(label=self._t(label_key))
             button.add_css_class("swir-button")
-            button.set_tooltip_text(f"{label} local UTF-8 document")
+            button.set_focusable(True)
+            button.set_tooltip_text(self._t(tooltip_key))
             button.connect("clicked", handler)
             header.append(button)
+            self.buttons[name] = button
         root.append(header)
         scroller = Gtk.ScrolledWindow()
         scroller.set_hexpand(True)
@@ -297,11 +445,14 @@ class SwirTextEditor(Gtk.Application):
         view = Gtk.TextView()
         view.set_wrap_mode(Gtk.WrapMode.NONE)
         view.set_monospace(True)
-        view.set_tooltip_text("Local UTF-8 text editor")
+        view.set_focusable(True)
+        view.set_direction(direction)
+        view.set_tooltip_text(self._t("editor_tooltip"))
+        self.editor = view
         self.buffer = view.get_buffer()
         scroller.set_child(view)
         root.append(scroller)
-        self.status = Gtk.Label(label="Create or open a local UTF-8 text/code file.")
+        self.status = Gtk.Label(label=self._t("ready"))
         self.status.add_css_class("swir-muted")
         self.status.set_xalign(0)
         self.status.set_margin_start(12)
@@ -317,16 +468,16 @@ class SwirTextEditor(Gtk.Application):
     def do_open(self, files: list[Gio.File], _count: int, _hint: str) -> None:
         self.activate()
         if not files or not files[0].is_native():
-            self._set_status("Only local files are accepted.")
+            self._set_status(self._t("only_local"))
             return
         path = files[0].get_path()
         if not path:
-            self._set_status("Could not resolve local path.")
+            self._set_status(self._t("path_failed"))
             return
         try:
             self._load(path)
         except (OSError, DocumentError) as exc:
-            self._set_status(f"Could not open document: {exc}")
+            self._set_status(self._t("open_failed", reason=str(exc)))
 
     def _load(self, value: str | os.PathLike[str]) -> None:
         path, text, identity = load_document(value)
@@ -334,8 +485,8 @@ class SwirTextEditor(Gtk.Application):
         self.buffer.set_text(text)
         self.path, self.identity = path, identity
         if self.window is not None:
-            self.window.set_title(f"{path.name} — SWIR Text Editor")
-        self._set_status(f"Opened local UTF-8 document • {path.name}")
+            self.window.set_title(f"{path.name} — {self._t('window_title')}")
+        self._set_status(self._t("opened", name=path.name))
 
     def _text(self) -> str:
         assert self.buffer is not None
@@ -348,13 +499,13 @@ class SwirTextEditor(Gtk.Application):
         self.path = None
         self.identity = None
         if self.window is not None:
-            self.window.set_title("Untitled — SWIR Text Editor")
-        self._set_status("New unsaved local UTF-8 document.")
+            self.window.set_title(self._t("untitled"))
+        self._set_status(self._t("new_unsaved"))
 
     def _open_clicked(self, _button: Gtk.Button) -> None:
         if self.window is None or self.file_dialog is not None:
             return
-        dialog = Gtk.FileChooserNative.new("Open local document", self.window, Gtk.FileChooserAction.OPEN, "Open", "Cancel")
+        dialog = Gtk.FileChooserNative.new(self._t("open_dialog"), self.window, Gtk.FileChooserAction.OPEN, self._t("open"), self._t("cancel"))
         dialog.set_select_multiple(False)
         dialog.connect("response", self._open_response)
         self.file_dialog = dialog
@@ -366,26 +517,26 @@ class SwirTextEditor(Gtk.Application):
                 return
             selected = dialog.get_file()
             if selected is None or not selected.is_native() or not selected.get_path():
-                self._set_status("Only local files are accepted.")
+                self._set_status(self._t("only_local"))
                 return
             try:
                 self._load(selected.get_path())
             except (OSError, DocumentError) as exc:
-                self._set_status(f"Could not open document: {exc}")
+                self._set_status(self._t("open_failed", reason=str(exc)))
         finally:
             dialog.hide()
             self.file_dialog = None
 
     def _save(self) -> bool:
         if self.path is None or self.identity is None:
-            self._set_status("Choose Save As to create this document.")
+            self._set_status(self._t("choose_save_as"))
             return False
         try:
             self.identity = save_document(self.path, self._text(), self.identity)
         except (OSError, DocumentError) as exc:
-            self._set_status(f"Save refused: {exc}")
+            self._set_status(self._t("save_refused", reason=str(exc)))
             return False
-        self._set_status("Saved atomically.")
+        self._set_status(self._t("saved"))
         return True
 
     def _save_clicked(self, _button: Gtk.Button) -> None:
@@ -400,7 +551,7 @@ class SwirTextEditor(Gtk.Application):
     def _show_save_as(self) -> None:
         if self.window is None or self.file_dialog is not None:
             return
-        dialog = Gtk.FileChooserNative.new("Save new local document", self.window, Gtk.FileChooserAction.SAVE, "Save", "Cancel")
+        dialog = Gtk.FileChooserNative.new(self._t("save_as_dialog"), self.window, Gtk.FileChooserAction.SAVE, self._t("save"), self._t("cancel"))
         dialog.set_current_name(self.path.name if self.path is not None else "untitled.txt")
         dialog.connect("response", self._save_as_response)
         self.file_dialog = dialog
@@ -412,17 +563,17 @@ class SwirTextEditor(Gtk.Application):
                 return
             selected = dialog.get_file()
             if selected is None or not selected.is_native() or not selected.get_path():
-                self._set_status("Only local Save As targets are accepted.")
+                self._set_status(self._t("save_target_local"))
                 return
             try:
                 path, identity = create_document(selected.get_path(), self._text())
             except (OSError, DocumentError) as exc:
-                self._set_status(f"Save As refused: {exc}")
+                self._set_status(self._t("save_as_refused", reason=str(exc)))
                 return
             self.path, self.identity = path, identity
             if self.window is not None:
-                self.window.set_title(f"{path.name} — SWIR Text Editor")
-            self._set_status(f"Created securely • {path.name}")
+                self.window.set_title(f"{path.name} — {self._t('window_title')}")
+            self._set_status(self._t("created", name=path.name))
         finally:
             dialog.hide()
             self.file_dialog = None
@@ -461,6 +612,13 @@ class SwirTextEditor(Gtk.Application):
             "interactiveNew": True,
             "interactiveSaveAs": True,
             "maxDocumentBytes": MAX_DOCUMENT_BYTES,
+            "requestedLanguage": self.locale.requested_language,
+            "catalogLanguage": self.locale.catalog_language,
+            "fallbackUsed": self.locale.fallback,
+            "textDirection": self.locale.text_direction,
+            "windowTitle": self._t("window_title"),
+            "buttonLabels": {name: button.get_label() for name, button in self.buttons.items()},
+            "editorTooltip": self.editor.get_tooltip_text() if self.editor is not None else "",
         }
         evidence.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
         evidence.chmod(0o600)

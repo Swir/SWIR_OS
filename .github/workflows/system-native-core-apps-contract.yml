@@ -52,7 +52,11 @@ jobs:
           ! grep -RE 'subprocess\.(run|Popen).*\b(sudo|pkexec)\b' system/apps/swir-*.py
           grep -F 'fileOpenDelegationEnabled": False' system/apps/swir-files.py >/dev/null
           grep -F 'mutationControlsExposed": False' system/apps/swir-network-center.py >/dev/null
+          grep -F 'UserSettingsStore' system/apps/swir-network-center.py >/dev/null
+          grep -F 'localizedTooltips' system/apps/swir-network-center.py >/dev/null
           grep -F 'ownerOnlyNotesFile' system/apps/swir-notes.py >/dev/null
+          grep -F 'UserSettingsStore' system/apps/swir-notes.py >/dev/null
+          grep -F 'localizedTooltips' system/apps/swir-notes.py >/dev/null
           grep -F 'ownerOnlySettingsFile' system/apps/swir-settings.py >/dev/null
           grep -F 'defaultAppCategoryCount' system/apps/swir-settings.py >/dev/null
           grep -F 'processRowsBounded' system/apps/swir-system-monitor.py >/dev/null
@@ -78,15 +82,30 @@ jobs:
           set -euo pipefail
           RUNTIME="${{ runner.temp }}/swir-runtime"
           CONFIG="${{ runner.temp }}/swir-config"
+          NETWORK_CONFIG="${{ runner.temp }}/swir-network-config"
+          NOTES_CONFIG="${{ runner.temp }}/swir-notes-config"
           DATA="${{ runner.temp }}/swir-data"
-          mkdir -p "$RUNTIME" "$CONFIG" "$DATA"
-          chmod 0700 "$RUNTIME" "$CONFIG" "$DATA"
+          mkdir -p "$RUNTIME" "$CONFIG" "$NETWORK_CONFIG/swir" "$NOTES_CONFIG/swir" "$DATA"
+          chmod 0700 "$RUNTIME" "$CONFIG" "$NETWORK_CONFIG" "$NETWORK_CONFIG/swir" "$NOTES_CONFIG" "$NOTES_CONFIG/swir" "$DATA"
+          for locale_root in "$NETWORK_CONFIG" "$NOTES_CONFIG"; do
+            cat > "$locale_root/swir/settings.json" <<'JSON'
+          {
+            "schema": "swir.user-settings/0.1",
+            "appearance": "dark",
+            "language": "pl-PL",
+            "clock24h": true,
+            "themeId": "builtin.swir-dark"
+          }
+          JSON
+            chmod 0600 "$locale_root/swir/settings.json"
+          done
           export XDG_RUNTIME_DIR="$RUNTIME"
           export XDG_CONFIG_HOME="$CONFIG"
           export XDG_DATA_HOME="$DATA"
           export WAYLAND_DISPLAY=wayland-swir-apps
           export GDK_BACKEND=wayland
           export PYTHONPATH="$GITHUB_WORKSPACE/system/apps"
+          python3 system/apps/swir-notes.py --self-test
 
           weston --backend=headless-backend.so --socket="$WAYLAND_DISPLAY" --idle-time=0 --log="$RUNTIME/weston.log" &
           WESTON_PID=$!
@@ -111,8 +130,14 @@ jobs:
           }
 
           run_app "SWIR Files" "$RUNTIME/files.json" system/apps/swir-files.py
-          run_app "SWIR Network Center" "$RUNTIME/network.json" system/apps/swir-network-center.py
-          run_app "SWIR Notes" "$RUNTIME/notes.json" system/apps/swir-notes.py
+          echo "Running SWIR Network Center localized runtime evidence"
+          timeout --signal=TERM --kill-after=5s 25s \
+            env XDG_CONFIG_HOME="$NETWORK_CONFIG" SWIR_APP_E2E=1 SWIR_APP_EVIDENCE_PATH="$RUNTIME/network.json" \
+            python3 system/apps/swir-network-center.py
+          echo "Running SWIR Notes localized runtime evidence"
+          timeout --signal=TERM --kill-after=5s 25s \
+            env XDG_CONFIG_HOME="$NOTES_CONFIG" SWIR_APP_E2E=1 SWIR_APP_EVIDENCE_PATH="$RUNTIME/notes.json" \
+            python3 system/apps/swir-notes.py
           run_app "SWIR Settings" "$RUNTIME/settings.json" system/apps/swir-settings.py
           run_app "SWIR System Monitor" "$RUNTIME/system-monitor.json" system/apps/swir-system-monitor.py
           run_app "SWIR Terminal" "$RUNTIME/terminal.json" system/apps/swir-terminal.py
@@ -134,19 +159,32 @@ jobs:
           assert files['windowMapped'] is True and files['privilegedOperations'] is False
           assert files['currentDirectoryReadable'] is True and files['fileOpenDelegationEnabled'] is False
 
-          assert network['schema'] == 'swir.native-network-center-runtime-evidence/0.1'
+          assert network['schema'] == 'swir.native-network-center-runtime-evidence/0.2'
           assert network['passed'] is True and network['applicationId'] == 'dev.swir.NetworkCenter'
           assert network['nativeToolkit'] == 'gtk4' and network['displayProtocol'] == 'wayland'
           assert network['windowMapped'] is True and network['privilegedOperations'] is False
           assert network['mutationControlsExposed'] is False and network['nmcliAbsolutePath'] == '/usr/bin/nmcli'
           assert network['nmcliPresent'] is True and network['deviceRowsBounded'] == 100
           assert network['queryTimeoutSeconds'] == 4
+          assert network['requestedLanguage'] == 'pl-PL' and network['catalogLanguage'] == 'pl-PL'
+          assert network['translationFallback'] is False and network['textDirection'] == 'ltr'
+          assert network['localizedWindowTitle'] == 'Centrum sieci SWIR'
+          assert network['localizedRefreshLabel'] == 'Odśwież'
+          assert network['localizedSurfaceVerified'] is True
+          assert network['refreshButtonFocusable'] is True and network['localizedTooltips'] is True
 
-          assert notes['schema'] == 'swir.native-notes-runtime-evidence/0.1'
+          assert notes['schema'] == 'swir.native-notes-runtime-evidence/0.2'
           assert notes['passed'] is True and notes['applicationId'] == 'dev.swir.Notes'
           assert notes['nativeToolkit'] == 'gtk4' and notes['displayProtocol'] == 'wayland'
           assert notes['windowMapped'] is True and notes['privilegedOperations'] is False
           assert notes['atomicPersistence'] is True and notes['ownerOnlyNotesFile'] is True
+          assert notes['requestedLanguage'] == 'pl-PL' and notes['catalogLanguage'] == 'pl-PL'
+          assert notes['translationFallback'] is False and notes['textDirection'] == 'ltr'
+          assert notes['localizedWindowTitle'] == 'Notatki SWIR'
+          assert notes['localizedSaveLabel'] == 'Zapisz'
+          assert notes['localizedSurfaceVerified'] is True
+          assert notes['saveButtonFocusable'] is True and notes['editorFocusable'] is True
+          assert notes['localizedTooltips'] is True
           assert notes_path.read_text(encoding='utf-8') == 'SWIR Notes E2E\n'
           assert stat.S_IMODE(notes_path.stat().st_mode) == 0o600
 
