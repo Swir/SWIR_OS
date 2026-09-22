@@ -57,6 +57,8 @@ Photo Studio 0.3 closes the previously documented image-editor depth gap by impl
 
 The runtime-evidence coverage is machine-audited across all explicit implementation capabilities. Native Default Apps has separately verified browser, media, image, PDF, text/code and archive categories with final-image staging. Text Editor now has a dedicated local-file runtime authority and safe New/Open/Save/Save As behavior. Clock alarms persist across restarts and the active-session background service is runtime-verified with the Clock window closed.
 
-The remaining umbrella completion gate is **suite-wide locale/accessibility depth and final daily-use integration verification across the supported first-party applications**. A green inventory/evidence gate must not hide that product-depth gap or inflate roadmap progress.
+The locale/accessibility closure is now advancing through real application surfaces rather than inventory claims. Calculator, Notes and Network Center consume the bounded per-user SWIR language preference, expose reviewed English/Polish/Norwegian Bokmål chrome with safe English fallback, and carry runtime evidence for localized Wayland surfaces plus keyboard-focus/tool-tip accessibility where those controls apply. Network Center remains read-only and Notes keeps its owner-only atomic storage boundary while localized.
+
+The remaining umbrella completion gate is **suite-wide locale/accessibility depth and final daily-use integration verification across the supported first-party applications**. The verified Calculator/Notes/Network slices reduce that gap but do not complete it; a green inventory/evidence gate must not hide the remaining product-depth work or inflate roadmap progress.
 
 The canonical checklist and percentage remain exclusively in `SWIR-OS-ARCHITECTURE.md`.
