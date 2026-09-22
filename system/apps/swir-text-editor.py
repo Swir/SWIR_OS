@@ -23,7 +23,7 @@ if LIBDIR.is_dir() and str(LIBDIR) not in sys.path:
 from core_runtime import UserSettingsStore, normalize_language_tag  # noqa: E402
 
 APP_ID: Final = "dev.swir.TextEditor"
-EVIDENCE_SCHEMA: Final = "swir.native-text-editor-runtime-evidence/0.3"
+EVIDENCE_SCHEMA: Final = "swir.native-text-editor-runtime-evidence/0.2"
 MAX_DOCUMENT_BYTES: Final = 4 * 1024 * 1024
 
 CSS = b"""
