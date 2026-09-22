@@ -113,9 +113,30 @@ internal sealed class DesktopUpdateBackgroundHostController : IAsyncDisposable
         await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var policy = _describePolicy(trustedShell);
+            object policy;
+            try
+            {
+                policy = _describePolicy(trustedShell);
+            }
+            catch
+            {
+                await _scheduler.StopAsync().ConfigureAwait(false);
+                throw;
+            }
+
+            bool runtimeEligible;
+            try
+            {
+                runtimeEligible = RuntimeEligibleFor(policy);
+            }
+            catch
+            {
+                await _scheduler.StopAsync().ConfigureAwait(false);
+                throw;
+            }
+
             await _scheduler.StopAsync().ConfigureAwait(false);
-            return DescribeCore(policy, RuntimeEligibleFor(policy));
+            return DescribeCore(policy, runtimeEligible);
         }
         finally
         {
@@ -129,11 +150,13 @@ internal sealed class DesktopUpdateBackgroundHostController : IAsyncDisposable
         _lifecycleGate.Wait();
         try
         {
-            object policy;
             try
             {
-                policy = _describePolicy(trustedShell);
-                return DescribeCore(policy, RuntimeEligibleFor(policy));
+                var policy = _describePolicy(trustedShell);
+                var runtimeEligible = RuntimeEligibleFor(policy);
+                if (!AllowsBackgroundChecks(policy) || !runtimeEligible)
+                    _scheduler.StopAsync().GetAwaiter().GetResult();
+                return DescribeCore(policy, runtimeEligible);
             }
             catch
             {
