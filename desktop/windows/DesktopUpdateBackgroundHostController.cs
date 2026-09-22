@@ -9,13 +9,14 @@ namespace Swir.Desktop.Host;
 /// </summary>
 internal sealed class DesktopUpdateBackgroundHostController : IAsyncDisposable
 {
-    public const string ControllerSchema = "swir.desktop-update-background-host/0.1";
+    public const string ControllerSchema = "swir.desktop-update-background-host/0.2";
 
     private readonly Func<bool, object> _describePolicy;
     private readonly Func<bool, string, object> _setPolicy;
     private readonly DesktopUpdateBackgroundScheduler _scheduler;
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
     private bool _disposed;
+    private int _disposeStarted;
 
     internal DesktopUpdateBackgroundHostController(
         Func<CancellationToken, Task<object>> backgroundCycle,
@@ -75,7 +76,29 @@ internal sealed class DesktopUpdateBackgroundHostController : IAsyncDisposable
         await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var policy = _setPolicy(trustedShell, persistedMode);
+            object policy;
+            try
+            {
+                policy = _setPolicy(trustedShell, persistedMode);
+            }
+            catch
+            {
+                // A failed write may have happened before or after persistence. Re-read
+                // the authoritative policy and reconcile from that state. If the policy
+                // cannot be established, stop the scheduler rather than keeping stale
+                // permissions alive.
+                try
+                {
+                    var currentPolicy = _describePolicy(trustedShell);
+                    await ReconcileSchedulerAsync(currentPolicy).ConfigureAwait(false);
+                }
+                catch
+                {
+                    await _scheduler.StopAsync().ConfigureAwait(false);
+                }
+                throw;
+            }
+
             await ReconcileSchedulerAsync(policy).ConfigureAwait(false);
             return DescribeCore(policy);
         }
@@ -88,8 +111,27 @@ internal sealed class DesktopUpdateBackgroundHostController : IAsyncDisposable
     internal object Describe(bool trustedShell)
     {
         ThrowIfDisposed();
-        var policy = _describePolicy(trustedShell);
-        return DescribeCore(policy);
+        _lifecycleGate.Wait();
+        try
+        {
+            object policy;
+            try
+            {
+                policy = _describePolicy(trustedShell);
+            }
+            catch
+            {
+                // Describe is also a policy boundary. A failed policy read must not
+                // preserve a scheduler that was started under an older decision.
+                _scheduler.StopAsync().GetAwaiter().GetResult();
+                throw;
+            }
+            return DescribeCore(policy);
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
     }
 
     private async Task ReconcileSchedulerAsync(object policy)
@@ -129,20 +171,18 @@ internal sealed class DesktopUpdateBackgroundHostController : IAsyncDisposable
 
     private void ThrowIfDisposed()
     {
-        if (_disposed)
+        if (_disposed || Volatile.Read(ref _disposeStarted) != 0)
             throw new ObjectDisposedException(nameof(DesktopUpdateBackgroundHostController));
     }
 
     public async ValueTask DisposeAsync()
     {
-        if (_disposed)
+        if (Interlocked.Exchange(ref _disposeStarted, 1) != 0)
             return;
 
         await _lifecycleGate.WaitAsync().ConfigureAwait(false);
         try
         {
-            if (_disposed)
-                return;
             await _scheduler.DisposeAsync().ConfigureAwait(false);
             _disposed = true;
         }
