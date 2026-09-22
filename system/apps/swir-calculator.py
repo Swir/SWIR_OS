@@ -3,7 +3,9 @@
 
 Expression evaluation is implemented with a strict AST allowlist. The
 application never evaluates Python source, never invokes a shell, and does not
-need privileged access or network connectivity.
+need privileged access or network connectivity. The visible application
+surface follows the bounded SWIR user-language preference with a safe English
+fallback.
 """
 
 from __future__ import annotations
@@ -15,15 +17,21 @@ import os
 import pathlib
 import sys
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, Mapping
 
 import gi
 
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
+LIBDIR = pathlib.Path("/usr/local/lib/swir")
+if LIBDIR.is_dir() and str(LIBDIR) not in sys.path:
+    sys.path.insert(0, str(LIBDIR))
+
+from core_runtime import UserSettingsStore, normalize_language_tag  # noqa: E402
+
 APP_ID: Final = "dev.swir.Calculator"
-EVIDENCE_SCHEMA: Final = "swir.native-calculator-runtime-evidence/0.1"
+EVIDENCE_SCHEMA: Final = "swir.native-calculator-runtime-evidence/0.2"
 MAX_EXPRESSION_CHARS: Final = 256
 MAX_AST_NODES: Final = 64
 MAX_ABS_VALUE: Final = 1e100
@@ -66,6 +74,73 @@ window.swir-calculator {
 }
 .swir-subtle { color: #8FAFC2; }
 """
+
+_TRANSLATIONS: Final[Mapping[str, Mapping[str, str]]] = {
+    "en": {
+        "window_title": "SWIR Calculator",
+        "subtitle": "Local arithmetic • no eval • no network • no privileges",
+        "expression_hint": "Arithmetic expression",
+        "copy": "Copy",
+        "ready": "Ready",
+        "history_empty": "History: empty",
+        "history_prefix": "History: {items}",
+        "cleared": "Cleared",
+        "length_limit": "Expression length limit reached",
+        "calculated": "Calculated",
+        "copied": "Copied result",
+    },
+    "pl-PL": {
+        "window_title": "Kalkulator SWIR",
+        "subtitle": "Lokalne obliczenia • bez eval • bez sieci • bez uprawnień",
+        "expression_hint": "Wyrażenie arytmetyczne",
+        "copy": "Kopiuj",
+        "ready": "Gotowy",
+        "history_empty": "Historia: pusta",
+        "history_prefix": "Historia: {items}",
+        "cleared": "Wyczyszczono",
+        "length_limit": "Osiągnięto limit długości wyrażenia",
+        "calculated": "Obliczono",
+        "copied": "Skopiowano wynik",
+    },
+    "nb-NO": {
+        "window_title": "SWIR-kalkulator",
+        "subtitle": "Lokal regning • ingen eval • ingen nettverk • ingen privilegier",
+        "expression_hint": "Aritmetisk uttrykk",
+        "copy": "Kopier",
+        "ready": "Klar",
+        "history_empty": "Historikk: tom",
+        "history_prefix": "Historikk: {items}",
+        "cleared": "Tømt",
+        "length_limit": "Grensen for uttrykkslengde er nådd",
+        "calculated": "Beregnet",
+        "copied": "Resultatet er kopiert",
+    },
+}
+
+
+@dataclass(frozen=True)
+class CalculatorLocale:
+    requested_language: str
+    catalog_language: str
+    strings: Mapping[str, str]
+
+    @property
+    def fallback(self) -> bool:
+        return self.requested_language != self.catalog_language
+
+    @property
+    def text_direction(self) -> str:
+        return "rtl" if self.catalog_language.split("-", 1)[0] in {"ar", "he"} else "ltr"
+
+    def text(self, key: str, **values: object) -> str:
+        template = self.strings[key]
+        return template.format(**values) if values else template
+
+
+def calculator_locale(language: object) -> CalculatorLocale:
+    requested = normalize_language_tag(language) or "en"
+    catalog = requested if requested in _TRANSLATIONS else "en"
+    return CalculatorLocale(requested, catalog, _TRANSLATIONS[catalog])
 
 
 class CalculatorError(ValueError):
@@ -189,6 +264,10 @@ def _self_test() -> int:
         else:
             raise AssertionError(f"unsafe expression accepted: {rejected}")
     assert format_value(60.0) == "60"
+    assert calculator_locale("pl_PL.UTF-8").text("copy") == "Kopiuj"
+    assert calculator_locale("nb-NO").text("ready") == "Klar"
+    unsupported = calculator_locale("de-DE")
+    assert unsupported.catalog_language == "en" and unsupported.fallback is True
     print("SWIR Calculator self-test: OK")
     return 0
 
@@ -201,12 +280,25 @@ class SwirCalculator(Gtk.Application):
         self.status: Gtk.Label | None = None
         self.history_label: Gtk.Label | None = None
         self.history: list[str] = []
+        self.store = UserSettingsStore()
+        self.locale = calculator_locale("en")
         self.e2e = os.environ.get("SWIR_APP_E2E", "0") == "1"
         self.evidence_path = os.environ.get("SWIR_APP_EVIDENCE_PATH", "")
         self.e2e_expression = os.environ.get(
             "SWIR_CALCULATOR_E2E_EXPRESSION", "(12.5 + 7.5) * 3"
         )
         self.window_mapped = False
+
+    def _t(self, key: str, **values: object) -> str:
+        return self.locale.text(key, **values)
+
+    def _load_locale(self) -> None:
+        try:
+            settings = self.store.load()
+            language = settings.get("language", "en")
+        except (OSError, ValueError, RuntimeError, json.JSONDecodeError, UnicodeError):
+            language = "en"
+        self.locale = calculator_locale(language)
 
     def do_startup(self) -> None:
         Gtk.Application.do_startup(self)
@@ -224,10 +316,14 @@ class SwirCalculator(Gtk.Application):
             self.window.present()
             return
 
+        self._load_locale()
         window = Gtk.ApplicationWindow(application=self)
-        window.set_title("SWIR Calculator")
+        window.set_title(self._t("window_title"))
         window.set_default_size(390, 570)
         window.add_css_class("swir-calculator")
+        window.set_direction(
+            Gtk.TextDirection.RTL if self.locale.text_direction == "rtl" else Gtk.TextDirection.LTR
+        )
         self.window = window
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
@@ -237,12 +333,12 @@ class SwirCalculator(Gtk.Application):
         outer.set_margin_end(18)
         window.set_child(outer)
 
-        brand = Gtk.Label(label="SWIR Calculator")
+        brand = Gtk.Label(label=self._t("window_title"))
         brand.add_css_class("swir-brand")
         brand.set_xalign(0)
         outer.append(brand)
 
-        subtitle = Gtk.Label(label="Local arithmetic • no eval • no network • no privileges")
+        subtitle = Gtk.Label(label=self._t("subtitle"), wrap=True)
         subtitle.add_css_class("swir-subtle")
         subtitle.set_xalign(0)
         outer.append(subtitle)
@@ -251,6 +347,7 @@ class SwirCalculator(Gtk.Application):
         entry.add_css_class("swir-display")
         entry.set_alignment(1.0)
         entry.set_placeholder_text("0")
+        entry.set_tooltip_text(self._t("expression_hint"))
         entry.set_max_length(MAX_EXPRESSION_CHARS)
         entry.connect("activate", self._calculate_from_entry)
         self.entry = entry
@@ -268,22 +365,24 @@ class SwirCalculator(Gtk.Application):
             ("0", 0, 4), (".", 1, 4), ("%", 2, 4), ("+", 3, 4),
             ("±", 0, 5), ("x²", 1, 5), ("Copy", 2, 5), ("=", 3, 5),
         ]
-        for label, col, row in layout:
-            button = Gtk.Button(label=label)
+        for token, col, row in layout:
+            display_label = self._t("copy") if token == "Copy" else token
+            button = Gtk.Button(label=display_label)
             button.add_css_class("swir-key")
-            if label == "=":
+            button.set_tooltip_text(display_label)
+            if token == "=":
                 button.add_css_class("swir-equals")
             button.set_hexpand(True)
             button.set_vexpand(True)
-            button.connect("clicked", self._button_pressed, label)
+            button.connect("clicked", self._button_pressed, token)
             grid.attach(button, col, row, 1, 1)
 
-        self.status = Gtk.Label(label="Ready")
+        self.status = Gtk.Label(label=self._t("ready"), wrap=True)
         self.status.add_css_class("swir-subtle")
         self.status.set_xalign(0)
         outer.append(self.status)
 
-        self.history_label = Gtk.Label(label="History: empty", wrap=True)
+        self.history_label = Gtk.Label(label=self._t("history_empty"), wrap=True)
         self.history_label.add_css_class("swir-subtle")
         self.history_label.set_xalign(0)
         outer.append(self.history_label)
@@ -291,25 +390,25 @@ class SwirCalculator(Gtk.Application):
         window.connect("map", self._on_mapped)
         window.present()
 
-    def _button_pressed(self, _button: Gtk.Button, label: str) -> None:
+    def _button_pressed(self, _button: Gtk.Button, token: str) -> None:
         if self.entry is None:
             return
-        if label == "C":
+        if token == "C":
             self.entry.set_text("")
-            self._set_status("Cleared")
+            self._set_status(self._t("cleared"))
             return
-        if label == "⌫":
+        if token == "⌫":
             text = self.entry.get_text()
             self.entry.set_text(text[:-1])
             self.entry.set_position(-1)
             return
-        if label == "=":
+        if token == "=":
             self._calculate_from_entry(self.entry)
             return
-        if label == "Copy":
+        if token == "Copy":
             self._copy_display()
             return
-        if label == "±":
+        if token == "±":
             text = self.entry.get_text().strip()
             if text.startswith("-"):
                 text = text[1:]
@@ -320,20 +419,20 @@ class SwirCalculator(Gtk.Application):
             self.entry.set_text(text)
             self.entry.set_position(-1)
             return
-        if label == "x²":
+        if token == "x²":
             text = self.entry.get_text().strip()
             if text:
                 self.entry.set_text(f"({text})**2")
                 self.entry.set_position(-1)
             return
-        self._append(label)
+        self._append(token)
 
     def _append(self, token: str) -> None:
         if self.entry is None:
             return
         current = self.entry.get_text()
         if len(current) + len(token) > MAX_EXPRESSION_CHARS:
-            self._set_status("Expression length limit reached")
+            self._set_status(self._t("length_limit"))
             return
         position = self.entry.get_position()
         if position < 0:
@@ -357,7 +456,7 @@ class SwirCalculator(Gtk.Application):
         self.history.append(f"{calculation.expression} = {formatted}")
         del self.history[:-MAX_HISTORY]
         self._refresh_history()
-        self._set_status("Calculated")
+        self._set_status(self._t("calculated"))
 
     def _copy_display(self) -> None:
         if self.entry is None or self.window is None:
@@ -365,13 +464,16 @@ class SwirCalculator(Gtk.Application):
         display = self.window.get_display()
         clipboard = display.get_clipboard()
         clipboard.set_text(self.entry.get_text())
-        self._set_status("Copied result")
+        self._set_status(self._t("copied"))
 
     def _refresh_history(self) -> None:
         if self.history_label is None:
             return
         latest = self.history[-3:]
-        self.history_label.set_text("History: " + (" • ".join(latest) if latest else "empty"))
+        if latest:
+            self.history_label.set_text(self._t("history_prefix", items=" • ".join(latest)))
+        else:
+            self.history_label.set_text(self._t("history_empty"))
 
     def _set_status(self, text: str) -> None:
         if self.status is not None:
@@ -379,9 +481,7 @@ class SwirCalculator(Gtk.Application):
 
     def _on_mapped(self, _window: Gtk.Window) -> None:
         self.window_mapped = True
-        if not self.e2e:
-            return
-        if self.entry is None:
+        if not self.e2e or self.entry is None:
             return
         self.entry.set_text(self.e2e_expression)
         self._calculate_from_entry(self.entry)
@@ -416,6 +516,15 @@ class SwirCalculator(Gtk.Application):
             "expressionLimitChars": MAX_EXPRESSION_CHARS,
             "astNodeLimit": MAX_AST_NODES,
             "historyBounded": MAX_HISTORY,
+            "requestedLanguage": self.locale.requested_language,
+            "catalogLanguage": self.locale.catalog_language,
+            "translationFallback": self.locale.fallback,
+            "textDirection": self.locale.text_direction,
+            "localizedWindowTitle": self._t("window_title"),
+            "localizedCopyLabel": self._t("copy"),
+            "localizedSurfaceVerified": self.locale.catalog_language in _TRANSLATIONS,
+            "keyboardEntryActivation": True,
+            "focusableKeypad": True,
         }
         path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
         try:
