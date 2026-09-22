@@ -13,6 +13,10 @@ internal static class DesktopUpdateBackgroundHostControllerSelfTests
         Run("automatic policy restarts scheduler without restart permission", AutomaticRestartsSchedulerSafely, failures);
         Run("malformed policy shape fails closed", MalformedPolicyFailsClosed, failures);
         Run("policy read failure stops stale scheduler", PolicyReadFailureStopsStaleScheduler, failures);
+        Run("describe policy failure stops stale scheduler", DescribeFailureStopsStaleScheduler, failures);
+        Run("policy write failure reconciles authoritative policy", PolicyWriteFailureReconcilesCurrentPolicy, failures);
+        Run("policy write plus reread failure stops stale scheduler", PolicyWriteAndReadFailureStopsStaleScheduler, failures);
+        Run("concurrent disposal is idempotent", ConcurrentDisposalIsIdempotent, failures);
         Run("untrusted policy access is preserved", UntrustedAccessIsRejected, failures);
 
         if (failures.Count == 0)
@@ -90,6 +94,92 @@ internal static class DesktopUpdateBackgroundHostControllerSelfTests
         Expect(!after.GetProperty("scheduler").GetProperty("running").GetBoolean(), "policy read failure must stop stale scheduler state");
     }
 
+    private static void DescribeFailureStopsStaleScheduler()
+    {
+        using var f = new Fixture("notify");
+        var running = Json(f.Controller.StartAsync(true).GetAwaiter().GetResult());
+        Expect(running.GetProperty("scheduler").GetProperty("running").GetBoolean(), "precondition: scheduler must be running");
+
+        f.ThrowOnDescribe = true;
+        try
+        {
+            _ = f.Controller.Describe(true);
+            throw new InvalidOperationException("Expected policy-read-failed.");
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "policy-read-failed")
+        {
+        }
+
+        f.ThrowOnDescribe = false;
+        var after = Json(f.Controller.Describe(true));
+        Expect(!after.GetProperty("scheduler").GetProperty("running").GetBoolean(), "failed status read must not retain stale scheduler permissions");
+    }
+
+    private static void PolicyWriteFailureReconcilesCurrentPolicy()
+    {
+        using var f = new Fixture("notify");
+        var running = Json(f.Controller.StartAsync(true).GetAwaiter().GetResult());
+        Expect(running.GetProperty("scheduler").GetProperty("running").GetBoolean(), "precondition: scheduler must be running");
+
+        f.ThrowOnSet = true;
+        try
+        {
+            _ = f.Controller.SetUserPolicyAsync(true, "manual").GetAwaiter().GetResult();
+            throw new InvalidOperationException("Expected policy-write-failed.");
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "policy-write-failed")
+        {
+        }
+
+        f.ThrowOnSet = false;
+        var after = Json(f.Controller.Describe(true));
+        Expect(after.GetProperty("scheduler").GetProperty("running").GetBoolean(), "failed write with readable notify policy must retain the verified scheduler decision");
+        Expect(after.GetProperty("policy").GetProperty("mode").GetString() == "notify", "failed write must not invent a policy transition");
+    }
+
+    private static void PolicyWriteAndReadFailureStopsStaleScheduler()
+    {
+        using var f = new Fixture("notify");
+        var running = Json(f.Controller.StartAsync(true).GetAwaiter().GetResult());
+        Expect(running.GetProperty("scheduler").GetProperty("running").GetBoolean(), "precondition: scheduler must be running");
+
+        f.ThrowOnSet = true;
+        f.ThrowOnDescribe = true;
+        try
+        {
+            _ = f.Controller.SetUserPolicyAsync(true, "manual").GetAwaiter().GetResult();
+            throw new InvalidOperationException("Expected policy-write-failed.");
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "policy-write-failed")
+        {
+        }
+
+        f.ThrowOnSet = false;
+        f.ThrowOnDescribe = false;
+        var after = Json(f.Controller.Describe(true));
+        Expect(!after.GetProperty("scheduler").GetProperty("running").GetBoolean(), "unverifiable post-write policy must stop stale scheduler state");
+    }
+
+    private static void ConcurrentDisposalIsIdempotent()
+    {
+        using var f = new Fixture("notify");
+        _ = f.Controller.StartAsync(true).GetAwaiter().GetResult();
+        var tasks = Enumerable.Range(0, 8)
+            .Select(_ => f.Controller.DisposeAsync().AsTask())
+            .ToArray();
+        Task.WhenAll(tasks).GetAwaiter().GetResult();
+
+        try
+        {
+            _ = f.Controller.Describe(true);
+        }
+        catch (ObjectDisposedException)
+        {
+            return;
+        }
+        throw new InvalidOperationException("Disposed controller accepted a new lifecycle operation.");
+    }
+
     private static void UntrustedAccessIsRejected()
     {
         using var f = new Fixture("notify");
@@ -122,6 +212,7 @@ internal static class DesktopUpdateBackgroundHostControllerSelfTests
         public int Cycles { get; private set; }
         public bool ReturnMalformedPolicy { get; set; }
         public bool ThrowOnDescribe { get; set; }
+        public bool ThrowOnSet { get; set; }
         public DesktopUpdateBackgroundHostController Controller { get; }
 
         public Fixture(string initialMode)
@@ -143,6 +234,7 @@ internal static class DesktopUpdateBackgroundHostControllerSelfTests
                 (trustedShell, mode) =>
                 {
                     RequireTrusted(trustedShell);
+                    if (ThrowOnSet) throw new InvalidOperationException("policy-write-failed");
                     _mode = Normalize(mode);
                     return Policy(_mode);
                 },
