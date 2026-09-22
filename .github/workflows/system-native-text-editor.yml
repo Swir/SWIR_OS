@@ -126,7 +126,7 @@ jobs:
           evidence = json.load(open(sys.argv[1], encoding='utf-8'))
           edited = pathlib.Path(sys.argv[2])
           created = pathlib.Path(sys.argv[3])
-          assert evidence['schema'] == 'swir.native-text-editor-runtime-evidence/0.3'
+          assert evidence['schema'] == 'swir.native-text-editor-runtime-evidence/0.2'
           assert evidence['passed'] is True
           assert evidence['applicationId'] == 'dev.swir.TextEditor'
           assert evidence['nativeToolkit'] == 'gtk4'
