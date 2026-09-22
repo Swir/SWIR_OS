@@ -23,6 +23,7 @@ from typing import Final, Iterator, Mapping
 import gi
 
 gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
 LIBDIR = pathlib.Path("/usr/local/lib/swir")
@@ -522,10 +523,11 @@ class SwirClock(Gtk.Application):
         outer.set_margin_top(14); outer.set_margin_start(20); outer.set_margin_end(20); outer.set_margin_bottom(12)
         editor = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8); editor.add_css_class("swir-card")
         self.hour_spin = Gtk.SpinButton.new_with_range(0, 23, 1); self.minute_spin = Gtk.SpinButton.new_with_range(0, 59, 1)
+        self.hour_spin.set_focusable(True); self.minute_spin.set_focusable(True)
         self.hour_spin.set_tooltip_text(self._t("hour")); self.minute_spin.set_tooltip_text(self._t("minute"))
         now = dt.datetime.now().astimezone(); self.hour_spin.set_value(now.hour); self.minute_spin.set_value(now.minute)
-        self.label_entry = Gtk.Entry(); self.label_entry.set_placeholder_text(self._t("alarm_label")); self.label_entry.set_tooltip_text(self._t("alarm_label")); self.label_entry.set_max_length(MAX_LABEL_CHARS); self.label_entry.set_hexpand(True)
-        add = Gtk.Button(label=self._t("add_alarm")); add.add_css_class("swir-primary"); add.set_tooltip_text(self._t("add_alarm")); add.connect("clicked", self._add_alarm); self.add_button = add
+        self.label_entry = Gtk.Entry(); self.label_entry.set_focusable(True); self.label_entry.set_placeholder_text(self._t("alarm_label")); self.label_entry.set_tooltip_text(self._t("alarm_label")); self.label_entry.set_max_length(MAX_LABEL_CHARS); self.label_entry.set_hexpand(True)
+        add = Gtk.Button(label=self._t("add_alarm")); add.set_focusable(True); add.add_css_class("swir-primary"); add.set_tooltip_text(self._t("add_alarm")); add.connect("clicked", self._add_alarm); self.add_button = add
         for widget in (Gtk.Label(label=self._t("hour")), self.hour_spin, Gtk.Label(label=self._t("minute")), self.minute_spin, self.label_entry, add): editor.append(widget)
         outer.append(editor)
         note_text = self._t("alarm_note")
