@@ -11,6 +11,10 @@ internal static class DesktopUpdateBackgroundHostControllerSelfTests
         Run("manual policy keeps scheduler stopped", ManualKeepsSchedulerStopped, failures);
         Run("policy downgrade stops scheduler", DowngradeStopsScheduler, failures);
         Run("automatic policy restarts scheduler without restart permission", AutomaticRestartsSchedulerSafely, failures);
+        Run("runtime ineligibility blocks scheduler", RuntimeIneligibilityBlocksScheduler, failures);
+        Run("runtime eligibility loss stops stale scheduler", RuntimeEligibilityLossStopsScheduler, failures);
+        Run("runtime eligibility failure stops stale scheduler", RuntimeEligibilityFailureStopsScheduler, failures);
+        Run("explicit stop drains scheduler", ExplicitStopDrainsScheduler, failures);
         Run("malformed policy shape fails closed", MalformedPolicyFailsClosed, failures);
         Run("policy read failure stops stale scheduler", PolicyReadFailureStopsStaleScheduler, failures);
         Run("describe policy failure stops stale scheduler", DescribeFailureStopsStaleScheduler, failures);
@@ -35,6 +39,7 @@ internal static class DesktopUpdateBackgroundHostControllerSelfTests
         var state = Json(f.Controller.StartAsync(true).GetAwaiter().GetResult());
         Expect(state.GetProperty("scheduler").GetProperty("running").GetBoolean(), "notify policy must start the scheduler");
         Expect(state.GetProperty("policy").GetProperty("backgroundCheck").GetBoolean(), "notify policy must retain background checks");
+        Expect(state.GetProperty("runtimeEligible").GetBoolean(), "eligible runtime must be reported");
         Expect(!state.GetProperty("automaticRestart").GetBoolean(), "host controller must never permit automatic restart");
     }
 
@@ -65,6 +70,50 @@ internal static class DesktopUpdateBackgroundHostControllerSelfTests
         Expect(!state.GetProperty("policy").GetProperty("automaticRestart").GetBoolean(), "automatic policy must still forbid silent restart");
     }
 
+    private static void RuntimeIneligibilityBlocksScheduler()
+    {
+        using var f = new Fixture("notify") { RuntimeEligible = false };
+        var state = Json(f.Controller.StartAsync(true).GetAwaiter().GetResult());
+        Expect(!state.GetProperty("runtimeEligible").GetBoolean(), "ineligible runtime must be reported");
+        Expect(!state.GetProperty("schedulerAllowed").GetBoolean(), "ineligible runtime must block scheduler permission");
+        Expect(!state.GetProperty("scheduler").GetProperty("running").GetBoolean(), "ineligible runtime must keep scheduler stopped");
+    }
+
+    private static void RuntimeEligibilityLossStopsScheduler()
+    {
+        using var f = new Fixture("notify");
+        _ = f.Controller.StartAsync(true).GetAwaiter().GetResult();
+        f.RuntimeEligible = false;
+        var state = Json(f.Controller.Describe(true));
+        Expect(!state.GetProperty("scheduler").GetProperty("running").GetBoolean(), "status read must drain scheduler after runtime eligibility is lost");
+    }
+
+    private static void RuntimeEligibilityFailureStopsScheduler()
+    {
+        using var f = new Fixture("notify");
+        _ = f.Controller.StartAsync(true).GetAwaiter().GetResult();
+        f.ThrowOnRuntimeEligibility = true;
+        try
+        {
+            _ = f.Controller.StartAsync(true).GetAwaiter().GetResult();
+            throw new InvalidOperationException("Expected runtime-eligibility-failed.");
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "runtime-eligibility-failed")
+        {
+        }
+        f.ThrowOnRuntimeEligibility = false;
+        var after = Json(f.Controller.Describe(true));
+        Expect(!after.GetProperty("scheduler").GetProperty("running").GetBoolean(), "runtime eligibility failure must stop stale scheduler state");
+    }
+
+    private static void ExplicitStopDrainsScheduler()
+    {
+        using var f = new Fixture("notify");
+        _ = f.Controller.StartAsync(true).GetAwaiter().GetResult();
+        var stopped = Json(f.Controller.StopAsync(true).GetAwaiter().GetResult());
+        Expect(!stopped.GetProperty("scheduler").GetProperty("running").GetBoolean(), "explicit host stop must drain scheduler");
+    }
+
     private static void MalformedPolicyFailsClosed()
     {
         using var f = new Fixture("notify") { ReturnMalformedPolicy = true };
@@ -78,17 +127,9 @@ internal static class DesktopUpdateBackgroundHostControllerSelfTests
         using var f = new Fixture("notify");
         var running = Json(f.Controller.StartAsync(true).GetAwaiter().GetResult());
         Expect(running.GetProperty("scheduler").GetProperty("running").GetBoolean(), "precondition: scheduler must be running");
-
         f.ThrowOnDescribe = true;
-        try
-        {
-            _ = f.Controller.StartAsync(true).GetAwaiter().GetResult();
-            throw new InvalidOperationException("Expected policy-read-failed.");
-        }
-        catch (InvalidOperationException ex) when (ex.Message == "policy-read-failed")
-        {
-        }
-
+        try { _ = f.Controller.StartAsync(true).GetAwaiter().GetResult(); throw new InvalidOperationException("Expected policy-read-failed."); }
+        catch (InvalidOperationException ex) when (ex.Message == "policy-read-failed") { }
         f.ThrowOnDescribe = false;
         var after = Json(f.Controller.Describe(true));
         Expect(!after.GetProperty("scheduler").GetProperty("running").GetBoolean(), "policy read failure must stop stale scheduler state");
@@ -97,19 +138,10 @@ internal static class DesktopUpdateBackgroundHostControllerSelfTests
     private static void DescribeFailureStopsStaleScheduler()
     {
         using var f = new Fixture("notify");
-        var running = Json(f.Controller.StartAsync(true).GetAwaiter().GetResult());
-        Expect(running.GetProperty("scheduler").GetProperty("running").GetBoolean(), "precondition: scheduler must be running");
-
+        _ = f.Controller.StartAsync(true).GetAwaiter().GetResult();
         f.ThrowOnDescribe = true;
-        try
-        {
-            _ = f.Controller.Describe(true);
-            throw new InvalidOperationException("Expected policy-read-failed.");
-        }
-        catch (InvalidOperationException ex) when (ex.Message == "policy-read-failed")
-        {
-        }
-
+        try { _ = f.Controller.Describe(true); throw new InvalidOperationException("Expected policy-read-failed."); }
+        catch (InvalidOperationException ex) when (ex.Message == "policy-read-failed") { }
         f.ThrowOnDescribe = false;
         var after = Json(f.Controller.Describe(true));
         Expect(!after.GetProperty("scheduler").GetProperty("running").GetBoolean(), "failed status read must not retain stale scheduler permissions");
@@ -118,19 +150,10 @@ internal static class DesktopUpdateBackgroundHostControllerSelfTests
     private static void PolicyWriteFailureReconcilesCurrentPolicy()
     {
         using var f = new Fixture("notify");
-        var running = Json(f.Controller.StartAsync(true).GetAwaiter().GetResult());
-        Expect(running.GetProperty("scheduler").GetProperty("running").GetBoolean(), "precondition: scheduler must be running");
-
+        _ = f.Controller.StartAsync(true).GetAwaiter().GetResult();
         f.ThrowOnSet = true;
-        try
-        {
-            _ = f.Controller.SetUserPolicyAsync(true, "manual").GetAwaiter().GetResult();
-            throw new InvalidOperationException("Expected policy-write-failed.");
-        }
-        catch (InvalidOperationException ex) when (ex.Message == "policy-write-failed")
-        {
-        }
-
+        try { _ = f.Controller.SetUserPolicyAsync(true, "manual").GetAwaiter().GetResult(); throw new InvalidOperationException("Expected policy-write-failed."); }
+        catch (InvalidOperationException ex) when (ex.Message == "policy-write-failed") { }
         f.ThrowOnSet = false;
         var after = Json(f.Controller.Describe(true));
         Expect(after.GetProperty("scheduler").GetProperty("running").GetBoolean(), "failed write with readable notify policy must retain the verified scheduler decision");
@@ -140,22 +163,11 @@ internal static class DesktopUpdateBackgroundHostControllerSelfTests
     private static void PolicyWriteAndReadFailureStopsStaleScheduler()
     {
         using var f = new Fixture("notify");
-        var running = Json(f.Controller.StartAsync(true).GetAwaiter().GetResult());
-        Expect(running.GetProperty("scheduler").GetProperty("running").GetBoolean(), "precondition: scheduler must be running");
-
-        f.ThrowOnSet = true;
-        f.ThrowOnDescribe = true;
-        try
-        {
-            _ = f.Controller.SetUserPolicyAsync(true, "manual").GetAwaiter().GetResult();
-            throw new InvalidOperationException("Expected policy-write-failed.");
-        }
-        catch (InvalidOperationException ex) when (ex.Message == "policy-write-failed")
-        {
-        }
-
-        f.ThrowOnSet = false;
-        f.ThrowOnDescribe = false;
+        _ = f.Controller.StartAsync(true).GetAwaiter().GetResult();
+        f.ThrowOnSet = true; f.ThrowOnDescribe = true;
+        try { _ = f.Controller.SetUserPolicyAsync(true, "manual").GetAwaiter().GetResult(); throw new InvalidOperationException("Expected policy-write-failed."); }
+        catch (InvalidOperationException ex) when (ex.Message == "policy-write-failed") { }
+        f.ThrowOnSet = false; f.ThrowOnDescribe = false;
         var after = Json(f.Controller.Describe(true));
         Expect(!after.GetProperty("scheduler").GetProperty("running").GetBoolean(), "unverifiable post-write policy must stop stale scheduler state");
     }
@@ -164,42 +176,22 @@ internal static class DesktopUpdateBackgroundHostControllerSelfTests
     {
         using var f = new Fixture("notify");
         _ = f.Controller.StartAsync(true).GetAwaiter().GetResult();
-        var tasks = Enumerable.Range(0, 8)
-            .Select(_ => f.Controller.DisposeAsync().AsTask())
-            .ToArray();
-        Task.WhenAll(tasks).GetAwaiter().GetResult();
-
-        try
-        {
-            _ = f.Controller.Describe(true);
-        }
-        catch (ObjectDisposedException)
-        {
-            return;
-        }
+        Task.WhenAll(Enumerable.Range(0, 8).Select(_ => f.Controller.DisposeAsync().AsTask())).GetAwaiter().GetResult();
+        try { _ = f.Controller.Describe(true); }
+        catch (ObjectDisposedException) { return; }
         throw new InvalidOperationException("Disposed controller accepted a new lifecycle operation.");
     }
 
     private static void UntrustedAccessIsRejected()
     {
         using var f = new Fixture("notify");
-        try
-        {
-            _ = f.Controller.StartAsync(false).GetAwaiter().GetResult();
-        }
-        catch (InvalidOperationException ex) when (ex.Message == "trusted-shell-required")
-        {
-            return;
-        }
+        try { _ = f.Controller.StartAsync(false).GetAwaiter().GetResult(); }
+        catch (InvalidOperationException ex) when (ex.Message == "trusted-shell-required") { return; }
         throw new InvalidOperationException("Expected trusted-shell-required.");
     }
 
     private static JsonElement Json(object value) => JsonSerializer.SerializeToElement(value);
-    private static void Expect(bool condition, string message)
-    {
-        if (!condition) throw new InvalidOperationException(message);
-    }
-
+    private static void Expect(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
     private static void Run(string name, Action test, List<string> failures)
     {
         try { test(); Console.WriteLine($"PASS {name}"); }
@@ -213,6 +205,8 @@ internal static class DesktopUpdateBackgroundHostControllerSelfTests
         public bool ReturnMalformedPolicy { get; set; }
         public bool ThrowOnDescribe { get; set; }
         public bool ThrowOnSet { get; set; }
+        public bool RuntimeEligible { get; set; } = true;
+        public bool ThrowOnRuntimeEligibility { get; set; }
         public DesktopUpdateBackgroundHostController Controller { get; }
 
         public Fixture(string initialMode)
@@ -239,7 +233,12 @@ internal static class DesktopUpdateBackgroundHostControllerSelfTests
                     return Policy(_mode);
                 },
                 interval: TimeSpan.FromHours(1),
-                initialDelay: TimeSpan.FromHours(1));
+                initialDelay: TimeSpan.FromHours(1),
+                runtimeEligibility: () =>
+                {
+                    if (ThrowOnRuntimeEligibility) throw new InvalidOperationException("runtime-eligibility-failed");
+                    return RuntimeEligible;
+                });
         }
 
         private static object Policy(string mode) => mode switch
