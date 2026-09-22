@@ -14,6 +14,9 @@ on:
       - 'desktop/windows/DesktopUpdateBackgroundScheduler.cs'
       - 'desktop/windows/DesktopUpdateBackgroundSchedulerSelfTests.cs'
       - 'desktop/windows/SWIR.Desktop.UpdateBackgroundScheduler.SelfTests.csproj'
+      - 'desktop/windows/DesktopUpdateBackgroundHostController.cs'
+      - 'desktop/windows/DesktopUpdateBackgroundHostControllerSelfTests.cs'
+      - 'desktop/windows/SWIR.Desktop.UpdateBackgroundHostController.SelfTests.csproj'
       - 'desktop/windows/DesktopGitHubUpdatePolicy.cs'
       - 'desktop/windows/DesktopReleaseBundleBuilder.cs'
       - 'desktop/windows/DesktopReleaseBundleSelfTests.cs'
@@ -39,6 +42,9 @@ on:
       - 'desktop/windows/DesktopUpdateBackgroundScheduler.cs'
       - 'desktop/windows/DesktopUpdateBackgroundSchedulerSelfTests.cs'
       - 'desktop/windows/SWIR.Desktop.UpdateBackgroundScheduler.SelfTests.csproj'
+      - 'desktop/windows/DesktopUpdateBackgroundHostController.cs'
+      - 'desktop/windows/DesktopUpdateBackgroundHostControllerSelfTests.cs'
+      - 'desktop/windows/SWIR.Desktop.UpdateBackgroundHostController.SelfTests.csproj'
       - 'desktop/windows/DesktopGitHubUpdatePolicy.cs'
       - 'desktop/windows/DesktopReleaseBundleBuilder.cs'
       - 'desktop/windows/DesktopReleaseBundleSelfTests.cs'
@@ -89,6 +95,9 @@ jobs:
       - name: Verify non-overlapping update background scheduler
         working-directory: desktop/windows
         run: dotnet run --project SWIR.Desktop.UpdateBackgroundScheduler.SelfTests.csproj --configuration Release
+      - name: Verify Desktop host scheduler policy controller
+        working-directory: desktop/windows
+        run: dotnet run --project SWIR.Desktop.UpdateBackgroundHostController.SelfTests.csproj --configuration Release
       - name: Verify release bundle integration
         working-directory: desktop/windows
         run: dotnet run --project SWIR.Desktop.ReleaseBundle.SelfTests.csproj --configuration Release
