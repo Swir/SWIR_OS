@@ -72,7 +72,7 @@ internal sealed class DesktopUpdateBackgroundHostRuntime : IAsyncDisposable
         string persistedMode,
         CancellationToken cancellationToken = default)
     {
-        _lifecycleGate.Wait(cancellationToken);
+        await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             ThrowIfDisposed();
@@ -183,14 +183,14 @@ internal static class DesktopUpdateBackgroundHostBootstrap
 
         try
         {
-            _ = await runtime.StartAsync().ConfigureAwait(true);
+            _ = await runtime.StartAsync().ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             Trace.TraceError(
                 "SWIR Desktop background update runtime failed closed during startup: {0}",
                 ex.Message);
-            await runtime.DisposeAsync().ConfigureAwait(true);
+            await runtime.DisposeAsync().ConfigureAwait(false);
             lock (Sync)
             {
                 if (ReferenceEquals(_runtime, runtime))
