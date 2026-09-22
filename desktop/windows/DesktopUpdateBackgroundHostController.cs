@@ -6,13 +6,16 @@ namespace Swir.Desktop.Host;
 /// Coordinates the Desktop host lifetime with the policy-aware background update
 /// scheduler. The controller never weakens signed-feed verification, never stages
 /// work when the persisted user policy forbids it, and never restarts the host.
+/// Runtime eligibility is evaluated independently from user policy so a scheduler
+/// cannot remain alive when the signed release path is unavailable or unsafe.
 /// </summary>
 internal sealed class DesktopUpdateBackgroundHostController : IAsyncDisposable
 {
-    public const string ControllerSchema = "swir.desktop-update-background-host/0.2";
+    public const string ControllerSchema = "swir.desktop-update-background-host/0.3";
 
     private readonly Func<bool, object> _describePolicy;
     private readonly Func<bool, string, object> _setPolicy;
+    private readonly Func<bool> _runtimeEligibility;
     private readonly DesktopUpdateBackgroundScheduler _scheduler;
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
     private bool _disposed;
@@ -24,7 +27,8 @@ internal sealed class DesktopUpdateBackgroundHostController : IAsyncDisposable
         Func<bool, string, object> setPolicy,
         TimeSpan? interval = null,
         TimeSpan? initialDelay = null,
-        Action<DesktopUpdateBackgroundSchedulerEvent>? eventSink = null)
+        Action<DesktopUpdateBackgroundSchedulerEvent>? eventSink = null,
+        Func<bool>? runtimeEligibility = null)
     {
         ArgumentNullException.ThrowIfNull(backgroundCycle);
         ArgumentNullException.ThrowIfNull(describePolicy);
@@ -32,6 +36,7 @@ internal sealed class DesktopUpdateBackgroundHostController : IAsyncDisposable
 
         _describePolicy = describePolicy;
         _setPolicy = setPolicy;
+        _runtimeEligibility = runtimeEligibility ?? (() => true);
         _scheduler = new DesktopUpdateBackgroundScheduler(
             backgroundCycle,
             interval,
@@ -52,14 +57,12 @@ internal sealed class DesktopUpdateBackgroundHostController : IAsyncDisposable
             }
             catch
             {
-                // A controller that cannot establish current policy must not leave a
-                // previously-running scheduler alive on stale permissions.
                 await _scheduler.StopAsync().ConfigureAwait(false);
                 throw;
             }
 
-            await ReconcileSchedulerAsync(policy).ConfigureAwait(false);
-            return DescribeCore(policy);
+            var runtimeEligible = await ReconcileSchedulerAsync(policy).ConfigureAwait(false);
+            return DescribeCore(policy, runtimeEligible);
         }
         finally
         {
@@ -83,14 +86,10 @@ internal sealed class DesktopUpdateBackgroundHostController : IAsyncDisposable
             }
             catch
             {
-                // A failed write may have happened before or after persistence. Re-read
-                // the authoritative policy and reconcile from that state. If the policy
-                // cannot be established, stop the scheduler rather than keeping stale
-                // permissions alive.
                 try
                 {
                     var currentPolicy = _describePolicy(trustedShell);
-                    await ReconcileSchedulerAsync(currentPolicy).ConfigureAwait(false);
+                    _ = await ReconcileSchedulerAsync(currentPolicy).ConfigureAwait(false);
                 }
                 catch
                 {
@@ -99,8 +98,45 @@ internal sealed class DesktopUpdateBackgroundHostController : IAsyncDisposable
                 throw;
             }
 
-            await ReconcileSchedulerAsync(policy).ConfigureAwait(false);
-            return DescribeCore(policy);
+            var runtimeEligible = await ReconcileSchedulerAsync(policy).ConfigureAwait(false);
+            return DescribeCore(policy, runtimeEligible);
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
+    }
+
+    internal async Task<object> StopAsync(bool trustedShell, CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            object policy;
+            try
+            {
+                policy = _describePolicy(trustedShell);
+            }
+            catch
+            {
+                await _scheduler.StopAsync().ConfigureAwait(false);
+                throw;
+            }
+
+            bool runtimeEligible;
+            try
+            {
+                runtimeEligible = RuntimeEligibleFor(policy);
+            }
+            catch
+            {
+                await _scheduler.StopAsync().ConfigureAwait(false);
+                throw;
+            }
+
+            await _scheduler.StopAsync().ConfigureAwait(false);
+            return DescribeCore(policy, runtimeEligible);
         }
         finally
         {
@@ -114,19 +150,19 @@ internal sealed class DesktopUpdateBackgroundHostController : IAsyncDisposable
         _lifecycleGate.Wait();
         try
         {
-            object policy;
             try
             {
-                policy = _describePolicy(trustedShell);
+                var policy = _describePolicy(trustedShell);
+                var runtimeEligible = RuntimeEligibleFor(policy);
+                if (!AllowsBackgroundChecks(policy) || !runtimeEligible)
+                    _scheduler.StopAsync().GetAwaiter().GetResult();
+                return DescribeCore(policy, runtimeEligible);
             }
             catch
             {
-                // Describe is also a policy boundary. A failed policy read must not
-                // preserve a scheduler that was started under an older decision.
                 _scheduler.StopAsync().GetAwaiter().GetResult();
                 throw;
             }
-            return DescribeCore(policy);
         }
         finally
         {
@@ -134,23 +170,51 @@ internal sealed class DesktopUpdateBackgroundHostController : IAsyncDisposable
         }
     }
 
-    private async Task ReconcileSchedulerAsync(object policy)
+    private async Task<bool> ReconcileSchedulerAsync(object policy)
     {
-        if (AllowsBackgroundChecks(policy))
+        if (!AllowsBackgroundChecks(policy))
+        {
+            await _scheduler.StopAsync().ConfigureAwait(false);
+            return false;
+        }
+
+        bool runtimeEligible;
+        try
+        {
+            runtimeEligible = _runtimeEligibility();
+        }
+        catch
+        {
+            await _scheduler.StopAsync().ConfigureAwait(false);
+            throw;
+        }
+
+        if (runtimeEligible)
         {
             _scheduler.Start();
-            return;
+            return true;
         }
 
         await _scheduler.StopAsync().ConfigureAwait(false);
+        return false;
     }
 
-    private object DescribeCore(object policy) => new
+    private bool RuntimeEligibleFor(object policy)
+    {
+        if (!AllowsBackgroundChecks(policy))
+            return false;
+        return _runtimeEligibility();
+    }
+
+    private object DescribeCore(object policy, bool runtimeEligible) => new
     {
         schema = ControllerSchema,
         policy,
+        runtimeEligible,
+        schedulerAllowed = AllowsBackgroundChecks(policy) && runtimeEligible,
         scheduler = _scheduler.Describe(),
         failClosedPolicy = true,
+        failClosedRuntimeEligibility = true,
         automaticRestart = false
     };
 
