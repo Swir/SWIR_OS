@@ -22,16 +22,23 @@ import pathlib
 import sys
 import tempfile
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, Mapping
 
 import gi
 
+gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk  # noqa: E402
 
+LIBDIR = pathlib.Path("/usr/local/lib/swir")
+if LIBDIR.is_dir() and str(LIBDIR) not in sys.path:
+    sys.path.insert(0, str(LIBDIR))
+
+from core_runtime import UserSettingsStore, normalize_language_tag  # noqa: E402
+
 APP_ID: Final = "dev.swir.PhotoStudio"
-EVIDENCE_SCHEMA: Final = "swir.native-photo-studio-runtime-evidence/0.3"
+EVIDENCE_SCHEMA: Final = "swir.native-photo-studio-runtime-evidence/0.4"
 MAX_INPUT_BYTES: Final = 64 * 1024 * 1024
 MAX_PIXELS: Final = 40_000_000
 MAX_HISTORY: Final = 24
@@ -107,6 +114,77 @@ window.swir-app { background: #02050A; color: #F4FAFF; }
 entry, spinbutton { min-width: 74px; }
 """
 
+
+
+_TRANSLATIONS: Final[Mapping[str, Mapping[str, str]]] = {
+    "en": {
+        "window_title": "SWIR Photo Studio", "brand": "◈  SWIR PHOTO STUDIO", "open_image": "Open image", "export_copy": "Export copy",
+        "rotate_left": "↶ Rotate", "rotate_right": "↷ Rotate", "flip_h": "⇋ Flip H", "flip_v": "⇅ Flip V", "crop_center": "Crop 80%",
+        "undo": "Undo", "redo": "Redo", "crop_x": "Crop x", "apply_crop": "Apply crop", "exposure_down": "Exposure −", "exposure_up": "Exposure +",
+        "brightness_down": "Brightness −", "brightness_up": "Brightness +", "contrast_down": "Contrast −", "contrast_up": "Contrast +",
+        "saturation_down": "Saturation −", "saturation_up": "Saturation +", "bw": "B&W", "sepia": "Sepia", "text": "Text", "text_placeholder": "SWIR TEXT",
+        "scale": "scale", "add_text": "Add text", "width": "width", "draw_line": "Draw cyan line", "empty_info": "Open a local image to begin",
+        "safe_status": "Non-destructive editing • source unchanged • explicit export copy", "open_dialog": "Open image in SWIR Photo Studio",
+        "export_dialog": "Export edited copy", "open_first": "Open an image first.", "only_local": "Only local image files are accepted.",
+        "opened_readonly": "Opened read-only: {name}",
+    },
+    "pl-PL": {
+        "window_title": "Studio zdjęć SWIR", "brand": "◈  STUDIO ZDJĘĆ SWIR", "open_image": "Otwórz obraz", "export_copy": "Eksportuj kopię",
+        "rotate_left": "↶ Obróć", "rotate_right": "↷ Obróć", "flip_h": "⇋ Odbij H", "flip_v": "⇅ Odbij V", "crop_center": "Kadruj 80%",
+        "undo": "Cofnij", "redo": "Ponów", "crop_x": "Kadrowanie x", "apply_crop": "Zastosuj kadr", "exposure_down": "Ekspozycja −", "exposure_up": "Ekspozycja +",
+        "brightness_down": "Jasność −", "brightness_up": "Jasność +", "contrast_down": "Kontrast −", "contrast_up": "Kontrast +",
+        "saturation_down": "Nasycenie −", "saturation_up": "Nasycenie +", "bw": "Czarno-białe", "sepia": "Sepia", "text": "Tekst", "text_placeholder": "TEKST SWIR",
+        "scale": "skala", "add_text": "Dodaj tekst", "width": "grubość", "draw_line": "Rysuj cyjanową linię", "empty_info": "Otwórz lokalny obraz, aby rozpocząć",
+        "safe_status": "Edycja niedestrukcyjna • źródło bez zmian • jawny eksport kopii", "open_dialog": "Otwórz obraz w Studio zdjęć SWIR",
+        "export_dialog": "Eksportuj edytowaną kopię", "open_first": "Najpierw otwórz obraz.", "only_local": "Akceptowane są tylko lokalne pliki obrazów.",
+        "opened_readonly": "Otwarto tylko do odczytu: {name}",
+    },
+    "nb-NO": {
+        "window_title": "SWIR fotostudio", "brand": "◈  SWIR FOTOSTUDIO", "open_image": "Åpne bilde", "export_copy": "Eksporter kopi",
+        "rotate_left": "↶ Roter", "rotate_right": "↷ Roter", "flip_h": "⇋ Speil H", "flip_v": "⇅ Speil V", "crop_center": "Beskjær 80%",
+        "undo": "Angre", "redo": "Gjør om", "crop_x": "Beskjæring x", "apply_crop": "Bruk beskjæring", "exposure_down": "Eksponering −", "exposure_up": "Eksponering +",
+        "brightness_down": "Lysstyrke −", "brightness_up": "Lysstyrke +", "contrast_down": "Kontrast −", "contrast_up": "Kontrast +",
+        "saturation_down": "Metning −", "saturation_up": "Metning +", "bw": "Svart-hvitt", "sepia": "Sepia", "text": "Tekst", "text_placeholder": "SWIR-TEKST",
+        "scale": "skala", "add_text": "Legg til tekst", "width": "bredde", "draw_line": "Tegn cyan linje", "empty_info": "Åpne et lokalt bilde for å begynne",
+        "safe_status": "Ikke-destruktiv redigering • kilden endres ikke • eksplisitt eksportkopi", "open_dialog": "Åpne bilde i SWIR fotostudio",
+        "export_dialog": "Eksporter redigert kopi", "open_first": "Åpne et bilde først.", "only_local": "Bare lokale bildefiler godtas.",
+        "opened_readonly": "Åpnet skrivebeskyttet: {name}",
+    },
+}
+
+
+@dataclass(frozen=True)
+class PhotoLocale:
+    requested_language: str
+    catalog_language: str
+    strings: Mapping[str, str]
+
+    @property
+    def fallback(self) -> bool:
+        return self.requested_language != self.catalog_language
+
+    @property
+    def text_direction(self) -> str:
+        return "rtl" if self.catalog_language.split("-", 1)[0] in {"ar", "he"} else "ltr"
+
+    def text(self, key: str, **values: object) -> str:
+        template = self.strings[key]
+        return template.format(**values) if values else template
+
+
+def photo_locale(language: object) -> PhotoLocale:
+    requested = normalize_language_tag(language) or "en"
+    catalog = requested if requested in _TRANSLATIONS else "en"
+    return PhotoLocale(requested, catalog, _TRANSLATIONS[catalog])
+
+
+def _load_locale() -> PhotoLocale:
+    try:
+        settings = UserSettingsStore().load()
+        language = settings.get("language", "en")
+    except (OSError, RuntimeError, ValueError, json.JSONDecodeError):
+        language = "en"
+    return photo_locale(language)
 
 class PhotoPolicyError(RuntimeError):
     pass
@@ -491,12 +569,16 @@ class EditHistory:
 class SwirPhotoStudio(Gtk.Application):
     def __init__(self) -> None:
         super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.HANDLES_OPEN | Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
+        self.locale = _load_locale()
         self.window: Gtk.ApplicationWindow | None = None
         self.picture: Gtk.Picture | None = None
         self.status_label: Gtk.Label | None = None
         self.info_label: Gtk.Label | None = None
         self.undo_button: Gtk.Button | None = None
         self.redo_button: Gtk.Button | None = None
+        self.open_button: Gtk.Button | None = None
+        self.export_button: Gtk.Button | None = None
+        self._focus_controls: list[Gtk.Widget] = []
         self.history: EditHistory | None = None
         self.source_path: pathlib.Path | None = None
         self.crop_x: Gtk.SpinButton | None = None
@@ -517,6 +599,15 @@ class SwirPhotoStudio(Gtk.Application):
         self._e2e_input = os.environ.get("SWIR_PHOTO_E2E_IMAGE", "")
         self._e2e_export_dir = os.environ.get("SWIR_PHOTO_E2E_EXPORT_DIR", "")
         self._evidence_written = False
+
+    def t(self, key: str, **values: object) -> str:
+        return self.locale.text(key, **values)
+
+    def _track_control(self, widget: Gtk.Widget, tooltip: str) -> Gtk.Widget:
+        widget.set_focusable(True)
+        widget.set_tooltip_text(tooltip)
+        self._focus_controls.append(widget)
+        return widget
 
     @staticmethod
     def _spin(minimum: int, maximum: int, value: int = 0) -> Gtk.SpinButton:
@@ -574,7 +665,7 @@ class SwirPhotoStudio(Gtk.Application):
         for gio_file in files:
             text = gio_file.get_path()
             if not text:
-                self._set_status("Only local image files are accepted.")
+                self._set_status(self.t("only_local"))
                 return
             try:
                 self._open_path(_validated_local_image(text))
@@ -587,54 +678,58 @@ class SwirPhotoStudio(Gtk.Application):
             self.window.present()
             return
         window = Gtk.ApplicationWindow(application=self)
-        window.set_title("SWIR Photo Studio")
+        window.set_title(self.t("window_title"))
         window.set_default_size(1260, 900)
         window.add_css_class("swir-app")
+        window.set_direction(Gtk.TextDirection.RTL if self.locale.text_direction == "rtl" else Gtk.TextDirection.LTR)
         self.window = window
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         window.set_child(root)
 
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         header.add_css_class("swir-header")
-        brand = Gtk.Label(label="◈  SWIR PHOTO STUDIO")
+        brand = Gtk.Label(label=self.t("brand"))
         brand.add_css_class("swir-brand")
         header.append(brand)
         spacer = Gtk.Box()
         spacer.set_hexpand(True)
         header.append(spacer)
-        for label, callback, css in (("Open image", self._choose_open, "swir-button"), ("Export copy", self._choose_export, "swir-primary")):
-            button = Gtk.Button(label=label)
-            button.add_css_class(css)
-            button.connect("clicked", callback)
-            header.append(button)
+        self.open_button = self._track_control(Gtk.Button(label=self.t("open_image")), self.t("open_image"))
+        self.open_button.add_css_class("swir-button")
+        self.open_button.connect("clicked", self._choose_open)
+        header.append(self.open_button)
+        self.export_button = self._track_control(Gtk.Button(label=self.t("export_copy")), self.t("export_copy"))
+        self.export_button.add_css_class("swir-primary")
+        self.export_button.connect("clicked", self._choose_export)
+        header.append(self.export_button)
         root.append(header)
 
         basic = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
         basic.add_css_class("swir-panel")
         for label, callback in (
-            ("↶ Rotate", lambda *_: self._rotate(GdkPixbuf.PixbufRotation.COUNTERCLOCKWISE)),
-            ("↷ Rotate", lambda *_: self._rotate(GdkPixbuf.PixbufRotation.CLOCKWISE)),
-            ("⇋ Flip H", lambda *_: self._flip(True)),
-            ("⇅ Flip V", lambda *_: self._flip(False)),
-            ("Crop 80%", lambda *_: self._crop_center()),
+            (self.t("rotate_left"), lambda *_: self._rotate(GdkPixbuf.PixbufRotation.COUNTERCLOCKWISE)),
+            (self.t("rotate_right"), lambda *_: self._rotate(GdkPixbuf.PixbufRotation.CLOCKWISE)),
+            (self.t("flip_h"), lambda *_: self._flip(True)),
+            (self.t("flip_v"), lambda *_: self._flip(False)),
+            (self.t("crop_center"), lambda *_: self._crop_center()),
             ("50%", lambda *_: self._resize(0.5)),
             ("200%", lambda *_: self._resize(2.0)),
         ):
-            button = Gtk.Button(label=label)
+            button = self._track_control(Gtk.Button(label=label), label)
             button.add_css_class("swir-button")
             button.connect("clicked", callback)
             basic.append(button)
-        self.undo_button = Gtk.Button(label="Undo")
+        self.undo_button = self._track_control(Gtk.Button(label=self.t("undo")), self.t("undo"))
         self.undo_button.connect("clicked", lambda *_: self._undo())
         basic.append(self.undo_button)
-        self.redo_button = Gtk.Button(label="Redo")
+        self.redo_button = self._track_control(Gtk.Button(label=self.t("redo")), self.t("redo"))
         self.redo_button.connect("clicked", lambda *_: self._redo())
         basic.append(self.redo_button)
         root.append(basic)
 
         crop = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         crop.add_css_class("swir-panel")
-        crop.append(self._label("Crop x"))
+        crop.append(self._label(self.t("crop_x")))
         self.crop_x = self._spin(0, 1)
         crop.append(self.crop_x)
         crop.append(self._label("y"))
@@ -646,7 +741,7 @@ class SwirPhotoStudio(Gtk.Application):
         crop.append(self._label("h"))
         self.crop_h = self._spin(1, 1, 1)
         crop.append(self.crop_h)
-        crop_button = Gtk.Button(label="Apply crop")
+        crop_button = self._track_control(Gtk.Button(label=self.t("apply_crop")), self.t("apply_crop"))
         crop_button.add_css_class("swir-button")
         crop_button.connect("clicked", lambda *_: self._crop_from_controls())
         crop.append(crop_button)
@@ -655,18 +750,18 @@ class SwirPhotoStudio(Gtk.Application):
         color = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
         color.add_css_class("swir-panel")
         for label, callback in (
-            ("Exposure −", lambda *_: self._adjust(exposure_stops=-0.25, description="Exposure −0.25 EV.")),
-            ("Exposure +", lambda *_: self._adjust(exposure_stops=0.25, description="Exposure +0.25 EV.")),
-            ("Brightness −", lambda *_: self._adjust(brightness=-0.08, description="Brightness reduced.")),
-            ("Brightness +", lambda *_: self._adjust(brightness=0.08, description="Brightness increased.")),
-            ("Contrast −", lambda *_: self._adjust(contrast=-0.10, description="Contrast reduced.")),
-            ("Contrast +", lambda *_: self._adjust(contrast=0.10, description="Contrast increased.")),
-            ("Saturation −", lambda *_: self._adjust(saturation=-0.12, description="Saturation reduced.")),
-            ("Saturation +", lambda *_: self._adjust(saturation=0.12, description="Saturation increased.")),
-            ("B&W", lambda *_: self._adjust(grayscale=True, description="Grayscale filter applied.")),
-            ("Sepia", lambda *_: self._adjust(sepia=True, description="Sepia filter applied.")),
+            (self.t("exposure_down"), lambda *_: self._adjust(exposure_stops=-0.25, description="Exposure −0.25 EV.")),
+            (self.t("exposure_up"), lambda *_: self._adjust(exposure_stops=0.25, description="Exposure +0.25 EV.")),
+            (self.t("brightness_down"), lambda *_: self._adjust(brightness=-0.08, description="Brightness reduced.")),
+            (self.t("brightness_up"), lambda *_: self._adjust(brightness=0.08, description="Brightness increased.")),
+            (self.t("contrast_down"), lambda *_: self._adjust(contrast=-0.10, description="Contrast reduced.")),
+            (self.t("contrast_up"), lambda *_: self._adjust(contrast=0.10, description="Contrast increased.")),
+            (self.t("saturation_down"), lambda *_: self._adjust(saturation=-0.12, description="Saturation reduced.")),
+            (self.t("saturation_up"), lambda *_: self._adjust(saturation=0.12, description="Saturation increased.")),
+            (self.t("bw"), lambda *_: self._adjust(grayscale=True, description="Grayscale filter applied.")),
+            (self.t("sepia"), lambda *_: self._adjust(sepia=True, description="Sepia filter applied.")),
         ):
-            button = Gtk.Button(label=label)
+            button = self._track_control(Gtk.Button(label=label), label)
             button.add_css_class("swir-button")
             button.connect("clicked", callback)
             color.append(button)
@@ -677,9 +772,9 @@ class SwirPhotoStudio(Gtk.Application):
 
         annotate = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         annotate.add_css_class("swir-panel")
-        annotate.append(self._label("Text"))
-        self.text_entry = Gtk.Entry()
-        self.text_entry.set_placeholder_text("SWIR TEXT")
+        annotate.append(self._label(self.t("text")))
+        self.text_entry = self._track_control(Gtk.Entry(), self.t("text"))
+        self.text_entry.set_placeholder_text(self.t("text_placeholder"))
         self.text_entry.set_max_length(MAX_ANNOTATION_CHARS)
         annotate.append(self.text_entry)
         annotate.append(self._label("x"))
@@ -688,10 +783,10 @@ class SwirPhotoStudio(Gtk.Application):
         annotate.append(self._label("y"))
         self.text_y = self._spin(0, 1)
         annotate.append(self.text_y)
-        annotate.append(self._label("scale"))
+        annotate.append(self._label(self.t("scale")))
         self.text_scale = self._spin(1, MAX_TEXT_SCALE, 2)
         annotate.append(self.text_scale)
-        text_button = Gtk.Button(label="Add text")
+        text_button = self._track_control(Gtk.Button(label=self.t("add_text")), self.t("add_text"))
         text_button.add_css_class("swir-button")
         text_button.connect("clicked", lambda *_: self._annotate_from_controls())
         annotate.append(text_button)
@@ -704,10 +799,10 @@ class SwirPhotoStudio(Gtk.Application):
             spin = self._spin(0, 1)
             setattr(self, attr, spin)
             line.append(spin)
-        line.append(self._label("width"))
+        line.append(self._label(self.t("width")))
         self.line_width = self._spin(1, MAX_LINE_WIDTH, 3)
         line.append(self.line_width)
-        line_button = Gtk.Button(label="Draw cyan line")
+        line_button = self._track_control(Gtk.Button(label=self.t("draw_line")), self.t("draw_line"))
         line_button.add_css_class("swir-button")
         line_button.connect("clicked", lambda *_: self._draw_line_from_controls())
         line.append(line_button)
@@ -723,12 +818,12 @@ class SwirPhotoStudio(Gtk.Application):
         self.picture.set_hexpand(True)
         self.picture.set_vexpand(True)
         panel.append(self.picture)
-        self.info_label = Gtk.Label(label="Open a local image to begin")
+        self.info_label = Gtk.Label(label=self.t("empty_info"))
         self.info_label.add_css_class("swir-muted")
         panel.append(self.info_label)
         root.append(panel)
 
-        self.status_label = Gtk.Label(label="Non-destructive editing • source unchanged • explicit export copy")
+        self.status_label = Gtk.Label(label=self.t("safe_status"))
         self.status_label.add_css_class("swir-muted")
         self.status_label.set_xalign(0)
         root.append(self.status_label)
@@ -741,7 +836,7 @@ class SwirPhotoStudio(Gtk.Application):
         self.source_path = path
         self.history = EditHistory.from_pixbuf(_load_pixbuf(path))
         self._refresh_picture()
-        self._set_status(f"Opened read-only: {path.name}")
+        self._set_status(self.t("opened_readonly", name=path.name))
 
     def _refresh_picture(self) -> None:
         if not self.history or not self.picture:
@@ -780,7 +875,7 @@ class SwirPhotoStudio(Gtk.Application):
 
     def _require_image(self) -> EditHistory | None:
         if self.history is None:
-            self._set_status("Open an image first.")
+            self._set_status(self.t("open_first"))
             return None
         return self.history
 
@@ -927,7 +1022,7 @@ class SwirPhotoStudio(Gtk.Application):
     def _choose_open(self, *_args) -> None:
         if not self.window:
             return
-        dialog = Gtk.FileDialog(title="Open image in SWIR Photo Studio")
+        dialog = Gtk.FileDialog(title=self.t("open_dialog"))
         dialog.set_modal(True)
         dialog.open(self.window, None, self._open_finished)
 
@@ -945,7 +1040,7 @@ class SwirPhotoStudio(Gtk.Application):
         history = self._require_image()
         if history is None or not self.window:
             return
-        dialog = Gtk.FileDialog(title="Export edited copy")
+        dialog = Gtk.FileDialog(title=self.t("export_dialog"))
         dialog.set_modal(True)
         source_stem = self.source_path.stem if self.source_path else "swir-photo"
         dialog.set_initial_name(f"{source_stem}-edited.png")
@@ -1048,6 +1143,17 @@ class SwirPhotoStudio(Gtk.Application):
             "nativeToolkit": "gtk4-gdkpixbuf",
             "displayProtocol": "wayland",
             "windowMapped": True,
+            "localeRequested": self.locale.requested_language,
+            "localeCatalog": self.locale.catalog_language,
+            "localeFallback": self.locale.fallback,
+            "textDirection": self.locale.text_direction,
+            "textDirectionApplied": bool(self.window and self.window.get_direction() == (Gtk.TextDirection.RTL if self.locale.text_direction == "rtl" else Gtk.TextDirection.LTR)),
+            "localizedWindowTitle": self.window.get_title() if self.window else "",
+            "localizedOpenLabel": self.open_button.get_label() if self.open_button else "",
+            "localizedUndoLabel": self.undo_button.get_label() if self.undo_button else "",
+            "localizedSurfaceVerified": bool(self.window and self.open_button and self.undo_button and self.text_entry and self.window.get_title() == self.t("window_title") and self.open_button.get_label() == self.t("open_image") and self.undo_button.get_label() == self.t("undo") and self.text_entry.get_placeholder_text() == self.t("text_placeholder")),
+            "accessibilityFocusVerified": bool(self._focus_controls) and all(widget.get_focusable() for widget in self._focus_controls),
+            "accessibilityTooltipsVerified": bool(self._focus_controls) and all(bool(widget.get_tooltip_text()) for widget in self._focus_controls),
             "sourceReadOnly": source.read_bytes() == source_bytes,
             "localFilesOnly": True,
             "remoteUriInputAccepted": False,
@@ -1080,6 +1186,7 @@ class SwirPhotoStudio(Gtk.Application):
             "selfUpdater": False,
         }
         required = (
+            "localizedSurfaceVerified", "accessibilityFocusVerified", "accessibilityTooltipsVerified", "textDirectionApplied",
             "sourceReadOnly", "undoRedoVerified", "rotateVerified", "resizeVerified", "cropVerified", "customCropVerified",
             "exposureVerified", "brightnessVerified", "contrastVerified", "saturationVerified",
             "grayscaleVerified", "sepiaVerified", "textAnnotationVerified", "drawingVerified", "pngExport", "jpegExport",
@@ -1095,6 +1202,12 @@ class SwirPhotoStudio(Gtk.Application):
 def _self_test() -> int:
     with tempfile.TemporaryDirectory(prefix="swir-photo-selftest-") as temp:
         root = pathlib.Path(temp)
+        pl = photo_locale("pl")
+        no = photo_locale("no")
+        fallback = photo_locale("de-DE")
+        assert pl.catalog_language == "pl-PL" and pl.text("open_image") == "Otwórz obraz" and not pl.fallback
+        assert no.catalog_language == "nb-NO" and no.text("open_image") == "Åpne bilde" and not no.fallback
+        assert fallback.catalog_language == "en" and fallback.fallback
         source = root / "source.png"
         pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, True, 8, 64, 40)
         pixbuf.fill(0x2488FFFF)
