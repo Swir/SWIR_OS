@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     paths:
+      - 'system/apps/core_runtime.py'
       - 'system/apps/hardware_center_runtime.py'
       - 'system/apps/hardware_center_runtime.selftest.py'
       - 'system/apps/swir-hardware-center.py'
@@ -20,6 +21,7 @@ on:
       - '.github/workflows/system-native-hardware-center.yml'
   pull_request:
     paths:
+      - 'system/apps/core_runtime.py'
       - 'system/apps/hardware_center_runtime.py'
       - 'system/apps/hardware_center_runtime.selftest.py'
       - 'system/apps/swir-hardware-center.py'
@@ -57,6 +59,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m py_compile \
+            system/apps/core_runtime.py \
             system/apps/hardware_center_runtime.py \
             system/apps/hardware_center_runtime.selftest.py \
             system/apps/swir-hardware-center.py \
@@ -80,6 +83,8 @@ jobs:
           grep -F 'firmwareInventoryReadOnly": True' system/apps/swir-hardware-center.py >/dev/null
           grep -F 'arbitraryDriverDownloadsAllowed": False' system/apps/swir-hardware-center.py >/dev/null
           grep -F 'windowsKernelDriversAsLinuxPath": False' system/apps/swir-hardware-center.py >/dev/null
+          grep -F 'UserSettingsStore' system/apps/swir-hardware-center.py >/dev/null
+          grep -F 'localizedTooltips' system/apps/swir-hardware-center.py >/dev/null
           ! grep -RE '/usr/bin/(sudo|pkexec|su)|/bin/su|os\.system\(|shell *= *True' \
             system/apps/swir-hardware-center.py \
             system/apps/hardware_center_runtime.py
@@ -95,14 +100,26 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends weston python3-gi gir1.2-gtk-4.0 nodejs
-      - name: Map Hardware Center and load trusted report
+      - name: Map localized Hardware Center and load trusted report
         shell: bash
         run: |
           set -euo pipefail
           RUNTIME="${{ runner.temp }}/swir-hardware-runtime"
-          mkdir -p "$RUNTIME"
-          chmod 0700 "$RUNTIME"
+          CONFIG="${{ runner.temp }}/swir-hardware-config"
+          mkdir -p "$RUNTIME" "$CONFIG/swir"
+          chmod 0700 "$RUNTIME" "$CONFIG" "$CONFIG/swir"
+          cat > "$CONFIG/swir/settings.json" <<'JSON'
+          {
+            "schema": "swir.user-settings/0.1",
+            "appearance": "dark",
+            "language": "pl-PL",
+            "clock24h": true,
+            "themeId": "builtin.swir-dark"
+          }
+          JSON
+          chmod 0600 "$CONFIG/swir/settings.json"
           export XDG_RUNTIME_DIR="$RUNTIME"
+          export XDG_CONFIG_HOME="$CONFIG"
           export WAYLAND_DISPLAY=wayland-swir-hardware
           export GDK_BACKEND=wayland
           export PYTHONPATH="$GITHUB_WORKSPACE/system/apps"
@@ -118,16 +135,24 @@ jobs:
           done
           [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]]
 
+          set +e
           timeout --signal=TERM --kill-after=5s 30s \
             env SWIR_APP_E2E=1 \
               SWIR_APP_EVIDENCE_PATH="$RUNTIME/hardware.json" \
               SWIR_HARDWARE_CENTER_REPORT_SCRIPT="$GITHUB_WORKSPACE/system/hardware/driver-center-report.mjs" \
-              python3 system/apps/swir-hardware-center.py
+              python3 system/apps/swir-hardware-center.py \
+              >"$RUNTIME/hardware-app.log" 2>&1
+          APP_RC=$?
+          set -e
+          if [[ "$APP_RC" -ne 0 ]]; then
+            cat "$RUNTIME/hardware-app.log" >&2 || true
+            exit "$APP_RC"
+          fi
 
           python3 - "$RUNTIME/hardware.json" <<'PY'
           import json, sys
           evidence = json.load(open(sys.argv[1], encoding='utf-8'))
-          assert evidence['schema'] == 'swir.native-hardware-center-runtime-evidence/0.1'
+          assert evidence['schema'] == 'swir.native-hardware-center-runtime-evidence/0.2'
           assert evidence['passed'] is True
           assert evidence['applicationId'] == 'dev.swir.HardwareCenter'
           assert evidence['nativeToolkit'] == 'gtk4' and evidence['displayProtocol'] == 'wayland'
@@ -145,5 +170,35 @@ jobs:
           assert 0 <= evidence['visibleDeviceCount'] <= 256
           assert 0 <= evidence['visibleOperationCount'] <= 256
           assert 0 <= evidence['visibleFirmwareUpdateCount'] <= 128
+          assert evidence['requestedLanguage'] == 'pl-PL' and evidence['catalogLanguage'] == 'pl-PL'
+          assert evidence['translationFallback'] is False and evidence['textDirection'] == 'ltr'
+          assert evidence['localizedWindowTitle'] == 'Centrum sprzętu i sterowników SWIR'
+          assert evidence['localizedRefreshLabel'] == 'Odśwież diagnostykę'
+          assert evidence['localizedSurfaceVerified'] is True
+          assert evidence['refreshButtonFocusable'] is True and evidence['localizedTooltips'] is True
           assert evidence['error'] == ''
           PY
+
+          python3 - <<'PY'
+          import runpy
+          namespace = runpy.run_path('system/apps/swir-hardware-center.py', run_name='swir_hardware_center_locale_probe')
+          resolve = namespace['hardware_locale']
+          fallback = resolve('fr-FR')
+          assert fallback.requested_language == 'fr-FR'
+          assert fallback.catalog_language == 'en' and fallback.fallback is True
+          assert fallback.text('window_title') == 'SWIR Hardware & Driver Center'
+          norwegian = resolve('nb-NO')
+          assert norwegian.catalog_language == 'nb-NO' and norwegian.fallback is False
+          assert norwegian.text('refresh') == 'Oppdater diagnostikk'
+          PY
+      - name: Upload Hardware Center failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hardware-center-failure-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/swir-hardware-runtime/hardware-app.log
+            ${{ runner.temp }}/swir-hardware-runtime/hardware.json
+            ${{ runner.temp }}/swir-hardware-runtime/weston.log
+          if-no-files-found: warn
+          retention-days: 3
