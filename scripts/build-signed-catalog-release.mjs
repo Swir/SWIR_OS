@@ -8,6 +8,7 @@ const SCHEMA = 'swir.catalog-signature/1.0';
 const RELEASE_SCHEMA = 'swir.signed-catalog-release/1.0';
 const ROOT_SCHEMA = 'swir.catalog-trust-roots/1.0';
 const ARTIFACT_SCHEMA = 'swir.catalog-artifacts/1.0';
+const TARGET_EDITION = 'DESKTOP';
 
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
@@ -52,6 +53,16 @@ function loadCatalog(sourcePath) {
   if (!Array.isArray(catalog) || !catalog.length) throw new Error('SWIR_PACKAGE_CATALOG must be a non-empty array');
   return JSON.parse(JSON.stringify(catalog));
 }
+function supportsEdition(pkg, edition = TARGET_EDITION) {
+  const declared = pkg?.compatibility?.editions;
+  if (!Array.isArray(declared) || declared.length < 1) {
+    throw new Error(`Package ${pkg?.packageId || pkg?.id || '<missing>'} must declare compatibility.editions before release signing`);
+  }
+  return declared.map(value => String(value).trim().toUpperCase()).includes(String(edition).toUpperCase());
+}
+function desktopCatalog(catalog) {
+  return catalog.filter(pkg => supportsEdition(pkg, TARGET_EDITION));
+}
 function loadArtifactMap(filePath) {
   const doc = JSON.parse(fs.readFileSync(filePath, 'utf8'));
   if (doc?.schema !== ARTIFACT_SCHEMA || !Array.isArray(doc.artifacts)) {
@@ -72,7 +83,9 @@ function loadArtifactMap(filePath) {
   return map;
 }
 function mergeArtifacts(catalog, artifactMap) {
-  return catalog.map(pkg => {
+  const scoped = desktopCatalog(catalog);
+  if (!scoped.length) throw new Error('Catalog has no Desktop-compatible packages to sign');
+  return scoped.map(pkg => {
     const packageId = String(pkg.packageId || '').trim();
     const version = String(pkg.version || '').trim();
     const desktop = artifactMap.get(`${packageId}@${version}`);
@@ -161,9 +174,11 @@ function runSelfTest() {
   try {
     const catalogSource = path.resolve('swir-packages.js');
     const catalog = loadCatalog(catalogSource);
+    const desktopPackages = desktopCatalog(catalog);
+    const webOnlyPackages = catalog.filter(pkg => !supportsEdition(pkg, TARGET_EDITION));
     const artifacts = {
       schema: ARTIFACT_SCHEMA,
-      artifacts: catalog.map(pkg => ({
+      artifacts: desktopPackages.map(pkg => ({
         packageId: pkg.packageId,
         version: pkg.version,
         desktop: { sha256: sha256(`self-test:${pkg.packageId}@${pkg.version}`) }
@@ -185,12 +200,15 @@ function runSelfTest() {
     const envelope = result.release.envelope;
     const actualDigest = sha256(canonicalize(catalogView(result.release.catalog)));
     if (actualDigest !== envelope.catalogSha256) throw new Error('Self-test catalog digest mismatch');
+    if (result.release.catalog.length !== desktopPackages.length) throw new Error('Self-test Desktop catalog scope mismatch');
+    if (webOnlyPackages.some(pkg => result.release.catalog.some(item => item.packageId === pkg.packageId))) throw new Error('Self-test leaked a non-Desktop package into Desktop signed catalog');
+    if (!result.release.catalog.every(pkg => supportsEdition(pkg, TARGET_EDITION))) throw new Error('Self-test signed catalog contains package incompatible with Desktop');
     if (!result.release.catalog.every(pkg => /^[a-f0-9]{64}$/.test(pkg?.artifacts?.desktop?.sha256 || ''))) throw new Error('Self-test signed catalog lacks Desktop digests');
     if (!result.trustRoots.requireSignedCatalog || result.trustRoots.roots[0]?.scope?.[0] !== 'catalog:official') throw new Error('Self-test trust-root policy mismatch');
     for (const required of ['catalog.json','catalog-envelope.json','catalog-trust-roots.json','swir-signed-catalog-release.js','signed-catalog-release.json']) {
       if (!fs.existsSync(path.join(tmp, 'out', required))) throw new Error(`Self-test output missing: ${required}`);
     }
-    console.log(`SWIR signed catalog release builder self-test OK: ${result.release.catalog.length} packages, sequence ${envelope.sequence}, digest ${envelope.catalogSha256}`);
+    console.log(`SWIR signed catalog release builder self-test OK: ${result.release.catalog.length} Desktop packages, ${webOnlyPackages.length} non-Desktop packages excluded, sequence ${envelope.sequence}, digest ${envelope.catalogSha256}`);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -212,5 +230,5 @@ if (args.selfTest) {
     privateKeyPem: process.env[privateKeyEnv],
     validHours: Number(args['valid-hours'] || 168)
   });
-  console.log(`Signed SWIR catalog release written to ${outputDir}: ${result.release.catalog.length} packages, sequence ${result.release.envelope.sequence}, digest ${result.release.envelope.catalogSha256}`);
+  console.log(`Signed SWIR Desktop catalog release written to ${outputDir}: ${result.release.catalog.length} packages, sequence ${result.release.envelope.sequence}, digest ${result.release.envelope.catalogSha256}`);
 }

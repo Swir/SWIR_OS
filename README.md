@@ -12,8 +12,8 @@
 [![Desktop Windows Build](https://github.com/Swir/SWIR_OS/actions/workflows/desktop-windows-build.yml/badge.svg)](https://github.com/Swir/SWIR_OS/actions/workflows/desktop-windows-build.yml)
 [![Roadmap Contract](https://github.com/Swir/SWIR_OS/actions/workflows/roadmap-contract.yml/badge.svg)](https://github.com/Swir/SWIR_OS/actions/workflows/roadmap-contract.yml)
 
-![Roadmap](https://img.shields.io/badge/ROADMAP-92.3%25-02050A?style=for-the-badge&logoColor=62E5FF)
-![Completed](https://img.shields.io/badge/DONE-60%2F65-02050A?style=for-the-badge&logoColor=62E5FF)
+![Roadmap](https://img.shields.io/badge/ROADMAP-93.8%25-02050A?style=for-the-badge&logoColor=62E5FF)
+![Completed](https://img.shields.io/badge/DONE-61%2F65-02050A?style=for-the-badge&logoColor=62E5FF)
 ![Status](https://img.shields.io/badge/STATUS-IN%20PROGRESS-02050A?style=for-the-badge&logoColor=62E5FF)
 
 [![Author](https://img.shields.io/badge/Author-Swir-0088FF?style=flat-square&logo=github)](https://github.com/Swir)
@@ -31,9 +31,9 @@
 
 ## 📊 Project status
 
-<img width="100%" src="assets/readme/progress-card.svg" alt="SWIR OS roadmap progress — 92.3%, 60 of 65 verified deliverables" />
+<img width="100%" src="assets/readme/progress-card.svg" alt="SWIR OS roadmap progress — 93.8%, 61 of 65 verified deliverables" />
 
-**Measured scope:** full Web → Desktop → System `Version roadmap`. **Project progress:** 60/65 = **92.3%**. **Release readiness:** not ready; physical Live USB qualification, supported-device fwupd/LVFS validation, Desktop signing/update-feed work and other release gates remain open.
+**Measured scope:** full Web → Desktop → System `Version roadmap`. **Project progress:** 61/65 = **93.8%**. **Release readiness:** not ready; physical Live USB qualification, supported-device fwupd/LVFS validation, Desktop signing/update-feed work and other release gates remain open.
 
 SWIR OS is actively being developed as three connected editions: a browser-based Web Edition, a Windows Desktop Edition with native adapters, and a real Linux-native System Edition intended to run from removable media and install to disk as a standalone operating system.
 
@@ -46,7 +46,7 @@ SWIR OS is actively being developed as three connected editions: a browser-based
 ### Overall roadmap
 
 
-**60 of 65 measurable roadmap deliverables are complete.** The native System shell, Live USB, disk installation, detached boot, graphical-installer E2E and physical-hardware qualification are tracked explicitly rather than hidden inside generic bootable-image milestones. The authoritative checklist and progress math live in [`SWIR-OS-ARCHITECTURE.md`](SWIR-OS-ARCHITECTURE.md). A prototype, contract skeleton or CI job alone does not count as a completed roadmap item.
+**61 of 65 measurable roadmap deliverables are complete.** The native System shell, Live USB, disk installation, detached boot, graphical-installer E2E and physical-hardware qualification are tracked explicitly rather than hidden inside generic bootable-image milestones. The authoritative checklist and progress math live in [`SWIR-OS-ARCHITECTURE.md`](SWIR-OS-ARCHITECTURE.md). A prototype, contract skeleton or CI job alone does not count as a completed roadmap item.
 
 ---
 
@@ -79,6 +79,7 @@ Windows kernel drivers are **not** treated as a general solution for Linux hardw
 
 | Area | Verified/current direction |
 |---|---|
+| 🧩 **Installable Web widgets** | The official Web catalog now includes verified installable Clock and System widgets with a bounded shell host. The host only renders committed official package records whose protected identity and Web-only compatibility match the allowlist; widgets are local/read-only, permission-free and do not create native-support claims. |
 | 🖥️ **Native System shell** | The authenticated System Edition Wayland session now launches a real fullscreen GTK4 SWIR shell instead of stopping at an empty compositor. The UEFI E2E requires the native shell window to map, verifies fixed launcher entries and exercises the unprivileged subprocess launcher path. Privileged mutations remain outside the shell. |
 | 💽 **Live USB & installation** | A raw GPT amd64 image with SHA-256 is booted in CI as real QEMU USB mass storage under UEFI/OVMF. The VM gates prove graphical Live boot, no target write during idle/preview/cancel/wrong-token paths, source-media rejection, guarded install to a separate blank disk, source USB removal, standalone installed-disk boot and persistence. Physical USB qualification is still open. |
 | 🧭 **Native installer** | The GTK4 installer now drives the complete destructive path in a disposable UEFI VM through target review, wrong-token rejection, account/locale/keyboard/time-zone collection, the normal narrow Polkit helper, separate-disk installation and detached installed-system boot. The E2E verifies configured identity and regional settings after boot without storing password material in evidence. Physical hardware remains a separate gate. |

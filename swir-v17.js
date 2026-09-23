@@ -7,7 +7,7 @@
   let coreLoading=false;
 
   function loadRuntimeCore(){
-    if((window.SwirRuntime&&window.SwirTrustedKeys&&window.SwirPackageIntegrity&&window.SwirCatalogIntegrity&&window.SwirCatalogTrustState&&window.SwirInstallPipeline)||coreLoading)return;
+    if((window.SwirRuntime&&window.SwirTrustedKeys&&window.SwirPackageIntegrity&&window.SwirCatalogIntegrity&&window.SwirCatalogTrustState&&window.SwirInstallPipeline&&window.SwirWidgets)||coreLoading)return;
     coreLoading=true;
     const load=(src)=>new Promise((resolve,reject)=>{const s=document.createElement('script');s.src=src;s.async=false;s.onload=resolve;s.onerror=reject;document.head.appendChild(s)});
     (async()=>{
@@ -18,6 +18,7 @@
         if(!window.SwirCatalogIntegrity)await load('./swir-catalog-integrity.js');
         if(!window.SwirCatalogTrustState)await load('./swir-catalog-trust-state.js');
         if(!window.SwirInstallPipeline)await load('./swir-install-pipeline.js');
+        if(!window.SwirWidgets)await load('./swir-widgets.js');
       }catch(error){console.error('SWIR Runtime/Security Core failed to load',error)}finally{coreLoading=false}
     })();
   }
@@ -101,8 +102,9 @@
 
   function init(){
     loadRuntimeCore();
-    if(!window.SwirOS||!window.SwirAssociations||!window.SwirNotifications||!window.SwirAppSDK||!window.SwirPackageResolver||!window.SwirRuntime||!window.SwirTrustedKeys||!window.SwirPackageIntegrity||!window.SwirCatalogIntegrity||!window.SwirCatalogTrustState||!window.SwirInstallPipeline){setTimeout(init,60);return}
+    if(!window.SwirOS||!window.SwirAssociations||!window.SwirNotifications||!window.SwirAppSDK||!window.SwirPackageResolver||!window.SwirRuntime||!window.SwirTrustedKeys||!window.SwirPackageIntegrity||!window.SwirCatalogIntegrity||!window.SwirCatalogTrustState||!window.SwirInstallPipeline||!window.SwirWidgets){setTimeout(init,60);return}
     updateLabels();addQuickTile();wireTerminal();showStatus();
+    window.SwirWidgets.render().catch(error=>console.warn('[SWIR Widgets] initial render failed',error));
     setTimeout(()=>toast('SWIR OS 1.7','Runtime Adapter Contract, signed catalog freshness/anti-rollback, secure install pipeline, publisher trust and portable services are online.'),1300);
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();

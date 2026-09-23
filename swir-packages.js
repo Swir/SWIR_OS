@@ -46,6 +46,24 @@ window.SWIR_PACKAGE_CATALOG = Object.freeze([
     appData:"SWIR://APPDATA/CHAT", tags:["chat","social","server","live"],
     compatibility:{minOS:"1.7.0",minSDK:"1.2.0",platformApi:2,editions:["WEB","DESKTOP","SYSTEM"]},
     dependencies:[], optionalDependencies:[]
+  },
+  {
+    schema:"swir.app/1.0", id:"widget-clock", packageId:"swir.widget.clock", name:"Clock Widget", version:"1.0.0", author:"SWIR",
+    description:"Installable read-only desktop clock widget using local browser time and locale.",
+    category:"Widgets", icon:"CLK", accent:"#62e5ff", type:"iframe", entry:"./swir-widget-clock.html", desktop:false,
+    permissions:[], associations:[],
+    appData:"SWIR://APPDATA/WIDGET.CLOCK", tags:["widget","clock","desktop","time"],
+    compatibility:{minOS:"1.7.0",minSDK:"1.2.0",platformApi:2,editions:["WEB"]},
+    dependencies:[], optionalDependencies:[]
+  },
+  {
+    schema:"swir.app/1.0", id:"widget-system", packageId:"swir.widget.system", name:"System Widget", version:"1.0.0", author:"SWIR",
+    description:"Installable read-only desktop widget showing SWIR runtime and package state.",
+    category:"Widgets", icon:"SYS", accent:"#0088ff", type:"iframe", entry:"./swir-widget-system.html", desktop:false,
+    permissions:[], associations:[],
+    appData:"SWIR://APPDATA/WIDGET.SYSTEM", tags:["widget","system","desktop","runtime"],
+    compatibility:{minOS:"1.7.0",minSDK:"1.2.0",platformApi:2,editions:["WEB"]},
+    dependencies:[], optionalDependencies:[]
   }
 ]);
 
