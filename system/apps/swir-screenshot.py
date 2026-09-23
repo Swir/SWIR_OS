@@ -11,7 +11,8 @@ import tempfile
 import time
 import urllib.parse
 import uuid
-from typing import Callable, Final
+from dataclasses import dataclass
+from typing import Callable, Final, Mapping
 
 import gi
 
@@ -20,8 +21,14 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk  # noqa: E402
 
+LIBDIR = pathlib.Path("/usr/local/lib/swir")
+if LIBDIR.is_dir() and str(LIBDIR) not in sys.path:
+    sys.path.insert(0, str(LIBDIR))
+
+from core_runtime import UserSettingsStore, normalize_language_tag  # noqa: E402
+
 APP_ID: Final = "dev.swir.Screenshot"
-EVIDENCE_SCHEMA: Final = "swir.native-screenshot-runtime-evidence/0.1"
+EVIDENCE_SCHEMA: Final = "swir.native-screenshot-runtime-evidence/0.2"
 PORTAL_BUS: Final = "org.freedesktop.portal.Desktop"
 PORTAL_PATH: Final = "/org/freedesktop/portal/desktop"
 PORTAL_IFACE: Final = "org.freedesktop.portal.Screenshot"
@@ -39,6 +46,70 @@ window.swir-app { background: #02050A; color: #F4FAFF; }
 .swir-panel { background: #07111C; border: 1px solid rgba(98,229,255,0.25); border-radius: 14px; padding: 12px; }
 .swir-primary { background: #0088FF; color: #F4FAFF; border-radius: 9px; padding: 8px 14px; font-weight: 700; }
 """
+
+_TRANSLATIONS: Final[Mapping[str, Mapping[str, str]]] = {
+    "en": {
+        "window_title": "SWIR Screenshot Tool",
+        "brand": "SWIR Screenshot Tool",
+        "take_screenshot": "Take Screenshot",
+        "ready": "Uses the desktop portal for consent and selection.",
+        "waiting": "Waiting for desktop portal selection…",
+        "cancelled": "Screenshot cancelled.",
+        "request_failed": "Screenshot request failed.",
+        "saved": "Saved {name} — {width}×{height}",
+        "capture_tooltip": "Ask the desktop portal to select and capture a screenshot",
+        "preview_tooltip": "Preview of the most recently saved screenshot",
+    },
+    "pl-PL": {
+        "window_title": "Zrzut ekranu SWIR",
+        "brand": "Zrzut ekranu SWIR",
+        "take_screenshot": "Zrób zrzut ekranu",
+        "ready": "Używa portalu pulpitu do zgody i wyboru obszaru.",
+        "waiting": "Oczekiwanie na wybór w portalu pulpitu…",
+        "cancelled": "Anulowano zrzut ekranu.",
+        "request_failed": "Żądanie zrzutu ekranu nie powiodło się.",
+        "saved": "Zapisano {name} — {width}×{height}",
+        "capture_tooltip": "Poproś portal pulpitu o wybór i wykonanie zrzutu ekranu",
+        "preview_tooltip": "Podgląd ostatnio zapisanego zrzutu ekranu",
+    },
+    "nb-NO": {
+        "window_title": "SWIR-skjermbilde",
+        "brand": "SWIR-skjermbilde",
+        "take_screenshot": "Ta skjermbilde",
+        "ready": "Bruker skrivebordsportalen for samtykke og valg.",
+        "waiting": "Venter på valg i skrivebordsportalen…",
+        "cancelled": "Skjermbildet ble avbrutt.",
+        "request_failed": "Forespørselen om skjermbilde mislyktes.",
+        "saved": "Lagret {name} — {width}×{height}",
+        "capture_tooltip": "Be skrivebordsportalen velge og ta et skjermbilde",
+        "preview_tooltip": "Forhåndsvisning av sist lagrede skjermbilde",
+    },
+}
+
+
+@dataclass(frozen=True)
+class ScreenshotLocale:
+    requested_language: str
+    catalog_language: str
+    strings: Mapping[str, str]
+
+    @property
+    def fallback(self) -> bool:
+        return self.requested_language != self.catalog_language
+
+    @property
+    def text_direction(self) -> str:
+        return "rtl" if self.catalog_language.split("-", 1)[0] in {"ar", "he"} else "ltr"
+
+    def text(self, key: str, **values: object) -> str:
+        template = self.strings[key]
+        return template.format(**values) if values else template
+
+
+def screenshot_locale(language: object) -> ScreenshotLocale:
+    requested = normalize_language_tag(language) or "en"
+    catalog = requested if requested in _TRANSLATIONS else "en"
+    return ScreenshotLocale(requested, catalog, _TRANSLATIONS[catalog])
 
 
 class ScreenshotPolicyError(RuntimeError):
@@ -245,9 +316,21 @@ class SwirScreenshot(Gtk.Application):
         self.status: Gtk.Label | None = None
         self.capture_button: Gtk.Button | None = None
         self.portal: PortalScreenshotClient | None = None
+        self.settings_store = UserSettingsStore()
+        self.locale = self._load_locale()
         self._e2e = os.environ.get("SWIR_APP_E2E") == "1"
         self._evidence_path = os.environ.get("SWIR_APP_EVIDENCE_PATH", "")
         self._mapped = False
+
+    def _load_locale(self) -> ScreenshotLocale:
+        try:
+            language = self.settings_store.load().get("language", "en")
+        except (OSError, RuntimeError, UnicodeError, ValueError):
+            language = "en"
+        return screenshot_locale(language)
+
+    def _t(self, key: str, **values: object) -> str:
+        return self.locale.text(key, **values)
 
     def do_startup(self) -> None:
         Gtk.Application.do_startup(self)
@@ -268,28 +351,33 @@ class SwirScreenshot(Gtk.Application):
 
     def _build_ui(self) -> None:
         window = Gtk.ApplicationWindow(application=self)
-        window.set_title("SWIR Screenshot Tool")
+        window.set_title(self._t("window_title"))
         window.set_default_size(780, 560)
         window.add_css_class("swir-app")
+        direction = Gtk.TextDirection.RTL if self.locale.text_direction == "rtl" else Gtk.TextDirection.LTR
+        window.set_direction(direction)
         window.connect("map", lambda *_: setattr(self, "_mapped", True))
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         header.add_css_class("swir-header")
-        brand = Gtk.Label(label="SWIR Screenshot Tool", xalign=0)
+        brand = Gtk.Label(label=self._t("brand"), xalign=0)
         brand.add_css_class("swir-brand")
         header.append(brand)
         outer.append(header)
         body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         body.set_margin_top(18); body.set_margin_bottom(18); body.set_margin_start(18); body.set_margin_end(18)
         body.add_css_class("swir-panel")
-        capture = Gtk.Button(label="Take Screenshot")
+        capture = Gtk.Button(label=self._t("take_screenshot"))
         capture.add_css_class("swir-primary")
+        capture.set_focusable(True)
+        capture.set_tooltip_text(self._t("capture_tooltip"))
         capture.connect("clicked", lambda *_: self._capture())
         body.append(capture)
-        status_label = Gtk.Label(label="Uses the desktop portal for consent and selection.", xalign=0)
-        status_label.set_wrap(True); status_label.add_css_class("swir-muted")
+        status_label = Gtk.Label(label=self._t("ready"), xalign=0)
+        status_label.set_wrap(True); status_label.set_selectable(True); status_label.add_css_class("swir-muted")
         body.append(status_label)
         picture = Gtk.Picture(); picture.set_can_shrink(True); picture.set_content_fit(Gtk.ContentFit.CONTAIN); picture.set_vexpand(True)
+        picture.set_tooltip_text(self._t("preview_tooltip"))
         body.append(picture)
         outer.append(body)
         window.set_child(outer)
@@ -302,7 +390,7 @@ class SwirScreenshot(Gtk.Application):
     def _capture(self) -> None:
         if self.capture_button is not None:
             self.capture_button.set_sensitive(False)
-        self._set_status("Waiting for desktop portal selection…")
+        self._set_status(self._t("waiting"))
         try:
             self.portal = PortalScreenshotClient()
             self.portal.request(self._portal_response)
@@ -311,7 +399,8 @@ class SwirScreenshot(Gtk.Application):
 
     def _portal_response(self, response: int, results: dict[str, object]) -> None:
         if response != 0:
-            self._capture_failed(str(results.get("error", "Screenshot cancelled." if response == 1 else "Screenshot request failed.")))
+            default = self._t("cancelled") if response == 1 else self._t("request_failed")
+            self._capture_failed(str(results.get("error", default)))
             return
         try:
             uri = results.get("uri")
@@ -322,7 +411,7 @@ class SwirScreenshot(Gtk.Application):
             destination = _atomic_copy_capture(source, _default_output_directory())
             if self.picture is not None:
                 self.picture.set_filename(str(destination))
-            self._set_status(f"Saved {destination.name} — {width}×{height}")
+            self._set_status(self._t("saved", name=destination.name, width=width, height=height))
             if self.capture_button is not None:
                 self.capture_button.set_sensitive(True)
             if self._e2e:
@@ -346,15 +435,40 @@ class SwirScreenshot(Gtk.Application):
     def _write_evidence(self, destination: pathlib.Path, width: int, height: int) -> None:
         if not self._evidence_path:
             return
+        path = pathlib.Path(self._evidence_path)
+        runtime_text = os.environ.get("XDG_RUNTIME_DIR", "")
+        if not runtime_text or path.parent.resolve() != pathlib.Path(runtime_text).resolve():
+            raise ScreenshotPolicyError("refusing SWIR Screenshot evidence path outside XDG_RUNTIME_DIR")
+        localized_surface_verified = bool(
+            self.window
+            and self.window.get_title() == self._t("window_title")
+            and self.capture_button
+            and self.capture_button.get_label() == self._t("take_screenshot")
+        )
+        localized_tooltips = bool(
+            self.capture_button
+            and self.capture_button.get_tooltip_text() == self._t("capture_tooltip")
+            and self.picture
+            and self.picture.get_tooltip_text() == self._t("preview_tooltip")
+        )
         payload = {
-            "schema": EVIDENCE_SCHEMA, "passed": True, "applicationId": APP_ID,
+            "schema": EVIDENCE_SCHEMA, "passed": self._mapped and localized_surface_verified and localized_tooltips,
+            "applicationId": APP_ID,
             "nativeToolkit": "gtk4-gdkpixbuf", "displayProtocol": "wayland" if os.environ.get("WAYLAND_DISPLAY") else "unknown",
             "windowMapped": self._mapped, "portalBus": PORTAL_BUS, "portalInterface": PORTAL_IFACE,
             "portalRequestUsed": True, "interactiveRequest": True, "sourceUriScheme": "file", "sourceValidated": True,
             "savedFile": destination.name, "savedMode": f"{stat.S_IMODE(destination.stat().st_mode):04o}", "dimensions": [width, height],
             "remoteUriAccepted": False, "shellCapture": False, "privilegedOperations": False, "selfUpdater": False,
+            "requestedLanguage": self.locale.requested_language, "catalogLanguage": self.locale.catalog_language,
+            "translationFallback": self.locale.fallback, "textDirection": self.locale.text_direction,
+            "localizedWindowTitle": self._t("window_title"), "localizedCaptureLabel": self._t("take_screenshot"),
+            "localizedSurfaceVerified": localized_surface_verified,
+            "captureButtonFocusable": bool(self.capture_button and self.capture_button.get_focusable()),
+            "localizedTooltips": localized_tooltips,
+            "evidenceOwnerOnly": True,
         }
-        pathlib.Path(self._evidence_path).write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        path.chmod(0o600)
 
 
 def _self_test() -> int:
@@ -368,6 +482,10 @@ def _self_test() -> int:
         out = root / "out"; out.mkdir(mode=0o700)
         copied = _atomic_copy_capture(source, out)
         assert copied.is_file() and stat.S_IMODE(copied.stat().st_mode) == 0o600
+        assert screenshot_locale("pl-PL").text("take_screenshot") == "Zrób zrzut ekranu"
+        assert screenshot_locale("nb-NO").text("take_screenshot") == "Ta skjermbilde"
+        fallback = screenshot_locale("zz-ZZ")
+        assert fallback.catalog_language == "en" and fallback.fallback is True
         for bad in ("https://example.invalid/a.png", "data:image/png;base64,AAAA", "file://remotehost/tmp/a.png"):
             try:
                 _validated_portal_uri(bad)
