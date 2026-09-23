@@ -50,6 +50,41 @@ jobs:
           git fetch origin main
           git checkout main
           git merge --ff-only origin/main
+      - name: Verify release tag provenance and channel semantics
+        shell: bash
+        env:
+          CHANNEL: ${{ steps.release.outputs.channel }}
+        run: |
+          set -euo pipefail
+          git fetch --force origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+          TAG_COMMIT="$(git rev-list -n 1 "$RELEASE_TAG")"
+          if [[ -z "$TAG_COMMIT" ]]; then
+            echo "Desktop update feed promotion is blocked: release tag does not resolve to a commit." >&2
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$TAG_COMMIT" origin/main; then
+            echo "Desktop update feed promotion is blocked: release tag $RELEASE_TAG is not reachable from main." >&2
+            exit 1
+          fi
+          IS_PRERELEASE="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq '.isPrerelease')"
+          case "$CHANNEL" in
+            preview)
+              if [[ "$IS_PRERELEASE" != "true" ]]; then
+                echo "Desktop preview feed promotion is blocked: preview release must be marked prerelease." >&2
+                exit 1
+              fi
+              ;;
+            stable)
+              if [[ "$IS_PRERELEASE" != "false" ]]; then
+                echo "Desktop stable feed promotion is blocked: stable release must not be marked prerelease." >&2
+                exit 1
+              fi
+              ;;
+            *)
+              echo "Desktop update feed promotion is blocked: unsupported channel $CHANNEL." >&2
+              exit 1
+              ;;
+          esac
       - name: Materialize pinned public update trust root
         shell: bash
         run: |
