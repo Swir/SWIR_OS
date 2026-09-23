@@ -1,0 +1,91 @@
+name: Repair native suite exact-head gates
+
+on:
+  push:
+    branches: [system/native-suite-final-locale]
+    paths:
+      - '.github/workflows/repair-native-suite-gates.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: system/native-suite-final-locale
+          fetch-depth: 0
+      - name: Apply verified gate repairs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected exactly one match, found {count}: {old!r}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          monitor = 'system/apps/swir-system-monitor.py'
+          replace_once(
+              monitor,
+              'gi.require_version("Gtk", "4.0")\nfrom gi.repository import Gdk, GLib, Gtk  # noqa: E402',
+              'gi.require_version("Gdk", "4.0")\ngi.require_version("Gtk", "4.0")\nfrom gi.repository import Gdk, GLib, Gtk  # noqa: E402',
+          )
+          replace_once(
+              monitor,
+              '        self.process_filter = Gtk.Entry()\n        self.process_filter.set_placeholder_text(self.t("filter_placeholder"))',
+              '        self.process_filter = Gtk.Entry()\n        self.process_filter.set_focusable(True)\n        self.process_filter.set_placeholder_text(self.t("filter_placeholder"))',
+          )
+          replace_once(
+              monitor,
+              '        self.end_process_button = Gtk.Button(label=self.t("end_process"))\n        self.end_process_button.add_css_class("swir-danger")',
+              '        self.end_process_button = Gtk.Button(label=self.t("end_process"))\n        self.end_process_button.set_focusable(True)\n        self.end_process_button.add_css_class("swir-danger")',
+          )
+          replace_once(
+              monitor,
+              '        self.diag_refresh = Gtk.Button(label=self.t("refresh_diagnostics"))\n        self.diag_refresh.set_tooltip_text(self.t("refresh_tooltip"))',
+              '        self.diag_refresh = Gtk.Button(label=self.t("refresh_diagnostics"))\n        self.diag_refresh.set_focusable(True)\n        self.diag_refresh.set_tooltip_text(self.t("refresh_tooltip"))',
+          )
+
+          task = '.github/workflows/system-native-task-manager.yml'
+          replace_once(
+              task,
+              "          path = pathlib.Path('system/apps/swir-system-monitor.py')\n          spec = importlib.util.spec_from_file_location('swir_system_monitor_task_test', path)",
+              "          path = pathlib.Path('system/apps/swir-system-monitor.py')\n          sys.path.insert(0, str(path.parent.resolve()))\n          spec = importlib.util.spec_from_file_location('swir_system_monitor_task_test', path)",
+          )
+
+          core = '.github/workflows/system-native-core-apps-contract.yml'
+          replace_once(
+              core,
+              "          assert monitor['schema'] == 'swir.native-system-monitor-runtime-evidence/0.1'",
+              "          assert monitor['schema'] == 'swir.native-system-monitor-runtime-evidence/0.2'",
+          )
+          replace_once(
+              core,
+              "          assert monitor['memTotalKiB'] > 0\n\n          assert terminal['schema']",
+              "          assert monitor['memTotalKiB'] > 0\n          assert monitor['localizedSurfaceVerified'] is True\n          assert monitor['accessibilityFocusVerified'] is True\n          assert monitor['accessibilityTooltipsVerified'] is True\n          assert monitor['processTerminationSameUidOnly'] is True\n          assert monitor['processTerminationRequiresConfirmation'] is True\n          assert monitor['processIdentityRevalidated'] is True\n          assert monitor['diagnosticsReadOnly'] is True\n\n          assert terminal['schema']",
+          )
+          PY
+
+          python3 -m py_compile system/apps/swir-system-monitor.py
+          git diff --check
+          git diff -- system/apps/swir-system-monitor.py .github/workflows/system-native-task-manager.yml .github/workflows/system-native-core-apps-contract.yml
+      - name: Commit repaired gates and remove one-off workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'SWIR CI Repair'
+          git config user.email 'actions@users.noreply.github.com'
+          git rm .github/workflows/repair-native-suite-gates.yml
+          git add system/apps/swir-system-monitor.py .github/workflows/system-native-task-manager.yml .github/workflows/system-native-core-apps-contract.yml
+          git diff --cached --check
+          git commit -m 'Fix native suite exact-head gates'
+          git push origin HEAD:system/native-suite-final-locale
