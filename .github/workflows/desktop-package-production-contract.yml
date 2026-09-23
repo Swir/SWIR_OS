@@ -1,0 +1,79 @@
+name: Desktop Package Production Contract
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/desktop-package-production-contract.yml'
+      - '.github/workflows/desktop-release.yml'
+      - '.github/workflows/desktop-package-signing-evidence.yml'
+      - 'scripts/validate-desktop-package-production-contract.mjs'
+      - 'desktop/windows/DesktopPackageBridge.cs'
+      - 'desktop/windows/DesktopPackageTrustRootStore.cs'
+      - 'desktop/windows/DesktopPackageSignatureVerifier.cs'
+      - 'desktop/windows/DesktopSignedPackageLifecycleSelfTests.cs'
+      - 'desktop/windows/SWIR.Desktop.SignedPackageLifecycle.SelfTests.csproj'
+      - 'desktop/windows/DesktopPackageSignatureSelfTests.cs'
+      - 'desktop/windows/SWIR.Desktop.PackageSignature.SelfTests.csproj'
+      - 'desktop/windows/build-store-packages.ps1'
+      - 'swir-runtime.js'
+  pull_request:
+    paths:
+      - '.github/workflows/desktop-package-production-contract.yml'
+      - '.github/workflows/desktop-release.yml'
+      - '.github/workflows/desktop-package-signing-evidence.yml'
+      - 'scripts/validate-desktop-package-production-contract.mjs'
+      - 'desktop/windows/DesktopPackageBridge.cs'
+      - 'desktop/windows/DesktopPackageTrustRootStore.cs'
+      - 'desktop/windows/DesktopPackageSignatureVerifier.cs'
+      - 'desktop/windows/DesktopSignedPackageLifecycleSelfTests.cs'
+      - 'desktop/windows/SWIR.Desktop.SignedPackageLifecycle.SelfTests.csproj'
+      - 'desktop/windows/DesktopPackageSignatureSelfTests.cs'
+      - 'desktop/windows/SWIR.Desktop.PackageSignature.SelfTests.csproj'
+      - 'desktop/windows/build-store-packages.ps1'
+      - 'swir-runtime.js'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-package-production-contract-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  production-contract:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Assert pinned .NET SDK line
+        shell: pwsh
+        run: |
+          $version = dotnet --version
+          if ($version -notmatch '^8\.0\.4\d\d$') { throw "Expected pinned .NET 8.0.4xx SDK, got $version" }
+
+      - name: Validate production package trust wiring
+        run: node scripts/validate-desktop-package-production-contract.mjs
+
+      - name: Verify embedded signature and tamper rejection
+        working-directory: desktop/windows
+        run: dotnet run --project SWIR.Desktop.PackageSignature.SelfTests.csproj --configuration Release
+
+      - name: Verify signed catalog plus package lifecycle
+        working-directory: desktop/windows
+        run: dotnet run --project SWIR.Desktop.SignedPackageLifecycle.SelfTests.csproj --configuration Release
