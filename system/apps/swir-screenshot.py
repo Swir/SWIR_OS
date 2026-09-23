@@ -484,8 +484,8 @@ def _self_test() -> int:
         assert copied.is_file() and stat.S_IMODE(copied.stat().st_mode) == 0o600
         assert screenshot_locale("pl-PL").text("take_screenshot") == "Zrób zrzut ekranu"
         assert screenshot_locale("nb-NO").text("take_screenshot") == "Ta skjermbilde"
-        fallback = screenshot_locale("zz-ZZ")
-        assert fallback.catalog_language == "en" and fallback.fallback is True
+        fallback = screenshot_locale("de-DE")
+        assert fallback.requested_language == "de-DE" and fallback.catalog_language == "en" and fallback.fallback is True
         for bad in ("https://example.invalid/a.png", "data:image/png;base64,AAAA", "file://remotehost/tmp/a.png"):
             try:
                 _validated_portal_uri(bad)
