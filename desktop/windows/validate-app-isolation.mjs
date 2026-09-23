@@ -13,8 +13,18 @@ const catalog = sandbox.window.SWIR_PACKAGE_CATALOG;
 if (!Array.isArray(catalog) || !catalog.length) throw new Error('SWIR package catalog is empty or invalid.');
 
 const failures = [];
+const desktopPackages = catalog.filter(pkg => {
+  const editions = pkg?.compatibility?.editions;
+  if (!Array.isArray(editions) || editions.length < 1) {
+    failures.push(`${pkg?.packageId || pkg?.id || '<missing>'}: compatibility.editions is required for Desktop isolation scoping`);
+    return false;
+  }
+  return editions.map(value => String(value).trim().toUpperCase()).includes('DESKTOP');
+});
+if (!desktopPackages.length) failures.push('No Desktop-compatible packages found for App Bridge isolation validation');
+
 const ready = [];
-for (const pkg of catalog) {
+for (const pkg of desktopPackages) {
   const entry = String(pkg.entry || '').replace(/^\.\//, '');
   const file = path.join(root, entry);
   if (!entry || !fs.existsSync(file)) {
@@ -36,8 +46,8 @@ if (failures.length) {
   for (const failure of failures) console.error(` - ${failure}`);
   process.exit(1);
 }
-if (ready.length !== catalog.length) {
-  console.error(`Expected ${catalog.length} bridge-ready packages but found ${ready.length}.`);
+if (ready.length !== desktopPackages.length) {
+  console.error(`Expected ${desktopPackages.length} Desktop bridge-ready packages but found ${ready.length}.`);
   process.exit(1);
 }
-console.log(`App isolation bridge-ready packages (${ready.length}/${catalog.length}): ${ready.join(', ')}`);
+console.log(`Desktop App isolation bridge-ready packages (${ready.length}/${desktopPackages.length}): ${ready.join(', ')}`);
