@@ -181,7 +181,7 @@ jobs:
 
           python3 - <<'PY'
           import runpy
-          namespace = runpy.run_path('system/apps/swir-hardware-center.py')
+          namespace = runpy.run_path('system/apps/swir-hardware-center.py', run_name='swir_hardware_center_locale_probe')
           resolve = namespace['hardware_locale']
           fallback = resolve('fr-FR')
           assert fallback.requested_language == 'fr-FR'
