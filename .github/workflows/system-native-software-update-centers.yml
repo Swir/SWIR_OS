@@ -76,6 +76,12 @@ jobs:
           grep -F 'directPackageToolMutation": False' system/apps/swir-software-center.py >/dev/null
           grep -F 'directPackageToolMutation": False' system/apps/swir-update-center.py >/dev/null
           grep -F 'repositoryRefreshPerformed": False' system/apps/swir-update-center.py >/dev/null
+          grep -F 'UserSettingsStore' system/apps/swir-software-center.py >/dev/null
+          grep -F 'UserSettingsStore' system/apps/swir-update-center.py >/dev/null
+          grep -F '"pl-PL"' system/apps/swir-software-center.py >/dev/null
+          grep -F '"nb-NO"' system/apps/swir-software-center.py >/dev/null
+          grep -F '"pl-PL"' system/apps/swir-update-center.py >/dev/null
+          grep -F '"nb-NO"' system/apps/swir-update-center.py >/dev/null
           grep -F 'Software", (("/usr/local/bin/swir-software-center",)' system/session/swir-shell.py >/dev/null
           grep -F 'Updates", (("/usr/local/bin/swir-update-center",)' system/session/swir-shell.py >/dev/null
 
@@ -116,6 +122,9 @@ jobs:
           export WAYLAND_DISPLAY=wayland-swir-package-ui
           export GDK_BACKEND=wayland
           export PYTHONPATH="$GITHUB_WORKSPACE/system/apps"
+
+          python3 system/apps/swir-software-center.py --self-test
+          python3 system/apps/swir-update-center.py --self-test
 
           weston --backend=headless-backend.so --socket="$WAYLAND_DISPLAY" --idle-time=0 --log="$RUNTIME/weston.log" &
           WESTON_PID=$!
@@ -159,6 +168,7 @@ jobs:
           assert software['directPackageToolMutation'] is False
           assert software['packageTransactionBrokerBypassed'] is False
           assert software['readOnlyMetadata'] is True and software['packageRowsBounded'] == 200
+          assert software['catalogLanguage'] == 'en' and software['requestedLanguage'] == 'en'
           assert software['tools']['aptCache'] is True and software['tools']['dpkgQuery'] is True
 
           assert updates['schema'] == 'swir.native-update-center-runtime-evidence/0.2'
@@ -176,5 +186,6 @@ jobs:
           assert updates['simulationOnlyForDiscovery'] is True
           assert updates['bulkUpdateMutationExposed'] is False
           assert updates['updateRowsBounded'] == 200
+          assert updates['catalogLanguage'] == 'en' and updates['requestedLanguage'] == 'en'
           assert updates['tools']['aptGet'] is True
           PY
