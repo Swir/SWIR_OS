@@ -247,8 +247,8 @@ class SwirHardwareCenter(Gtk.Application):
             language = "en"
         return hardware_locale(language)
 
-    def _t(self, key: str, **values: object) -> str:
-        return self.locale.text(key, **values)
+    def _t(self, message_key: str, **values: object) -> str:
+        return self.locale.text(message_key, **values)
 
     def do_startup(self) -> None:
         Gtk.Application.do_startup(self)
