@@ -62,29 +62,13 @@ jobs:
             echo "Desktop update feed promotion is blocked: release tag does not resolve to a commit." >&2
             exit 1
           fi
-          if ! git merge-base --is-ancestor "$TAG_COMMIT" origin/main; then
-            echo "Desktop update feed promotion is blocked: release tag $RELEASE_TAG is not reachable from main." >&2
-            exit 1
-          fi
           IS_PRERELEASE="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq '.isPrerelease')"
-          case "$CHANNEL" in
-            preview)
-              if [[ "$IS_PRERELEASE" != "true" ]]; then
-                echo "Desktop preview feed promotion is blocked: preview release must be marked prerelease." >&2
-                exit 1
-              fi
-              ;;
-            stable)
-              if [[ "$IS_PRERELEASE" != "false" ]]; then
-                echo "Desktop stable feed promotion is blocked: stable release must not be marked prerelease." >&2
-                exit 1
-              fi
-              ;;
-            *)
-              echo "Desktop update feed promotion is blocked: unsupported channel $CHANNEL." >&2
-              exit 1
-              ;;
-          esac
+          node scripts/verify-desktop-release-provenance.mjs \
+            --tag "$RELEASE_TAG" \
+            --channel "$CHANNEL" \
+            --tag-commit "$TAG_COMMIT" \
+            --main-ref origin/main \
+            --prerelease "$IS_PRERELEASE"
       - name: Materialize pinned public update trust root
         shell: bash
         run: |
