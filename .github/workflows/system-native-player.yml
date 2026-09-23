@@ -45,6 +45,15 @@ jobs:
           set -euo pipefail
           python3 -m py_compile system/apps/swir-player.py system/session/swir-shell.py
           desktop-file-validate system/apps/swir-player.desktop
+          grep -F 'Name[pl]=Odtwarzacz SWIR' system/apps/swir-player.desktop >/dev/null
+          grep -F 'Name[nb]=SWIR-spiller' system/apps/swir-player.desktop >/dev/null
+          grep -F 'GenericName[pl]=Odtwarzacz multimediów' system/apps/swir-player.desktop >/dev/null
+          grep -F 'GenericName[nb]=Mediespiller' system/apps/swir-player.desktop >/dev/null
+          grep -F 'Comment[pl]=Odtwarzaj lokalne pliki audio i wideo' system/apps/swir-player.desktop >/dev/null
+          grep -F 'Comment[nb]=Spill av lokale lyd- og videofiler' system/apps/swir-player.desktop >/dev/null
+          grep -F 'Keywords[pl]=audio;wideo;muzyka;multimedia;odtwarzacz;' system/apps/swir-player.desktop >/dev/null
+          grep -F 'Keywords[nb]=lyd;video;musikk;media;spiller;' system/apps/swir-player.desktop >/dev/null
+          grep -F 'X-GNOME-UsesNotifications=true' system/apps/swir-player.desktop >/dev/null
           bash -n system/session/provision-graphical-session.sh
           grep -F 'Player", (("/usr/local/bin/swir-player",)' system/session/swir-shell.py >/dev/null
           grep -F 'system/apps/swir-player.py' system/session/provision-graphical-session.sh >/dev/null
