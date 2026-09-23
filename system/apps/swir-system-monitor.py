@@ -23,6 +23,7 @@ from typing import Callable, Final, Mapping
 
 import gi
 
+gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
@@ -633,6 +634,7 @@ class SwirSystemMonitor(Gtk.Application):
 
         process_toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self.process_filter = Gtk.Entry()
+        self.process_filter.set_focusable(True)
         self.process_filter.set_placeholder_text(self.t("filter_placeholder"))
         self.process_filter.set_tooltip_text(self.t("filter_tooltip"))
         self.process_filter.set_max_length(MAX_FILTER_CHARS)
@@ -642,6 +644,7 @@ class SwirSystemMonitor(Gtk.Application):
         process_toolbar.append(self.process_filter)
 
         self.end_process_button = Gtk.Button(label=self.t("end_process"))
+        self.end_process_button.set_focusable(True)
         self.end_process_button.add_css_class("swir-danger")
         self.end_process_button.set_sensitive(False)
         self.end_process_button.set_tooltip_text(self.t("end_tooltip"))
@@ -679,6 +682,7 @@ class SwirSystemMonitor(Gtk.Application):
         self.diag_summary.set_selectable(True)
         diag_toolbar.append(self.diag_summary)
         self.diag_refresh = Gtk.Button(label=self.t("refresh_diagnostics"))
+        self.diag_refresh.set_focusable(True)
         self.diag_refresh.set_tooltip_text(self.t("refresh_tooltip"))
         self.diag_refresh.connect("clicked", self._on_refresh_diagnostics)
         diag_toolbar.append(self.diag_refresh)
