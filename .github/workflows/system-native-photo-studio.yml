@@ -46,6 +46,14 @@ jobs:
           python3 -m py_compile system/apps/swir-photo-studio.py system/session/swir-shell.py
           python3 system/apps/swir-photo-studio.py --self-test
           desktop-file-validate system/apps/swir-photo-studio.desktop
+          grep -F 'Name[pl]=Studio zdjęć SWIR' system/apps/swir-photo-studio.desktop >/dev/null
+          grep -F 'Name[nb]=SWIR fotostudio' system/apps/swir-photo-studio.desktop >/dev/null
+          grep -F 'GenericName[pl]=Edytor i przeglądarka obrazów' system/apps/swir-photo-studio.desktop >/dev/null
+          grep -F 'GenericName[nb]=Bilderedigerer og bildeviser' system/apps/swir-photo-studio.desktop >/dev/null
+          grep -F 'Comment[pl]=Przeglądaj i edytuj lokalne obrazy w natywnym Studio zdjęć SWIR' system/apps/swir-photo-studio.desktop >/dev/null
+          grep -F 'Comment[nb]=Vis og rediger lokale bilder i det opprinnelige SWIR fotostudio' system/apps/swir-photo-studio.desktop >/dev/null
+          grep -F 'Keywords[pl]=zdjęcia;obrazy;przeglądarka;edytor;kadrowanie;adnotacje;' system/apps/swir-photo-studio.desktop >/dev/null
+          grep -F 'Keywords[nb]=foto;bilde;viser;redigering;beskjæring;merknader;' system/apps/swir-photo-studio.desktop >/dev/null
           bash -n system/session/provision-graphical-session.sh
           grep -F 'Photo Studio", (("/usr/local/bin/swir-photo-studio",)' system/session/swir-shell.py >/dev/null
           grep -F 'system/apps/swir-photo-studio.py' system/session/provision-graphical-session.sh >/dev/null
