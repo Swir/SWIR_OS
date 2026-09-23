@@ -61,6 +61,8 @@ jobs:
           grep -F 'defaultAppCategoryCount' system/apps/swir-settings.py >/dev/null
           grep -F 'processRowsBounded' system/apps/swir-system-monitor.py >/dev/null
           grep -F 'shellCommandInterpolation": False' system/apps/swir-terminal.py >/dev/null
+          grep -F 'UserSettingsStore' system/apps/swir-terminal.py >/dev/null
+          grep -F 'localizedTooltips' system/apps/swir-terminal.py >/dev/null
           grep -F 'Terminal", (("/usr/local/bin/swir-terminal",)' system/session/swir-shell.py >/dev/null
           grep -F 'Network", (("/usr/local/bin/swir-network-center",)' system/session/swir-shell.py >/dev/null
 
@@ -84,10 +86,11 @@ jobs:
           CONFIG="${{ runner.temp }}/swir-config"
           NETWORK_CONFIG="${{ runner.temp }}/swir-network-config"
           NOTES_CONFIG="${{ runner.temp }}/swir-notes-config"
+          TERMINAL_CONFIG="${{ runner.temp }}/swir-terminal-config"
           DATA="${{ runner.temp }}/swir-data"
-          mkdir -p "$RUNTIME" "$CONFIG" "$NETWORK_CONFIG/swir" "$NOTES_CONFIG/swir" "$DATA"
-          chmod 0700 "$RUNTIME" "$CONFIG" "$NETWORK_CONFIG" "$NETWORK_CONFIG/swir" "$NOTES_CONFIG" "$NOTES_CONFIG/swir" "$DATA"
-          for locale_root in "$NETWORK_CONFIG" "$NOTES_CONFIG"; do
+          mkdir -p "$RUNTIME" "$CONFIG" "$NETWORK_CONFIG/swir" "$NOTES_CONFIG/swir" "$TERMINAL_CONFIG/swir" "$DATA"
+          chmod 0700 "$RUNTIME" "$CONFIG" "$NETWORK_CONFIG" "$NETWORK_CONFIG/swir" "$NOTES_CONFIG" "$NOTES_CONFIG/swir" "$TERMINAL_CONFIG" "$TERMINAL_CONFIG/swir" "$DATA"
+          for locale_root in "$NETWORK_CONFIG" "$NOTES_CONFIG" "$TERMINAL_CONFIG"; do
             cat > "$locale_root/swir/settings.json" <<'JSON'
           {
             "schema": "swir.user-settings/0.1",
@@ -140,7 +143,10 @@ jobs:
             python3 system/apps/swir-notes.py
           run_app "SWIR Settings" "$RUNTIME/settings.json" system/apps/swir-settings.py
           run_app "SWIR System Monitor" "$RUNTIME/system-monitor.json" system/apps/swir-system-monitor.py
-          run_app "SWIR Terminal" "$RUNTIME/terminal.json" system/apps/swir-terminal.py
+          echo "Running SWIR Terminal localized runtime evidence"
+          timeout --signal=TERM --kill-after=5s 25s \
+            env XDG_CONFIG_HOME="$TERMINAL_CONFIG" SWIR_APP_E2E=1 SWIR_APP_EVIDENCE_PATH="$RUNTIME/terminal.json" \
+            python3 system/apps/swir-terminal.py
 
           python3 - "$RUNTIME/files.json" "$RUNTIME/network.json" "$RUNTIME/notes.json" "$RUNTIME/settings.json" "$RUNTIME/system-monitor.json" "$RUNTIME/terminal.json" "$CONFIG/swir/settings.json" "$DATA/swir/notes.txt" <<'PY'
           import json, pathlib, stat, sys
@@ -206,7 +212,7 @@ jobs:
           assert 0 < monitor['visibleProcessCount'] <= monitor['processRowsBounded'] == 200
           assert monitor['memTotalKiB'] > 0
 
-          assert terminal['schema'] == 'swir.native-terminal-runtime-evidence/0.1'
+          assert terminal['schema'] == 'swir.native-terminal-runtime-evidence/0.2'
           assert terminal['passed'] is True and terminal['applicationId'] == 'dev.swir.Terminal'
           assert terminal['nativeToolkit'] == 'gtk4-vte' and terminal['displayProtocol'] == 'wayland'
           assert terminal['windowMapped'] is True and terminal['ptyAttached'] is True
@@ -215,4 +221,10 @@ jobs:
           assert terminal['spawnApi'] in {'annotated-keyword', 'vte076-positional'}
           assert terminal['spawnError'] == ''
           assert terminal['vteRuntimeVersion']
+          assert terminal['requestedLanguage'] == 'pl-PL' and terminal['catalogLanguage'] == 'pl-PL'
+          assert terminal['translationFallback'] is False and terminal['textDirection'] == 'ltr'
+          assert terminal['localizedWindowTitle'] == 'Terminal SWIR'
+          assert terminal['localizedStatusLabel'] == 'Powłoka użytkownika • bez skrótów uprawnień'
+          assert terminal['localizedSurfaceVerified'] is True
+          assert terminal['terminalFocusable'] is True and terminal['localizedTooltips'] is True
           PY
