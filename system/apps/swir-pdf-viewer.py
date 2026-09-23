@@ -3,6 +3,8 @@
 
 The viewer accepts local regular PDF files only. It never executes document
 content, never launches helper commands, and does not modify the source file.
+The visible UI follows the bounded SWIR per-user language preference with a
+reviewed English fallback.
 """
 
 from __future__ import annotations
@@ -13,13 +15,19 @@ import pathlib
 import stat
 import sys
 import tempfile
-from typing import Final
+from typing import Final, Mapping
 
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Poppler", "0.18")
 from gi.repository import Gdk, Gio, GLib, Gtk, Poppler  # noqa: E402
+
+LIBDIR = pathlib.Path("/usr/local/lib/swir")
+if LIBDIR.is_dir() and str(LIBDIR) not in sys.path:
+    sys.path.insert(0, str(LIBDIR))
+
+from core_runtime import UserSettingsStore, normalize_language_tag  # noqa: E402
 
 APP_ID: Final = "dev.swir.PdfViewer"
 EVIDENCE_SCHEMA: Final = "swir.native-pdf-viewer-runtime-evidence/0.1"
@@ -57,6 +65,116 @@ window.swir-pdf-viewer {
 }
 """
 
+_TRANSLATIONS: Final[Mapping[str, Mapping[str, str]]] = {
+    "en": {
+        "window_title": "SWIR PDF Viewer",
+        "brand": "SWIR PDF Viewer",
+        "open_pdf": "Open PDF",
+        "open": "Open",
+        "cancel": "Cancel",
+        "previous": "Previous",
+        "next": "Next",
+        "no_document": "No document",
+        "zoom_out": "Zoom out",
+        "zoom_in": "Zoom in",
+        "open_local": "Open a local PDF document.",
+        "local_only": "Only local PDF files are accepted.",
+        "resolve_failed": "Could not resolve the local PDF path.",
+        "open_failed": "Could not open PDF: {error}",
+        "e2e_failed": "E2E load failed: {error}",
+        "pdf_documents": "PDF documents",
+        "opened": "Opened {name} • {count} {pages}",
+        "page_singular": "page",
+        "page_plural": "pages",
+        "page_label": "Page {current} / {total}",
+        "open_tooltip": "Open a local PDF file",
+        "previous_tooltip": "Previous page",
+        "next_tooltip": "Next page",
+        "page_tooltip": "Current page and document page count",
+        "zoom_tooltip": "Current zoom level",
+        "canvas_tooltip": "Read-only rendered PDF page",
+    },
+    "pl-PL": {
+        "window_title": "Przeglądarka PDF SWIR",
+        "brand": "Przeglądarka PDF SWIR",
+        "open_pdf": "Otwórz PDF",
+        "open": "Otwórz",
+        "cancel": "Anuluj",
+        "previous": "Poprzednia",
+        "next": "Następna",
+        "no_document": "Brak dokumentu",
+        "zoom_out": "Pomniejsz",
+        "zoom_in": "Powiększ",
+        "open_local": "Otwórz lokalny dokument PDF.",
+        "local_only": "Akceptowane są wyłącznie lokalne pliki PDF.",
+        "resolve_failed": "Nie udało się ustalić lokalnej ścieżki pliku PDF.",
+        "open_failed": "Nie udało się otworzyć PDF: {error}",
+        "e2e_failed": "Nie udało się wczytać pliku E2E: {error}",
+        "pdf_documents": "Dokumenty PDF",
+        "opened": "Otwarto {name} • {count} {pages}",
+        "page_singular": "strona",
+        "page_plural": "stron",
+        "page_label": "Strona {current} / {total}",
+        "open_tooltip": "Otwórz lokalny plik PDF",
+        "previous_tooltip": "Poprzednia strona",
+        "next_tooltip": "Następna strona",
+        "page_tooltip": "Bieżąca strona i liczba stron dokumentu",
+        "zoom_tooltip": "Bieżący poziom powiększenia",
+        "canvas_tooltip": "Renderowana strona PDF tylko do odczytu",
+    },
+    "nb-NO": {
+        "window_title": "SWIR PDF-viser",
+        "brand": "SWIR PDF-viser",
+        "open_pdf": "Åpne PDF",
+        "open": "Åpne",
+        "cancel": "Avbryt",
+        "previous": "Forrige",
+        "next": "Neste",
+        "no_document": "Ingen dokument",
+        "zoom_out": "Zoom ut",
+        "zoom_in": "Zoom inn",
+        "open_local": "Åpne et lokalt PDF-dokument.",
+        "local_only": "Bare lokale PDF-filer godtas.",
+        "resolve_failed": "Kunne ikke finne den lokale PDF-stien.",
+        "open_failed": "Kunne ikke åpne PDF: {error}",
+        "e2e_failed": "E2E-innlasting mislyktes: {error}",
+        "pdf_documents": "PDF-dokumenter",
+        "opened": "Åpnet {name} • {count} {pages}",
+        "page_singular": "side",
+        "page_plural": "sider",
+        "page_label": "Side {current} / {total}",
+        "open_tooltip": "Åpne en lokal PDF-fil",
+        "previous_tooltip": "Forrige side",
+        "next_tooltip": "Neste side",
+        "page_tooltip": "Gjeldende side og antall sider i dokumentet",
+        "zoom_tooltip": "Gjeldende zoomnivå",
+        "canvas_tooltip": "Skrivebeskyttet rendret PDF-side",
+    },
+}
+
+
+def _locale_key(language: object) -> str:
+    normalized = normalize_language_tag(language)
+    if normalized in {"pl-PL", "nb-NO"}:
+        return normalized
+    return "en"
+
+
+def resolve_locale(settings_store: UserSettingsStore | None = None) -> tuple[str, str]:
+    """Resolve the bounded per-user language with a fail-safe English fallback."""
+    try:
+        profile = (settings_store or UserSettingsStore()).load()
+        requested = normalize_language_tag(profile.get("language", ""))
+    except (OSError, RuntimeError, TypeError, ValueError):
+        requested = ""
+    return _locale_key(requested), requested or "en"
+
+
+def tr(locale: str, key: str, **values: object) -> str:
+    catalog = _TRANSLATIONS.get(locale, _TRANSLATIONS["en"])
+    template = catalog.get(key, _TRANSLATIONS["en"].get(key, key))
+    return template.format(**values) if values else template
+
 
 class PdfInputError(ValueError):
     """Raised when a requested document violates the local-file contract."""
@@ -84,6 +202,15 @@ def validate_pdf_path(value: str | os.PathLike[str]) -> pathlib.Path:
 
 
 def _self_test() -> int:
+    for language in ("en", "pl-PL", "nb-NO"):
+        catalog = _TRANSLATIONS[language]
+        assert set(catalog) == set(_TRANSLATIONS["en"])
+        assert tr(language, "open_pdf")
+    assert _locale_key("pl_PL.UTF-8") == "pl-PL"
+    assert _locale_key("nb_NO.UTF-8") == "nb-NO"
+    assert _locale_key("de-DE") == "en"
+    assert tr("unsupported", "open_pdf") == _TRANSLATIONS["en"]["open_pdf"]
+
     with tempfile.TemporaryDirectory(prefix="swir-pdf-selftest-") as tmp:
         root = pathlib.Path(tmp)
         sample = root / "sample.pdf"
@@ -121,6 +248,7 @@ def _self_test() -> int:
 class SwirPdfViewer(Gtk.Application):
     def __init__(self) -> None:
         super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.HANDLES_OPEN)
+        self.locale, self.requested_language = resolve_locale()
         self.window: Gtk.ApplicationWindow | None = None
         self.canvas: Gtk.DrawingArea | None = None
         self.page_label: Gtk.Label | None = None
@@ -155,7 +283,7 @@ class SwirPdfViewer(Gtk.Application):
             self.window.present()
             return
         window = Gtk.ApplicationWindow(application=self)
-        window.set_title("SWIR PDF Viewer")
+        window.set_title(tr(self.locale, "window_title"))
         window.set_default_size(1040, 760)
         window.add_css_class("swir-pdf-viewer")
         self.window = window
@@ -167,41 +295,47 @@ class SwirPdfViewer(Gtk.Application):
         toolbar.add_css_class("swir-toolbar")
         root.append(toolbar)
 
-        brand = Gtk.Label(label="SWIR PDF Viewer")
+        brand = Gtk.Label(label=tr(self.locale, "brand"))
         brand.add_css_class("swir-brand")
         toolbar.append(brand)
 
-        open_button = self._button("Open PDF")
+        open_button = self._button(
+            tr(self.locale, "open_pdf"), tr(self.locale, "open_tooltip")
+        )
         open_button.connect("clicked", self._choose_file)
         toolbar.append(open_button)
 
-        self.prev_button = self._button("Previous")
+        self.prev_button = self._button(
+            tr(self.locale, "previous"), tr(self.locale, "previous_tooltip")
+        )
         self.prev_button.connect("clicked", self._previous_page)
         toolbar.append(self.prev_button)
 
-        self.next_button = self._button("Next")
+        self.next_button = self._button(
+            tr(self.locale, "next"), tr(self.locale, "next_tooltip")
+        )
         self.next_button.connect("clicked", self._next_page)
         toolbar.append(self.next_button)
 
-        self.page_label = Gtk.Label(label="No document")
+        self.page_label = Gtk.Label(label=tr(self.locale, "no_document"))
         self.page_label.add_css_class("swir-subtle")
+        self.page_label.set_tooltip_text(tr(self.locale, "page_tooltip"))
         toolbar.append(self.page_label)
 
         spacer = Gtk.Box()
         spacer.set_hexpand(True)
         toolbar.append(spacer)
 
-        zoom_out = self._button("−")
-        zoom_out.set_tooltip_text("Zoom out")
+        zoom_out = self._button("−", tr(self.locale, "zoom_out"))
         zoom_out.connect("clicked", self._zoom_by, -ZOOM_STEP)
         toolbar.append(zoom_out)
 
         self.zoom_label = Gtk.Label(label="100%")
         self.zoom_label.add_css_class("swir-subtle")
+        self.zoom_label.set_tooltip_text(tr(self.locale, "zoom_tooltip"))
         toolbar.append(self.zoom_label)
 
-        zoom_in = self._button("+")
-        zoom_in.set_tooltip_text("Zoom in")
+        zoom_in = self._button("+", tr(self.locale, "zoom_in"))
         zoom_in.connect("clicked", self._zoom_by, ZOOM_STEP)
         toolbar.append(zoom_in)
 
@@ -212,14 +346,19 @@ class SwirPdfViewer(Gtk.Application):
         canvas.set_content_width(850)
         canvas.set_content_height(620)
         canvas.set_draw_func(self._draw_page)
+        canvas.set_tooltip_text(tr(self.locale, "canvas_tooltip"))
         self.canvas = canvas
         scroller.set_child(canvas)
         root.append(scroller)
 
-        self.status_label = Gtk.Label(label="Open a local PDF document.")
+        self.status_label = Gtk.Label(label=tr(self.locale, "open_local"))
         self.status_label.add_css_class("swir-status")
         self.status_label.set_xalign(0)
         root.append(self.status_label)
+
+        key_controller = Gtk.EventControllerKey()
+        key_controller.connect("key-pressed", self._on_key_pressed)
+        window.add_controller(key_controller)
 
         self._refresh_controls()
         window.connect("map", self._on_mapped)
@@ -229,7 +368,7 @@ class SwirPdfViewer(Gtk.Application):
             try:
                 self._load_document(self.e2e_file)
             except (PdfInputError, GLib.Error, OSError, RuntimeError) as exc:
-                self._set_status(f"E2E load failed: {exc}")
+                self._set_status(tr(self.locale, "e2e_failed", error=exc))
             GLib.timeout_add(150, self._write_evidence_when_ready)
 
     def do_open(self, files: list[Gio.File], _n_files: int, _hint: str) -> None:
@@ -238,35 +377,37 @@ class SwirPdfViewer(Gtk.Application):
             return
         first = files[0]
         if not first.is_native():
-            self._set_status("Only local PDF files are accepted.")
+            self._set_status(tr(self.locale, "local_only"))
             return
         path = first.get_path()
         if not path:
-            self._set_status("Could not resolve the local PDF path.")
+            self._set_status(tr(self.locale, "resolve_failed"))
             return
         try:
             self._load_document(path)
         except (PdfInputError, GLib.Error, OSError, RuntimeError) as exc:
-            self._set_status(f"Could not open PDF: {exc}")
+            self._set_status(tr(self.locale, "open_failed", error=exc))
 
     @staticmethod
-    def _button(label: str) -> Gtk.Button:
+    def _button(label: str, tooltip: str | None = None) -> Gtk.Button:
         button = Gtk.Button(label=label)
         button.add_css_class("swir-control")
+        if tooltip:
+            button.set_tooltip_text(tooltip)
         return button
 
-    def _choose_file(self, _button: Gtk.Button) -> None:
+    def _choose_file(self, _button: Gtk.Button | None) -> None:
         if self.window is None:
             return
         dialog = Gtk.FileChooserNative(
-            title="Open PDF",
+            title=tr(self.locale, "open_pdf"),
             transient_for=self.window,
             action=Gtk.FileChooserAction.OPEN,
-            accept_label="Open",
-            cancel_label="Cancel",
+            accept_label=tr(self.locale, "open"),
+            cancel_label=tr(self.locale, "cancel"),
         )
         file_filter = Gtk.FileFilter()
-        file_filter.set_name("PDF documents")
+        file_filter.set_name(tr(self.locale, "pdf_documents"))
         file_filter.add_mime_type("application/pdf")
         file_filter.add_pattern("*.pdf")
         file_filter.add_pattern("*.PDF")
@@ -280,15 +421,15 @@ class SwirPdfViewer(Gtk.Application):
                 return
             selected = dialog.get_file()
             if selected is None or not selected.is_native():
-                self._set_status("Only local PDF files are accepted.")
+                self._set_status(tr(self.locale, "local_only"))
                 return
             path = selected.get_path()
             if not path:
-                self._set_status("Could not resolve the local PDF path.")
+                self._set_status(tr(self.locale, "resolve_failed"))
                 return
             self._load_document(path)
         except (PdfInputError, GLib.Error, OSError, RuntimeError) as exc:
-            self._set_status(f"Could not open PDF: {exc}")
+            self._set_status(tr(self.locale, "open_failed", error=exc))
         finally:
             dialog.destroy()
 
@@ -312,7 +453,8 @@ class SwirPdfViewer(Gtk.Application):
         self.render_count = 0
         self._resize_canvas()
         self._refresh_controls()
-        self._set_status(f"Opened {path.name} • {pages} page{'s' if pages != 1 else ''}")
+        page_word = tr(self.locale, "page_singular" if pages == 1 else "page_plural")
+        self._set_status(tr(self.locale, "opened", name=path.name, count=pages, pages=page_word))
 
     def _current_page(self) -> Poppler.Page | None:
         if self.document is None:
@@ -349,26 +491,64 @@ class SwirPdfViewer(Gtk.Application):
         cr.restore()
         self.render_count += 1
 
-    def _previous_page(self, _button: Gtk.Button) -> None:
+    def _previous_page(self, _button: Gtk.Button | None) -> None:
         if self.document is None or self.page_index <= 0:
             return
         self.page_index -= 1
         self._resize_canvas()
         self._refresh_controls()
 
-    def _next_page(self, _button: Gtk.Button) -> None:
+    def _next_page(self, _button: Gtk.Button | None) -> None:
         if self.document is None or self.page_index + 1 >= self.page_count:
             return
         self.page_index += 1
         self._resize_canvas()
         self._refresh_controls()
 
-    def _zoom_by(self, _button: Gtk.Button, amount: float) -> None:
+    def _zoom_by(self, _button: Gtk.Button | None, amount: float) -> None:
         if self.document is None:
             return
         self.zoom = min(MAX_ZOOM, max(MIN_ZOOM, round(self.zoom + amount, 2)))
         self._resize_canvas()
         self._refresh_controls()
+
+    def _on_key_pressed(
+        self,
+        _controller: Gtk.EventControllerKey,
+        keyval: int,
+        _keycode: int,
+        state: Gdk.ModifierType,
+    ) -> bool:
+        ctrl = bool(state & Gdk.ModifierType.CONTROL_MASK)
+        if ctrl and keyval == Gdk.KEY_o:
+            self._choose_file(None)
+            return True
+        if keyval in (Gdk.KEY_Page_Up, Gdk.KEY_Left):
+            self._previous_page(None)
+            return True
+        if keyval in (Gdk.KEY_Page_Down, Gdk.KEY_Right):
+            self._next_page(None)
+            return True
+        if keyval == Gdk.KEY_Home and self.document is not None:
+            self.page_index = 0
+            self._resize_canvas()
+            self._refresh_controls()
+            return True
+        if keyval == Gdk.KEY_End and self.document is not None:
+            self.page_index = max(0, self.page_count - 1)
+            self._resize_canvas()
+            self._refresh_controls()
+            return True
+        if ctrl and keyval in (Gdk.KEY_plus, Gdk.KEY_equal, Gdk.KEY_KP_Add):
+            self._zoom_by(None, ZOOM_STEP)
+            return True
+        if ctrl and keyval in (Gdk.KEY_minus, Gdk.KEY_KP_Subtract):
+            self._zoom_by(None, -ZOOM_STEP)
+            return True
+        if keyval == Gdk.KEY_Escape and self.window is not None:
+            self.window.close()
+            return True
+        return False
 
     def _refresh_controls(self) -> None:
         has_document = self.document is not None
@@ -378,7 +558,14 @@ class SwirPdfViewer(Gtk.Application):
             self.next_button.set_sensitive(has_document and self.page_index + 1 < self.page_count)
         if self.page_label is not None:
             self.page_label.set_text(
-                f"Page {self.page_index + 1} / {self.page_count}" if has_document else "No document"
+                tr(
+                    self.locale,
+                    "page_label",
+                    current=self.page_index + 1,
+                    total=self.page_count,
+                )
+                if has_document
+                else tr(self.locale, "no_document")
             )
         if self.zoom_label is not None:
             self.zoom_label.set_text(f"{int(round(self.zoom * 100))}%")
@@ -423,6 +610,11 @@ class SwirPdfViewer(Gtk.Application):
             "zoomRange": [MIN_ZOOM, MAX_ZOOM],
             "privilegedOperations": False,
             "selfUpdater": False,
+            "languageRequested": self.requested_language,
+            "languageRendered": self.locale,
+            "englishFallback": self.locale == "en" and self.requested_language not in {"en", "en-US"},
+            "keyboardNavigation": True,
+            "localizedTooltips": True,
         }
         path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
         path.chmod(0o600)
