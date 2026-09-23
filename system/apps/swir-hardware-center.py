@@ -208,8 +208,8 @@ class HardwareLocale:
     def text_direction(self) -> str:
         return "rtl" if self.catalog_language.split("-", 1)[0] in {"ar", "he"} else "ltr"
 
-    def text(self, key: str, **values: object) -> str:
-        template = self.strings[key]
+    def text(self, message_key: str, **values: object) -> str:
+        template = self.strings[message_key]
         return template.format(**values) if values else template
 
 
