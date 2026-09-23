@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SWIR SDK Starter</title>
+  <style>
+    :root{color-scheme:dark;--bg:#02050a;--panel:#07111c;--line:#153149;--text:#eaf8ff;--muted:#8da8b8;--cyan:#62e5ff;--blue:#0088ff}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 50% -20%,#0a3656 0,transparent 45%),var(--bg);color:var(--text);font:15px/1.5 Inter,Segoe UI,Arial,sans-serif}.shell{width:min(720px,calc(100% - 32px));margin:0 auto;padding:48px 0}.eyebrow{font:700 12px ui-monospace,Consolas,monospace;letter-spacing:.16em;color:var(--cyan)}h1{margin:.4rem 0 .5rem;font-size:clamp(30px,6vw,48px);line-height:1.05}p{color:var(--muted)}.card{margin-top:28px;padding:22px;border:1px solid var(--line);border-radius:18px;background:color-mix(in srgb,var(--panel) 92%,transparent);box-shadow:0 0 36px #0088ff14}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:18px 0}.metric{padding:14px;border:1px solid #143049;border-radius:12px;background:#020913}.metric b{display:block;color:var(--cyan);font-size:12px;text-transform:uppercase;letter-spacing:.08em}.metric span{display:block;margin-top:4px;word-break:break-word}.field{display:grid;gap:8px;margin-top:16px}.field label{font-weight:700}.field input{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:#020913;color:var(--text);outline:none}.field input:focus{border-color:var(--cyan);box-shadow:0 0 0 3px #62e5ff1a}.actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}button{padding:10px 14px;border:1px solid #1d5f89;border-radius:10px;background:linear-gradient(135deg,#073860,#082238);color:var(--text);font-weight:800;cursor:pointer}button:hover{border-color:var(--cyan)}button:focus-visible{outline:3px solid #62e5ff55;outline-offset:2px}button.secondary{background:#08111a}.status{min-height:24px;margin:16px 0 0;color:var(--cyan);font-family:ui-monospace,Consolas,monospace}.status.error{color:#ff9fa8}.hint{margin-top:22px;padding-top:16px;border-top:1px solid var(--line);font-size:13px}@media(max-width:560px){.grid{grid-template-columns:1fr}.shell{padding-top:28px}}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <div class="eyebrow">SWIR APP SDK • STARTER</div>
+    <h1>Hello, SWIR OS.</h1>
+    <p>This minimal example uses the permission-aware App Bridge instead of reaching into shell internals or browser storage directly.</p>
+
+    <section class="card" aria-labelledby="starter-title">
+      <h2 id="starter-title">Runtime example</h2>
+      <div class="grid" aria-live="polite">
+        <div class="metric"><b>Package</b><span id="package-id">Checking…</span></div>
+        <div class="metric"><b>Edition</b><span id="edition">Checking…</span></div>
+        <div class="metric"><b>Locale</b><span id="locale">Checking…</span></div>
+        <div class="metric"><b>Launches</b><span id="launches">Checking…</span></div>
+      </div>
+
+      <div class="field">
+        <label for="note">Private app-data note</label>
+        <input id="note" maxlength="120" autocomplete="off" placeholder="Saved through the SWIR App Bridge">
+      </div>
+      <div class="actions">
+        <button id="save" type="button">Save note</button>
+        <button id="clear" class="secondary" type="button">Clear note</button>
+      </div>
+      <p id="status" class="status" role="status" aria-live="polite">Connecting to SWIR App Bridge…</p>
+      <p class="hint">The template declares only the <code>storage</code> permission. Add capabilities only when the application actually uses them.</p>
+    </section>
+  </main>
+  <script src="../../swir-app-bridge.js" data-swir-package="example.hello" data-swir-app="hello-template"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

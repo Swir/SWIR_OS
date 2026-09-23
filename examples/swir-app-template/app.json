@@ -7,7 +7,7 @@
   "author": "Your Name",
   "description": "Minimal permission-aware SWIR Web Edition application template.",
   "category": "Developer",
-  "icon": "DEV",
+  "icon": "./examples/swir-app-template/icon.svg",
   "accent": "#35e6ff",
   "type": "iframe",
   "entry": "./examples/swir-app-template/index.html",
