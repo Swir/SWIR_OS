@@ -135,11 +135,19 @@ jobs:
           done
           [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]]
 
+          set +e
           timeout --signal=TERM --kill-after=5s 30s \
             env SWIR_APP_E2E=1 \
               SWIR_APP_EVIDENCE_PATH="$RUNTIME/hardware.json" \
               SWIR_HARDWARE_CENTER_REPORT_SCRIPT="$GITHUB_WORKSPACE/system/hardware/driver-center-report.mjs" \
-              python3 system/apps/swir-hardware-center.py
+              python3 system/apps/swir-hardware-center.py \
+              >"$RUNTIME/hardware-app.log" 2>&1
+          APP_RC=$?
+          set -e
+          if [[ "$APP_RC" -ne 0 ]]; then
+            cat "$RUNTIME/hardware-app.log" >&2 || true
+            exit "$APP_RC"
+          fi
 
           python3 - "$RUNTIME/hardware.json" <<'PY'
           import json, sys
@@ -183,3 +191,14 @@ jobs:
           assert norwegian.catalog_language == 'nb-NO' and norwegian.fallback is False
           assert norwegian.text('refresh') == 'Oppdater diagnostikk'
           PY
+      - name: Upload Hardware Center failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hardware-center-failure-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/swir-hardware-runtime/hardware-app.log
+            ${{ runner.temp }}/swir-hardware-runtime/hardware.json
+            ${{ runner.temp }}/swir-hardware-runtime/weston.log
+          if-no-files-found: warn
+          retention-days: 3
