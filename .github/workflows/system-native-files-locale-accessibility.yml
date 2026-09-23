@@ -1,0 +1,191 @@
+name: System Native Files Locale Accessibility
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'system/apps/swir-files.py'
+      - 'system/apps/core_runtime.py'
+      - '.github/workflows/system-native-files-locale-accessibility.yml'
+  pull_request:
+    paths:
+      - 'system/apps/swir-files.py'
+      - 'system/apps/core_runtime.py'
+      - '.github/workflows/system-native-files-locale-accessibility.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: system-native-files-locale-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GTK4 contract runtime
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3-gi gir1.2-gtk-4.0
+      - name: Verify locale, accessibility and archive safety contracts
+        run: |
+          set -euo pipefail
+          python3 -m py_compile system/apps/core_runtime.py system/apps/swir-files.py
+          PYTHONPATH=system/apps python3 system/apps/swir-files.py --locale-self-test
+          PYTHONPATH=system/apps python3 system/apps/swir-files.py --archive-self-test
+          grep -F 'UserSettingsStore' system/apps/swir-files.py >/dev/null
+          grep -F 'localizedTooltips' system/apps/swir-files.py >/dev/null
+          grep -F 'translationFallback' system/apps/swir-files.py >/dev/null
+          grep -F 'MAX_ARCHIVE_ENTRIES: Final = 5000' system/apps/swir-files.py >/dev/null
+          grep -F 'MAX_ARCHIVE_EXPANDED_BYTES: Final = 2 * 1024 * 1024 * 1024' system/apps/swir-files.py >/dev/null
+          grep -F 'O_NOFOLLOW' system/apps/swir-files.py >/dev/null
+          grep -F 'O_EXCL' system/apps/swir-files.py >/dev/null
+          grep -F 'encrypted ZIP members are not supported' system/apps/swir-files.py >/dev/null
+          grep -F 'links, devices and special archive members are not accepted' system/apps/swir-files.py >/dev/null
+          ! grep -RE 'shell *= *True|os\.system\(' system/apps/swir-files.py
+          ! grep -RE "/usr/bin/(sudo|pkexec|su)([[:space:]\"']|$)|/bin/su([[:space:]\"']|$)" system/apps/swir-files.py
+
+  localized-wayland-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install controlled GTK4 and Wayland runtime
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends weston dbus-daemon python3-gi gir1.2-gtk-4.0
+      - name: Verify localized Files, Archive Manager and safe extraction on Wayland
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUNTIME="${{ runner.temp }}/swir-files-locale-runtime"
+          CONFIG_PL="${{ runner.temp }}/swir-files-config-pl"
+          CONFIG_FALLBACK="${{ runner.temp }}/swir-files-config-fallback"
+          DEST="$RUNTIME/destination"
+          mkdir -p "$RUNTIME" "$DEST" "$CONFIG_PL/swir" "$CONFIG_FALLBACK/swir"
+          chmod 0700 "$RUNTIME" "$DEST" "$CONFIG_PL" "$CONFIG_PL/swir" "$CONFIG_FALLBACK" "$CONFIG_FALLBACK/swir"
+          cat > "$CONFIG_PL/swir/settings.json" <<'JSON'
+          {
+            "schema": "swir.user-settings/0.1",
+            "appearance": "dark",
+            "language": "pl-PL",
+            "clock24h": true,
+            "themeId": "builtin.swir-dark"
+          }
+          JSON
+          cat > "$CONFIG_FALLBACK/swir/settings.json" <<'JSON'
+          {
+            "schema": "swir.user-settings/0.1",
+            "appearance": "dark",
+            "language": "de-DE",
+            "clock24h": true,
+            "themeId": "builtin.swir-dark"
+          }
+          JSON
+          chmod 0600 "$CONFIG_PL/swir/settings.json" "$CONFIG_FALLBACK/swir/settings.json"
+
+          export XDG_RUNTIME_DIR="$RUNTIME"
+          export WAYLAND_DISPLAY=wayland-swir-files-locale
+          export GDK_BACKEND=wayland
+          export PYTHONPATH="$GITHUB_WORKSPACE/system/apps"
+
+          python3 - "$RUNTIME/sample.zip" <<'PY'
+          import sys, zipfile
+          with zipfile.ZipFile(sys.argv[1], 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+              archive.writestr('docs/readme.txt', b'SWIR Files locale E2E\n')
+              archive.writestr('folder/nested.txt', b'nested\n')
+          PY
+
+          weston --backend=headless-backend.so --socket="$WAYLAND_DISPLAY" --idle-time=0 --log="$RUNTIME/weston.log" &
+          WESTON_PID=$!
+          cleanup() { kill "$WESTON_PID" 2>/dev/null || true; wait "$WESTON_PID" 2>/dev/null || true; }
+          trap cleanup EXIT
+          for _ in $(seq 1 80); do
+            [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]] && break
+            kill -0 "$WESTON_PID"
+            sleep 0.25
+          done
+          [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]]
+
+          timeout --signal=TERM --kill-after=5s 30s \
+            dbus-run-session -- \
+            env LIBGL_ALWAYS_SOFTWARE=1 GTK_A11Y=none \
+                XDG_CONFIG_HOME="$CONFIG_PL" \
+                SWIR_APP_E2E=1 \
+                SWIR_APP_EVIDENCE_PATH="$RUNTIME/files-pl.json" \
+            python3 system/apps/swir-files.py
+
+          timeout --signal=TERM --kill-after=5s 30s \
+            dbus-run-session -- \
+            env LIBGL_ALWAYS_SOFTWARE=1 GTK_A11Y=none \
+                XDG_CONFIG_HOME="$CONFIG_FALLBACK" \
+                SWIR_APP_E2E=1 \
+                SWIR_APP_EVIDENCE_PATH="$RUNTIME/files-fallback.json" \
+            python3 system/apps/swir-files.py
+
+          timeout --signal=TERM --kill-after=5s 30s \
+            dbus-run-session -- \
+            env LIBGL_ALWAYS_SOFTWARE=1 GTK_A11Y=none \
+                XDG_CONFIG_HOME="$CONFIG_PL" \
+                SWIR_APP_E2E=1 \
+                SWIR_APP_EVIDENCE_PATH="$RUNTIME/archive-pl.json" \
+                SWIR_ARCHIVE_E2E_INPUT="$RUNTIME/sample.zip" \
+                SWIR_ARCHIVE_E2E_DESTINATION="$DEST" \
+            python3 system/apps/swir-files.py --archive-manager
+
+          python3 - "$RUNTIME/files-pl.json" "$RUNTIME/files-fallback.json" "$RUNTIME/archive-pl.json" "$DEST" <<'PY'
+          import json, pathlib, stat, sys
+          files = json.load(open(sys.argv[1], encoding='utf-8'))
+          fallback = json.load(open(sys.argv[2], encoding='utf-8'))
+          archive = json.load(open(sys.argv[3], encoding='utf-8'))
+          destination = pathlib.Path(sys.argv[4])
+
+          assert files['schema'] == 'swir.native-files-runtime-evidence/0.1'
+          assert files['passed'] is True and files['applicationId'] == 'dev.swir.Files'
+          assert files['privilegedOperations'] is False and files['fileOpenDelegationEnabled'] is False
+          assert files['requestedLanguage'] == 'pl-PL' and files['catalogLanguage'] == 'pl-PL'
+          assert files['translationFallback'] is False and files['textDirection'] == 'ltr'
+          assert files['localizedWindowTitle'] == 'Pliki SWIR'
+          assert files['localizedArchiveLabel'] == 'Menedżer archiwów'
+          assert files['localizedSurfaceVerified'] is True
+          assert files['archiveButtonFocusable'] is True
+          assert files['hiddenToggleFocusable'] is True
+          assert files['fileListFocusable'] is True
+          assert files['localizedTooltips'] is True
+
+          assert fallback['passed'] is True
+          assert fallback['requestedLanguage'] == 'de-DE'
+          assert fallback['catalogLanguage'] == 'en'
+          assert fallback['translationFallback'] is True
+          assert fallback['localizedWindowTitle'] == 'SWIR Files'
+
+          assert archive['schema'] == 'swir.native-archive-manager-runtime-evidence/0.1'
+          assert archive['passed'] is True and archive['applicationId'] == 'dev.swir.ArchiveManager'
+          assert archive['requestedLanguage'] == 'pl-PL' and archive['catalogLanguage'] == 'pl-PL'
+          assert archive['translationFallback'] is False and archive['textDirection'] == 'ltr'
+          assert archive['localizedWindowTitle'] == 'Menedżer archiwów SWIR'
+          assert archive['localizedOpenLabel'] == 'Otwórz archiwum'
+          assert archive['localizedExtractLabel'] == 'Rozpakuj bezpiecznie'
+          assert archive['localizedSurfaceVerified'] is True
+          assert archive['openButtonFocusable'] is True
+          assert archive['extractButtonFocusable'] is True
+          assert archive['archiveListFocusable'] is True
+          assert archive['localizedTooltips'] is True
+          assert archive['pathTraversalAccepted'] is False
+          assert archive['symlinkMembersAccepted'] is False
+          assert archive['specialMembersAccepted'] is False
+          assert archive['exclusiveNoFollowWrites'] is True
+          assert archive['privilegedOperations'] is False and archive['selfUpdater'] is False
+          root = pathlib.Path(archive['extractionRoot'])
+          assert root.parent == destination.resolve()
+          assert stat.S_IMODE(root.stat().st_mode) == 0o700
+          assert stat.S_IMODE((root / 'docs' / 'readme.txt').stat().st_mode) == 0o600
+          assert stat.S_IMODE((root / 'folder' / 'nested.txt').stat().st_mode) == 0o600
+          assert not (destination.parent / 'escape.txt').exists()
+          PY

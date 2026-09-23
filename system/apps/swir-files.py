@@ -14,7 +14,7 @@ import tarfile
 import tempfile
 import zipfile
 from dataclasses import dataclass
-from typing import BinaryIO, Final
+from typing import BinaryIO, Final, Mapping
 
 import gi
 
@@ -25,7 +25,13 @@ LIBDIR = pathlib.Path("/usr/local/lib/swir")
 if LIBDIR.is_dir() and str(LIBDIR) not in sys.path:
     sys.path.insert(0, str(LIBDIR))
 
-from core_runtime import DirectoryEntry, list_directory, resolve_directory  # noqa: E402
+from core_runtime import (  # noqa: E402
+    DirectoryEntry,
+    UserSettingsStore,
+    list_directory,
+    normalize_language_tag,
+    resolve_directory,
+)
 
 APP_ID: Final = "dev.swir.Files"
 ARCHIVE_APP_ID: Final = "dev.swir.ArchiveManager"
@@ -37,7 +43,16 @@ MAX_ARCHIVE_MEMBER_BYTES: Final = 512 * 1024 * 1024
 MAX_ARCHIVE_EXPANDED_BYTES: Final = 2 * 1024 * 1024 * 1024
 MAX_ARCHIVE_PATH_BYTES: Final = 4096
 ARCHIVE_CHUNK_BYTES: Final = 1024 * 1024
-SUPPORTED_ARCHIVE_SUFFIXES: Final = (".zip", ".tar", ".tar.gz", ".tgz", ".tar.xz", ".txz", ".tar.bz2", ".tbz2")
+SUPPORTED_ARCHIVE_SUFFIXES: Final = (
+    ".zip",
+    ".tar",
+    ".tar.gz",
+    ".tgz",
+    ".tar.xz",
+    ".txz",
+    ".tar.bz2",
+    ".tbz2",
+)
 
 CSS = b"""
 window.swir-app { background: #02050A; color: #F4FAFF; }
@@ -52,6 +67,206 @@ window.swir-app { background: #02050A; color: #F4FAFF; }
 .swir-button:hover { border-color: #62E5FF; }
 .swir-primary { background: #0088FF; color: #F4FAFF; border-radius: 10px; padding: 7px 12px; font-weight: 700; }
 """
+
+_TRANSLATIONS: Final[Mapping[str, Mapping[str, str]]] = {
+    "en": {
+        "files_window_title": "SWIR Files",
+        "files_brand": "◆  SWIR Files",
+        "back": "Back",
+        "up": "Up",
+        "home": "Home",
+        "refresh": "Refresh",
+        "archive_manager": "Archive Manager",
+        "hidden": "Hidden",
+        "back_tooltip": "Return to the previous folder",
+        "up_tooltip": "Open the parent folder",
+        "home_tooltip": "Open your home folder",
+        "refresh_tooltip": "Refresh the current folder",
+        "archive_tooltip": "Open the safe SWIR Archive Manager",
+        "hidden_tooltip": "Show or hide hidden files",
+        "path_tooltip": "Current folder path",
+        "file_list_tooltip": "Files and folders in the current directory",
+        "files_status_tooltip": "Current file browsing status",
+        "could_not_read": "Could not read folder: {error}",
+        "items_status": "{count} items • read-only browsing foundation",
+        "cannot_open_folder": "Cannot open folder: {error}",
+        "file_open_limited": "File opening is intentionally limited until broader Default Apps integration is native.",
+        "cannot_inspect_item": "Cannot inspect item: {error}",
+        "opened_archive_manager": "Opened Archive Manager",
+        "could_not_open_archive_manager": "Could not open Archive Manager: {error}",
+        "kind_directory": "folder",
+        "kind_file": "file",
+        "kind_symlink": "symlink",
+        "kind_unavailable": "unavailable",
+        "kind_other": "other",
+        "archive_window_title": "SWIR Archive Manager",
+        "archive_brand": "◆  SWIR Archive Manager",
+        "open_archive": "Open archive",
+        "extract_safely": "Extract safely",
+        "open_archive_tooltip": "Choose a local ZIP or TAR archive",
+        "extract_tooltip": "Extract the validated archive without following links",
+        "archive_list_tooltip": "Validated archive entries",
+        "archive_status_tooltip": "Archive validation and extraction status",
+        "archive_intro": "Open a local ZIP or TAR archive. Links and traversal entries fail closed.",
+        "archive_dir_prefix": "DIR  ",
+        "archive_file_prefix": "FILE  ",
+        "archive_validated": "{name} • {count} entries • {size} expanded data • validated before extraction",
+        "open_archive_dialog": "Open archive",
+        "open": "Open",
+        "cancel": "Cancel",
+        "open_first": "Open and validate an archive first.",
+        "choose_extraction_parent": "Choose extraction parent",
+        "extract_here": "Extract here",
+        "extracted_safely": "Extracted safely to {output}",
+        "extraction_refused": "Extraction refused: {error}",
+    },
+    "pl-PL": {
+        "files_window_title": "Pliki SWIR",
+        "files_brand": "◆  Pliki SWIR",
+        "back": "Wstecz",
+        "up": "Wyżej",
+        "home": "Dom",
+        "refresh": "Odśwież",
+        "archive_manager": "Menedżer archiwów",
+        "hidden": "Ukryte",
+        "back_tooltip": "Wróć do poprzedniego folderu",
+        "up_tooltip": "Przejdź do folderu nadrzędnego",
+        "home_tooltip": "Przejdź do katalogu domowego",
+        "refresh_tooltip": "Odśwież bieżący folder",
+        "archive_tooltip": "Otwórz bezpieczny Menedżer archiwów SWIR",
+        "hidden_tooltip": "Pokaż lub ukryj ukryte pliki",
+        "path_tooltip": "Ścieżka bieżącego folderu",
+        "file_list_tooltip": "Pliki i foldery w bieżącym katalogu",
+        "files_status_tooltip": "Stan przeglądania plików",
+        "could_not_read": "Nie można odczytać folderu: {error}",
+        "items_status": "{count} elementów • przeglądanie tylko do odczytu",
+        "cannot_open_folder": "Nie można otworzyć folderu: {error}",
+        "file_open_limited": "Otwieranie plików pozostaje celowo ograniczone do czasu pełnej natywnej integracji aplikacji domyślnych.",
+        "cannot_inspect_item": "Nie można sprawdzić elementu: {error}",
+        "opened_archive_manager": "Otwarto Menedżer archiwów",
+        "could_not_open_archive_manager": "Nie można otworzyć Menedżera archiwów: {error}",
+        "kind_directory": "folder",
+        "kind_file": "plik",
+        "kind_symlink": "dowiązanie",
+        "kind_unavailable": "niedostępny",
+        "kind_other": "inne",
+        "archive_window_title": "Menedżer archiwów SWIR",
+        "archive_brand": "◆  Menedżer archiwów SWIR",
+        "open_archive": "Otwórz archiwum",
+        "extract_safely": "Rozpakuj bezpiecznie",
+        "open_archive_tooltip": "Wybierz lokalne archiwum ZIP lub TAR",
+        "extract_tooltip": "Rozpakuj zweryfikowane archiwum bez podążania za dowiązaniami",
+        "archive_list_tooltip": "Zweryfikowane wpisy archiwum",
+        "archive_status_tooltip": "Stan weryfikacji i rozpakowywania archiwum",
+        "archive_intro": "Otwórz lokalne archiwum ZIP lub TAR. Dowiązania i wpisy wychodzące poza katalog są blokowane.",
+        "archive_dir_prefix": "KAT  ",
+        "archive_file_prefix": "PLIK  ",
+        "archive_validated": "{name} • {count} wpisów • {size} po rozpakowaniu • zweryfikowano przed ekstrakcją",
+        "open_archive_dialog": "Otwórz archiwum",
+        "open": "Otwórz",
+        "cancel": "Anuluj",
+        "open_first": "Najpierw otwórz i zweryfikuj archiwum.",
+        "choose_extraction_parent": "Wybierz folder docelowy",
+        "extract_here": "Rozpakuj tutaj",
+        "extracted_safely": "Bezpiecznie rozpakowano do {output}",
+        "extraction_refused": "Odmowa rozpakowania: {error}",
+    },
+    "nb-NO": {
+        "files_window_title": "SWIR-filer",
+        "files_brand": "◆  SWIR-filer",
+        "back": "Tilbake",
+        "up": "Opp",
+        "home": "Hjem",
+        "refresh": "Oppdater",
+        "archive_manager": "Arkivbehandler",
+        "hidden": "Skjulte",
+        "back_tooltip": "Gå tilbake til forrige mappe",
+        "up_tooltip": "Åpne overordnet mappe",
+        "home_tooltip": "Åpne hjemmemappen din",
+        "refresh_tooltip": "Oppdater gjeldende mappe",
+        "archive_tooltip": "Åpne den sikre SWIR-arkivbehandleren",
+        "hidden_tooltip": "Vis eller skjul skjulte filer",
+        "path_tooltip": "Bane til gjeldende mappe",
+        "file_list_tooltip": "Filer og mapper i gjeldende katalog",
+        "files_status_tooltip": "Status for filutforskingen",
+        "could_not_read": "Kan ikke lese mappen: {error}",
+        "items_status": "{count} elementer • skrivebeskyttet filutforsking",
+        "cannot_open_folder": "Kan ikke åpne mappen: {error}",
+        "file_open_limited": "Filåpning er med vilje begrenset til bredere integrasjon av standardapper er helt innebygd.",
+        "cannot_inspect_item": "Kan ikke kontrollere elementet: {error}",
+        "opened_archive_manager": "Arkivbehandler åpnet",
+        "could_not_open_archive_manager": "Kan ikke åpne Arkivbehandler: {error}",
+        "kind_directory": "mappe",
+        "kind_file": "fil",
+        "kind_symlink": "symbolsk lenke",
+        "kind_unavailable": "utilgjengelig",
+        "kind_other": "annet",
+        "archive_window_title": "SWIR-arkivbehandler",
+        "archive_brand": "◆  SWIR-arkivbehandler",
+        "open_archive": "Åpne arkiv",
+        "extract_safely": "Pakk ut sikkert",
+        "open_archive_tooltip": "Velg et lokalt ZIP- eller TAR-arkiv",
+        "extract_tooltip": "Pakk ut det validerte arkivet uten å følge lenker",
+        "archive_list_tooltip": "Validerte arkivoppføringer",
+        "archive_status_tooltip": "Status for arkivvalidering og utpakking",
+        "archive_intro": "Åpne et lokalt ZIP- eller TAR-arkiv. Lenker og oppføringer som går utenfor målmappen blokkeres.",
+        "archive_dir_prefix": "MAPPE  ",
+        "archive_file_prefix": "FIL  ",
+        "archive_validated": "{name} • {count} oppføringer • {size} utpakket data • validert før utpakking",
+        "open_archive_dialog": "Åpne arkiv",
+        "open": "Åpne",
+        "cancel": "Avbryt",
+        "open_first": "Åpne og valider et arkiv først.",
+        "choose_extraction_parent": "Velg målmappe",
+        "extract_here": "Pakk ut her",
+        "extracted_safely": "Pakket sikkert ut til {output}",
+        "extraction_refused": "Utpakking avvist: {error}",
+    },
+}
+
+
+@dataclass(frozen=True)
+class FilesLocale:
+    requested_language: str
+    catalog_language: str
+    strings: Mapping[str, str]
+
+    @property
+    def fallback(self) -> bool:
+        return self.requested_language != self.catalog_language
+
+    @property
+    def text_direction(self) -> str:
+        return "rtl" if self.catalog_language.split("-", 1)[0] in {"ar", "he"} else "ltr"
+
+    def text(self, key: str, **values: object) -> str:
+        return self.strings[key].format(**values)
+
+
+def files_locale(language: object) -> FilesLocale:
+    requested = normalize_language_tag(language) or "en"
+    catalog = requested if requested in _TRANSLATIONS else "en"
+    return FilesLocale(requested, catalog, _TRANSLATIONS[catalog])
+
+
+def _load_files_locale(settings_store: UserSettingsStore) -> FilesLocale:
+    try:
+        language = settings_store.load().get("language", "en")
+    except (OSError, RuntimeError, UnicodeError, ValueError):
+        language = "en"
+    return files_locale(language)
+
+
+def locale_self_test() -> int:
+    polish = files_locale("pl_PL.UTF-8")
+    assert polish.catalog_language == "pl-PL" and polish.text("refresh") == "Odśwież"
+    norwegian = files_locale("no_NO.UTF-8")
+    assert norwegian.catalog_language == "nb-NO" and norwegian.text("home") == "Hjem"
+    fallback = files_locale("de-DE")
+    assert fallback.catalog_language == "en" and fallback.fallback is True
+    assert fallback.text("archive_manager") == "Archive Manager"
+    print("SWIR Files locale self-test: OK")
+    return 0
 
 
 def human_size(size: int | None) -> str:
@@ -373,12 +588,19 @@ class SwirFiles(Gtk.Application):
         self.listbox: Gtk.ListBox | None = None
         self.path_label: Gtk.Label | None = None
         self.status: Gtk.Label | None = None
+        self.archive_button: Gtk.Button | None = None
+        self.hidden_toggle: Gtk.CheckButton | None = None
+        self.settings_store = UserSettingsStore()
+        self.locale = _load_files_locale(self.settings_store)
         self.include_hidden = False
         self.history: list[pathlib.Path] = []
         self.current = resolve_directory(sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("--") else None)
         self.row_paths: dict[Gtk.ListBoxRow, pathlib.Path] = {}
         self.e2e = os.environ.get("SWIR_APP_E2E", "0") == "1"
         self.evidence_path = os.environ.get("SWIR_APP_EVIDENCE_PATH", "")
+
+    def _t(self, key: str, **values: object) -> str:
+        return self.locale.text(key, **values)
 
     def do_startup(self) -> None:
         Gtk.Application.do_startup(self)
@@ -395,9 +617,11 @@ class SwirFiles(Gtk.Application):
             return
 
         window = Gtk.ApplicationWindow(application=self)
-        window.set_title("SWIR Files")
+        window.set_title(self._t("files_window_title"))
         window.set_default_size(980, 680)
         window.add_css_class("swir-app")
+        direction = Gtk.TextDirection.RTL if self.locale.text_direction == "rtl" else Gtk.TextDirection.LTR
+        window.set_direction(direction)
         self.window = window
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -405,24 +629,38 @@ class SwirFiles(Gtk.Application):
 
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         header.add_css_class("swir-header")
-        brand = Gtk.Label(label="◆  SWIR Files")
+        brand = Gtk.Label(label=self._t("files_brand"))
         brand.add_css_class("swir-brand")
         brand.set_xalign(0)
         header.append(brand)
         spacer = Gtk.Box()
         spacer.set_hexpand(True)
         header.append(spacer)
-        for label, callback in (("Back", self._go_back), ("Up", self._go_up), ("Home", self._go_home), ("Refresh", self._refresh_clicked)):
-            button = Gtk.Button(label=label)
+
+        nav_specs = (
+            ("back", "back_tooltip", self._go_back),
+            ("up", "up_tooltip", self._go_up),
+            ("home", "home_tooltip", self._go_home),
+            ("refresh", "refresh_tooltip", self._refresh_clicked),
+        )
+        for label_key, tooltip_key, callback in nav_specs:
+            button = Gtk.Button(label=self._t(label_key))
             button.add_css_class("swir-button")
+            button.set_tooltip_text(self._t(tooltip_key))
             button.connect("clicked", callback)
             header.append(button)
-        archive_button = Gtk.Button(label="Archive Manager")
+
+        archive_button = Gtk.Button(label=self._t("archive_manager"))
         archive_button.add_css_class("swir-button")
+        archive_button.set_tooltip_text(self._t("archive_tooltip"))
         archive_button.connect("clicked", self._open_archive_manager)
+        self.archive_button = archive_button
         header.append(archive_button)
-        hidden = Gtk.CheckButton(label="Hidden")
+
+        hidden = Gtk.CheckButton(label=self._t("hidden"))
+        hidden.set_tooltip_text(self._t("hidden_tooltip"))
         hidden.connect("toggled", self._toggle_hidden)
+        self.hidden_toggle = hidden
         header.append(hidden)
         root.append(header)
 
@@ -430,6 +668,7 @@ class SwirFiles(Gtk.Application):
         self.path_label.add_css_class("swir-path")
         self.path_label.set_xalign(0)
         self.path_label.set_selectable(True)
+        self.path_label.set_tooltip_text(self._t("path_tooltip"))
         root.append(self.path_label)
 
         scroller = Gtk.ScrolledWindow()
@@ -437,6 +676,8 @@ class SwirFiles(Gtk.Application):
         scroller.set_vexpand(True)
         self.listbox = Gtk.ListBox()
         self.listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self.listbox.set_focusable(True)
+        self.listbox.set_tooltip_text(self._t("file_list_tooltip"))
         self.listbox.connect("row-activated", self._activate_row)
         scroller.set_child(self.listbox)
         root.append(scroller)
@@ -444,6 +685,8 @@ class SwirFiles(Gtk.Application):
         self.status = Gtk.Label()
         self.status.add_css_class("swir-muted")
         self.status.set_xalign(0)
+        self.status.set_selectable(True)
+        self.status.set_tooltip_text(self._t("files_status_tooltip"))
         root.append(self.status)
 
         self._render_directory()
@@ -471,9 +714,10 @@ class SwirFiles(Gtk.Application):
         name.set_xalign(0)
         name.set_hexpand(True)
         box.append(name)
-        kind = Gtk.Label(label=entry.kind)
+        kind_text = self._t(f"kind_{entry.kind}") if f"kind_{entry.kind}" in self.locale.strings else self._t("kind_other")
+        kind = Gtk.Label(label=kind_text)
         kind.add_css_class("swir-muted")
-        kind.set_width_chars(12)
+        kind.set_width_chars(16)
         box.append(kind)
         size = Gtk.Label(label=human_size(entry.size))
         size.add_css_class("swir-muted")
@@ -490,19 +734,19 @@ class SwirFiles(Gtk.Application):
         try:
             entries = list_directory(self.current, include_hidden=self.include_hidden)
         except (OSError, ValueError) as exc:
-            self.status.set_text(f"Could not read folder: {exc}")
+            self.status.set_text(self._t("could_not_read", error=exc))
             return
         self.path_label.set_text(str(self.current))
         for entry in entries:
             self.listbox.append(self._make_row(entry))
-        self.status.set_text(f"{len(entries)} items • read-only browsing foundation")
+        self.status.set_text(self._t("items_status", count=len(entries)))
 
     def _navigate(self, target: pathlib.Path, *, record: bool = True) -> None:
         try:
             destination = resolve_directory(target)
         except (OSError, ValueError) as exc:
             if self.status is not None:
-                self.status.set_text(f"Cannot open folder: {exc}")
+                self.status.set_text(self._t("cannot_open_folder", error=exc))
             return
         if record and destination != self.current:
             self.history.append(self.current)
@@ -519,10 +763,10 @@ class SwirFiles(Gtk.Application):
             elif _archive_suffix(target):
                 self._launch_archive_mode(target)
             elif self.status is not None:
-                self.status.set_text("File opening is intentionally limited until broader Default Apps integration is native.")
+                self.status.set_text(self._t("file_open_limited"))
         except OSError as exc:
             if self.status is not None:
-                self.status.set_text(f"Cannot inspect item: {exc}")
+                self.status.set_text(self._t("cannot_inspect_item", error=exc))
 
     def _launch_archive_mode(self, archive: pathlib.Path | None = None) -> None:
         argv = [sys.executable, str(pathlib.Path(__file__).resolve()), "--archive-manager"]
@@ -530,12 +774,20 @@ class SwirFiles(Gtk.Application):
             argv.extend(("--archive-open", str(archive)))
         try:
             import subprocess
-            subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True, start_new_session=True)
+
+            subprocess.Popen(
+                argv,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                close_fds=True,
+                start_new_session=True,
+            )
             if self.status is not None:
-                self.status.set_text("Opened Archive Manager")
+                self.status.set_text(self._t("opened_archive_manager"))
         except OSError as exc:
             if self.status is not None:
-                self.status.set_text(f"Could not open Archive Manager: {exc}")
+                self.status.set_text(self._t("could_not_open_archive_manager", error=exc))
 
     def _open_archive_manager(self, _button: Gtk.Button) -> None:
         self._launch_archive_mode()
@@ -566,9 +818,29 @@ class SwirFiles(Gtk.Application):
         if not runtime_text or path.parent.resolve() != pathlib.Path(runtime_text).resolve():
             raise RuntimeError("refusing SWIR Files evidence path outside XDG_RUNTIME_DIR")
         rows = list_directory(self.current, include_hidden=False)
+        localized_surface_verified = bool(
+            self.window
+            and self.window.get_title() == self._t("files_window_title")
+            and self.archive_button
+            and self.archive_button.get_label() == self._t("archive_manager")
+            and self.hidden_toggle
+            and self.hidden_toggle.get_label() == self._t("hidden")
+        )
+        localized_tooltips = bool(
+            self.archive_button
+            and self.archive_button.get_tooltip_text() == self._t("archive_tooltip")
+            and self.hidden_toggle
+            and self.hidden_toggle.get_tooltip_text() == self._t("hidden_tooltip")
+            and self.path_label
+            and self.path_label.get_tooltip_text() == self._t("path_tooltip")
+            and self.listbox
+            and self.listbox.get_tooltip_text() == self._t("file_list_tooltip")
+            and self.status
+            and self.status.get_tooltip_text() == self._t("files_status_tooltip")
+        )
         payload = {
             "schema": EVIDENCE_SCHEMA,
-            "passed": True,
+            "passed": localized_surface_verified and localized_tooltips,
             "applicationId": APP_ID,
             "nativeToolkit": "gtk4",
             "displayProtocol": "wayland",
@@ -578,6 +850,17 @@ class SwirFiles(Gtk.Application):
             "visibleEntryCount": len(rows),
             "fileOpenDelegationEnabled": False,
             "archiveManagerAvailable": True,
+            "requestedLanguage": self.locale.requested_language,
+            "catalogLanguage": self.locale.catalog_language,
+            "translationFallback": self.locale.fallback,
+            "textDirection": self.locale.text_direction,
+            "localizedWindowTitle": self._t("files_window_title"),
+            "localizedArchiveLabel": self._t("archive_manager"),
+            "localizedSurfaceVerified": localized_surface_verified,
+            "archiveButtonFocusable": bool(self.archive_button and self.archive_button.get_focusable()),
+            "hiddenToggleFocusable": bool(self.hidden_toggle and self.hidden_toggle.get_focusable()),
+            "fileListFocusable": bool(self.listbox and self.listbox.get_focusable()),
+            "localizedTooltips": localized_tooltips,
         }
         path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
         path.chmod(0o600)
@@ -596,14 +879,21 @@ class SwirArchiveManager(Gtk.Application):
         self.window: Gtk.ApplicationWindow | None = None
         self.list_box: Gtk.ListBox | None = None
         self.status: Gtk.Label | None = None
+        self.open_button: Gtk.Button | None = None
+        self.extract_button: Gtk.Button | None = None
         self.archive_path: pathlib.Path | None = None
         self.entries: list[ArchiveEntry] = []
         self.initial_archive = initial_archive
+        self.settings_store = UserSettingsStore()
+        self.locale = _load_files_locale(self.settings_store)
         self.e2e = os.environ.get("SWIR_APP_E2E", "0") == "1"
         self.evidence_path = os.environ.get("SWIR_APP_EVIDENCE_PATH", "")
         self.e2e_archive = os.environ.get("SWIR_ARCHIVE_E2E_INPUT", "")
         self.e2e_destination = os.environ.get("SWIR_ARCHIVE_E2E_DESTINATION", "")
         self.evidence_written = False
+
+    def _t(self, key: str, **values: object) -> str:
+        return self.locale.text(key, **values)
 
     def do_startup(self) -> None:
         Gtk.Application.do_startup(self)
@@ -619,28 +909,34 @@ class SwirArchiveManager(Gtk.Application):
             self.window.present()
             return
         window = Gtk.ApplicationWindow(application=self)
-        window.set_title("SWIR Archive Manager")
+        window.set_title(self._t("archive_window_title"))
         window.set_default_size(980, 700)
         window.add_css_class("swir-app")
+        direction = Gtk.TextDirection.RTL if self.locale.text_direction == "rtl" else Gtk.TextDirection.LTR
+        window.set_direction(direction)
         self.window = window
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         window.set_child(root)
 
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         header.add_css_class("swir-header")
-        brand = Gtk.Label(label="◆  SWIR Archive Manager")
+        brand = Gtk.Label(label=self._t("archive_brand"))
         brand.add_css_class("swir-brand")
         header.append(brand)
         spacer = Gtk.Box()
         spacer.set_hexpand(True)
         header.append(spacer)
-        open_button = Gtk.Button(label="Open archive")
+        open_button = Gtk.Button(label=self._t("open_archive"))
         open_button.add_css_class("swir-button")
+        open_button.set_tooltip_text(self._t("open_archive_tooltip"))
         open_button.connect("clicked", self._choose_open)
+        self.open_button = open_button
         header.append(open_button)
-        extract_button = Gtk.Button(label="Extract safely")
+        extract_button = Gtk.Button(label=self._t("extract_safely"))
         extract_button.add_css_class("swir-primary")
+        extract_button.set_tooltip_text(self._t("extract_tooltip"))
         extract_button.connect("clicked", self._choose_destination)
+        self.extract_button = extract_button
         header.append(extract_button)
         root.append(header)
 
@@ -653,14 +949,18 @@ class SwirArchiveManager(Gtk.Application):
         scroller.set_vexpand(True)
         self.list_box = Gtk.ListBox()
         self.list_box.set_selection_mode(Gtk.SelectionMode.NONE)
+        self.list_box.set_focusable(True)
+        self.list_box.set_tooltip_text(self._t("archive_list_tooltip"))
         scroller.set_child(self.list_box)
         panel.append(scroller)
         root.append(panel)
 
-        self.status = Gtk.Label(label="Open a local ZIP or TAR archive. Links and traversal entries fail closed.")
+        self.status = Gtk.Label(label=self._t("archive_intro"))
         self.status.add_css_class("swir-muted")
         self.status.set_xalign(0)
         self.status.set_wrap(True)
+        self.status.set_selectable(True)
+        self.status.set_tooltip_text(self._t("archive_status_tooltip"))
         root.append(self.status)
         window.connect("map", self._on_mapped)
         window.present()
@@ -691,7 +991,8 @@ class SwirArchiveManager(Gtk.Application):
         if self.list_box is not None:
             for entry in entries:
                 row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-                name = Gtk.Label(label=("DIR  " if entry.is_dir else "FILE  ") + entry.name)
+                prefix = self._t("archive_dir_prefix") if entry.is_dir else self._t("archive_file_prefix")
+                name = Gtk.Label(label=prefix + entry.name)
                 name.set_xalign(0)
                 name.set_hexpand(True)
                 row.append(name)
@@ -700,12 +1001,25 @@ class SwirArchiveManager(Gtk.Application):
                 row.append(size)
                 self.list_box.append(row)
         total = sum(entry.size for entry in entries)
-        self._set_status(f"{path.name} • {len(entries)} entries • {human_size(total)} expanded data • validated before extraction")
+        self._set_status(
+            self._t(
+                "archive_validated",
+                name=path.name,
+                count=len(entries),
+                size=human_size(total),
+            )
+        )
 
     def _choose_open(self, *_args) -> None:
         if self.window is None:
             return
-        chooser = Gtk.FileChooserNative.new("Open archive", self.window, Gtk.FileChooserAction.OPEN, "Open", "Cancel")
+        chooser = Gtk.FileChooserNative.new(
+            self._t("open_archive_dialog"),
+            self.window,
+            Gtk.FileChooserAction.OPEN,
+            self._t("open"),
+            self._t("cancel"),
+        )
         chooser.connect("response", self._open_response)
         chooser.show()
 
@@ -722,9 +1036,15 @@ class SwirArchiveManager(Gtk.Application):
 
     def _choose_destination(self, *_args) -> None:
         if self.window is None or self.archive_path is None:
-            self._set_status("Open and validate an archive first.")
+            self._set_status(self._t("open_first"))
             return
-        chooser = Gtk.FileChooserNative.new("Choose extraction parent", self.window, Gtk.FileChooserAction.SELECT_FOLDER, "Extract here", "Cancel")
+        chooser = Gtk.FileChooserNative.new(
+            self._t("choose_extraction_parent"),
+            self.window,
+            Gtk.FileChooserAction.SELECT_FOLDER,
+            self._t("extract_here"),
+            self._t("cancel"),
+        )
         chooser.connect("response", self._destination_response)
         chooser.show()
 
@@ -735,9 +1055,9 @@ class SwirArchiveManager(Gtk.Application):
             if path:
                 try:
                     output, _ = _extract_archive(self.archive_path, pathlib.Path(path))
-                    self._set_status(f"Extracted safely to {output}")
+                    self._set_status(self._t("extracted_safely", output=output))
                 except (ArchivePolicyError, OSError) as exc:
-                    self._set_status(f"Extraction refused: {exc}")
+                    self._set_status(self._t("extraction_refused", error=exc))
         chooser.destroy()
 
     def _on_mapped(self, _window: Gtk.Window) -> None:
@@ -752,9 +1072,27 @@ class SwirArchiveManager(Gtk.Application):
         archive = _validated_archive(self.e2e_archive)
         self._open_path(archive)
         output, digests = _extract_archive(archive, _validated_destination_parent(self.e2e_destination))
+        localized_surface_verified = bool(
+            self.window
+            and self.window.get_title() == self._t("archive_window_title")
+            and self.open_button
+            and self.open_button.get_label() == self._t("open_archive")
+            and self.extract_button
+            and self.extract_button.get_label() == self._t("extract_safely")
+        )
+        localized_tooltips = bool(
+            self.open_button
+            and self.open_button.get_tooltip_text() == self._t("open_archive_tooltip")
+            and self.extract_button
+            and self.extract_button.get_tooltip_text() == self._t("extract_tooltip")
+            and self.list_box
+            and self.list_box.get_tooltip_text() == self._t("archive_list_tooltip")
+            and self.status
+            and self.status.get_tooltip_text() == self._t("archive_status_tooltip")
+        )
         payload = {
             "schema": ARCHIVE_EVIDENCE_SCHEMA,
-            "passed": True,
+            "passed": localized_surface_verified and localized_tooltips,
             "applicationId": ARCHIVE_APP_ID,
             "nativeToolkit": "gtk4-python-stdlib-archive",
             "displayProtocol": "wayland",
@@ -770,6 +1108,18 @@ class SwirArchiveManager(Gtk.Application):
             "exclusiveNoFollowWrites": True,
             "privilegedOperations": False,
             "selfUpdater": False,
+            "requestedLanguage": self.locale.requested_language,
+            "catalogLanguage": self.locale.catalog_language,
+            "translationFallback": self.locale.fallback,
+            "textDirection": self.locale.text_direction,
+            "localizedWindowTitle": self._t("archive_window_title"),
+            "localizedOpenLabel": self._t("open_archive"),
+            "localizedExtractLabel": self._t("extract_safely"),
+            "localizedSurfaceVerified": localized_surface_verified,
+            "openButtonFocusable": bool(self.open_button and self.open_button.get_focusable()),
+            "extractButtonFocusable": bool(self.extract_button and self.extract_button.get_focusable()),
+            "archiveListFocusable": bool(self.list_box and self.list_box.get_focusable()),
+            "localizedTooltips": localized_tooltips,
         }
         evidence_path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
         evidence_path.chmod(0o600)
@@ -790,6 +1140,8 @@ def _archive_arg(argv: list[str]) -> str | None:
 
 
 if __name__ == "__main__":
+    if "--locale-self-test" in sys.argv:
+        raise SystemExit(locale_self_test())
     if "--archive-self-test" in sys.argv:
         raise SystemExit(archive_self_test())
     if "--archive-manager" in sys.argv:
