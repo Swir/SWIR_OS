@@ -1,4 +1,4 @@
-name: Repair Photo Studio runtime locale
+name: Repair final native suite integration gate
 
 on:
   push:
@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: repair-photo-runtime-locale
+  group: repair-final-native-suite
   cancel-in-progress: false
 
 jobs:
@@ -22,24 +22,24 @@ jobs:
         with:
           ref: system/native-suite-final-locale
           fetch-depth: 0
-      - name: Apply reviewed Photo Studio locale patch
+      - name: Repair final native-suite gate
         run: python3 scripts/repair-photo-runtime-locale.py
-      - name: Validate patched sources
+      - name: Validate repair
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m py_compile system/apps/swir-photo-studio.py system/apps/core_runtime.py
+          python3 -m py_compile system/apps/verify-native-daily-suite.py
+          grep -F 'swir.native-photo-studio-runtime-evidence/0.4' system/apps/verify-native-daily-suite.py >/dev/null
+          grep -F 'Photo Studio now closes the last identified locale/accessibility surface' system/SWIR-NATIVE-DAILY-SUITE-0.1.md >/dev/null
           git diff --check
-          grep -F 'swir.native-photo-studio-runtime-evidence/0.4' system/apps/swir-photo-studio.py system/SWIR-NATIVE-PHOTO-STUDIO-0.1.md .github/workflows/system-native-photo-studio.yml >/dev/null
-          grep -F 'catalog = requested if requested in _TRANSLATIONS else "en"' system/apps/swir-photo-studio.py >/dev/null
-      - name: Commit Photo Studio runtime locale implementation
+      - name: Commit verified repair
         shell: bash
         run: |
           set -euo pipefail
-          git restore --source=HEAD -- .github/workflows/system-native-photo-studio.yml
+          git restore --source=HEAD -- .github/workflows/repair-photo-runtime-locale.yml scripts/repair-photo-runtime-locale.py
           git config user.name 'SWIR CI Repair'
           git config user.email 'actions@users.noreply.github.com'
-          git add system/apps/swir-photo-studio.py system/SWIR-NATIVE-PHOTO-STUDIO-0.1.md
+          git add system/apps/verify-native-daily-suite.py system/SWIR-NATIVE-DAILY-SUITE-0.1.md
           git diff --cached --check
-          git commit -m 'System: localize Photo Studio runtime surface'
+          git commit -m 'CI: align native suite with Photo Studio runtime evidence'
           git push origin HEAD:system/native-suite-final-locale
