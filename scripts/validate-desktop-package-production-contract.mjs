@@ -30,6 +30,7 @@ const runtime = read('swir-runtime.js');
 const builder = read('desktop/windows/build-store-packages.ps1');
 const release = read('.github/workflows/desktop-release.yml');
 const evidence = read('.github/workflows/desktop-package-signing-evidence.yml');
+const evidenceRunProvenance = read('scripts/verify-package-signing-evidence-run-provenance.mjs');
 
 requireText(runtime, "const SIGNED_RELEASE_ARTIFACT_REF = 'release:verified-catalog-artifact';", 'runtime pins the catalog-selected release artifact reference');
 requireText(runtime, 'installAuthorizedReleaseArtifact:', 'runtime exposes signed release artifact installation only through structured catalog authorization');
@@ -57,6 +58,11 @@ requireText(release, "'package-trust-roots.json'", 'package trust roots are mand
 requireText(evidence, 'environment: desktop-production-signing', 'production signing evidence is protected by a dedicated GitHub environment');
 requireText(evidence, 'SWIR_PACKAGE_SIGNING_PRIVATE_KEY_BASE64', 'production evidence uses protected package signing material');
 requireText(evidence, 'Independently validate production signing evidence', 'production evidence has an independent validation step');
+requireText(evidence, 'Verify protected production evidence run provenance', 'production evidence is rebound to the exact GitHub run after artifact validation');
 requireText(evidence, 'Destroy protected signing key material', 'production evidence destroys temporary private-key material');
+requireText(evidenceRunProvenance, 'Evidence source commit mismatch', 'run provenance verifier rejects source-commit replay');
+requireText(evidenceRunProvenance, 'Evidence repository mismatch', 'run provenance verifier rejects cross-repository replay');
+requireText(evidenceRunProvenance, 'Evidence GitHub run id mismatch', 'run provenance verifier rejects cross-run replay');
+requireText(evidenceRunProvenance, 'Evidence GitHub run attempt mismatch', 'run provenance verifier rejects stale run-attempt replay');
 
 console.log(`Desktop package production contract passed: ${passed} checks.`);

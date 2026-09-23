@@ -9,6 +9,8 @@ on:
       - 'desktop/windows/build-store-packages.ps1'
       - 'desktop/windows/New-PackageSigningEvidence.ps1'
       - 'scripts/validate-package-signing-evidence.mjs'
+      - 'scripts/verify-package-signing-evidence-run-provenance.mjs'
+      - 'scripts/test-package-signing-evidence-run-provenance.mjs'
       - 'swir-packages.js'
   push:
     branches: [main]
@@ -19,6 +21,8 @@ on:
       - 'desktop/windows/build-store-packages.ps1'
       - 'desktop/windows/New-PackageSigningEvidence.ps1'
       - 'scripts/validate-package-signing-evidence.mjs'
+      - 'scripts/verify-package-signing-evidence-run-provenance.mjs'
+      - 'scripts/test-package-signing-evidence-run-provenance.mjs'
       - 'swir-packages.js'
   workflow_dispatch:
     inputs:
@@ -64,6 +68,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
+
+      - name: Verify signing evidence run provenance rejection cases
+        working-directory: ${{ github.workspace }}
+        run: node scripts/test-package-signing-evidence-run-provenance.mjs
 
       - name: Build package signing verifier
         run: dotnet build SWIR.Desktop.PackageSignatureTool.csproj --configuration Release
@@ -121,6 +129,12 @@ jobs:
         run: |
           node '${{ github.workspace }}\scripts\validate-package-signing-evidence.mjs' $env:SWIR_EVIDENCE_FILE $env:SWIR_EVIDENCE_STORE $env:SWIR_EVIDENCE_TRUST contract
           if ($LASTEXITCODE -ne 0) { throw "Package signing evidence validation failed with exit code $LASTEXITCODE" }
+
+      - name: Verify contract evidence run provenance
+        shell: pwsh
+        run: |
+          node '${{ github.workspace }}\scripts\verify-package-signing-evidence-run-provenance.mjs' $env:SWIR_EVIDENCE_FILE contract '${{ github.repository }}' '${{ github.sha }}' '${{ github.run_id }}' '${{ github.run_attempt }}'
+          if ($LASTEXITCODE -ne 0) { throw "Package signing contract evidence run provenance failed with exit code $LASTEXITCODE" }
 
       - name: Destroy ephemeral signing key
         if: always()
@@ -242,6 +256,12 @@ jobs:
         run: |
           node '${{ github.workspace }}\scripts\validate-package-signing-evidence.mjs' $env:SWIR_EVIDENCE_FILE $env:SWIR_EVIDENCE_STORE $env:SWIR_EVIDENCE_TRUST production
           if ($LASTEXITCODE -ne 0) { throw "Production signing evidence validation failed with exit code $LASTEXITCODE" }
+
+      - name: Verify protected production evidence run provenance
+        shell: pwsh
+        run: |
+          node '${{ github.workspace }}\scripts\verify-package-signing-evidence-run-provenance.mjs' $env:SWIR_EVIDENCE_FILE production '${{ github.repository }}' '${{ github.sha }}' '${{ github.run_id }}' '${{ github.run_attempt }}'
+          if ($LASTEXITCODE -ne 0) { throw "Production package signing evidence run provenance failed with exit code $LASTEXITCODE" }
 
       - name: Destroy protected signing key material
         if: always()
