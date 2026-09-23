@@ -46,6 +46,10 @@ rejectPattern(release, /generateKeyPairSync|generateKeyPair\(/, 'production rele
 requireText(feed, 'release:', 'feed promotion is release-event driven');
 requireText(feed, 'types: [published]', 'feed promotion waits for published releases');
 requireText(feed, '^desktop-v([0-9]+\\.[0-9]+\\.[0-9]+)-(preview|stable)$', 'release tag is version/channel bound');
+requireText(feed, 'git merge-base --is-ancestor "$TAG_COMMIT" origin/main', 'release tag commit must be reachable from canonical main');
+requireText(feed, 'gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease', 'release metadata is inspected before feed promotion');
+requireText(feed, 'preview release must be marked prerelease', 'preview channel requires GitHub prerelease semantics');
+requireText(feed, 'stable release must not be marked prerelease', 'stable channel rejects GitHub prerelease semantics');
 requireText(feed, 'SWIR_DESKTOP_UPDATE_KEY_ID', 'feed promotion pins the update key id');
 requireText(feed, 'SWIR_DESKTOP_UPDATE_PUBLIC_KEY_PEM_B64', 'feed promotion pins the public verification key');
 requireText(feed, 'gh release download "$RELEASE_TAG"', 'feed promotion downloads exact immutable release assets');
