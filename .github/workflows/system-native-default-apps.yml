@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - 'system/apps/swir-settings.py'
+      - 'system/apps/core_runtime.py'
+      - 'system/apps/i18n_runtime.py'
       - 'system/apps/swir-browser.py'
       - 'system/apps/swir-player.py'
       - 'system/apps/swir-photo-studio.py'
@@ -24,6 +26,8 @@ on:
   pull_request:
     paths:
       - 'system/apps/swir-settings.py'
+      - 'system/apps/core_runtime.py'
+      - 'system/apps/i18n_runtime.py'
       - 'system/apps/swir-browser.py'
       - 'system/apps/swir-player.py'
       - 'system/apps/swir-photo-studio.py'
@@ -63,6 +67,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             python3-gi gir1.2-gtk-4.0 desktop-file-utils
           python3 -m py_compile \
+            system/apps/core_runtime.py \
+            system/apps/i18n_runtime.py \
             system/apps/swir-settings.py \
             system/apps/swir-text-editor.py \
             system/apps/swir-files.py
@@ -88,6 +94,8 @@ jobs:
           grep -F '"text", "Text / code editor"' system/apps/swir-settings.py >/dev/null
           grep -F '"archive", "Archive manager"' system/apps/swir-settings.py >/dev/null
           grep -F 'defaultAppsMutationOnExplicitActionOnly' system/apps/swir-settings.py >/dev/null
+          grep -F 'localizedSurfaceVerified' system/apps/swir-settings.py >/dev/null
+          grep -F 'i18nCatalogLanguage' system/apps/swir-settings.py >/dev/null
           ! grep -RE '/usr/bin/(sudo|pkexec|su)|/bin/su' system/apps/swir-settings.py
           ! grep -RE 'subprocess\.|os\.system\(' system/apps/swir-settings.py
 
@@ -112,7 +120,7 @@ jobs:
           sudo install -m 0755 system/apps/swir-pdf-viewer.py /usr/local/bin/swir-pdf-viewer
           sudo install -m 0755 system/apps/swir-text-editor.py /usr/local/bin/swir-text-editor
           sudo install -m 0755 system/apps/swir-files.py /usr/local/bin/swir-files
-      - name: Exercise all six per-user defaults and real default launches
+      - name: Exercise localized Settings plus all six per-user defaults and real default launches
         shell: bash
         run: |
           set -euo pipefail
@@ -146,6 +154,15 @@ jobs:
           export GDK_BACKEND=wayland
           export PYTHONPATH="$GITHUB_WORKSPACE/system/apps"
 
+          python3 - <<'PY'
+          from core_runtime import UserSettingsStore
+          store = UserSettingsStore()
+          settings = store.load()
+          settings['language'] = 'pl-PL'
+          saved = store.save(settings)
+          assert saved['language'] == 'pl-PL'
+          PY
+
           weston --backend=headless-backend.so --socket="$WAYLAND_DISPLAY" --idle-time=0 --log="$RUNTIME/weston.log" &
           WESTON_PID=$!
           cleanup() { kill "$WESTON_PID" 2>/dev/null || true; wait "$WESTON_PID" 2>/dev/null || true; }
@@ -176,6 +193,14 @@ jobs:
           assert evidence['displayProtocol'] == 'wayland'
           assert evidence['windowMapped'] is True
           assert evidence['privilegedOperations'] is False
+          assert evidence['language'] == 'pl-PL'
+          assert evidence['i18nCatalogLanguage'] == 'pl-PL'
+          assert evidence['i18nCatalogFallback'] is False
+          assert evidence['textDirection'] == 'ltr'
+          assert evidence['localizedSurfaceVerified'] is True
+          assert evidence['windowTitle'] == 'Ustawienia SWIR'
+          assert evidence['languageSectionLabel'] == 'Język i region'
+          assert evidence['saveButtonLabel'] == 'Zapisz'
           assert evidence['defaultAppsPanel'] is True
           assert evidence['defaultAppCategoryCount'] == 6
           assert evidence['defaultAppCategories'] == ['browser', 'media', 'image', 'pdf', 'text', 'archive']
