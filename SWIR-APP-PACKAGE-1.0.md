@@ -166,6 +166,24 @@ Application becomes visible after shell refresh
 
 All official Web Edition entries must be same-origin files shipped with SWIR OS. Arbitrary remote JavaScript is not treated as a trusted SWIR package.
 
+## Installable Web widgets
+
+Web widgets use the same `swir.app/1.0` install/remove transaction as other Store packages. A widget is not allowed to bypass the package layer or inject arbitrary HTML from a manifest. The shell has a bounded renderer allowlist and only mounts a widget when all of these conditions are true:
+
+- the installed package record is a committed `swir-app-package` with `verification.officialCatalog === true`;
+- the package is one of the shell's known widget IDs and its protected catalog identity (`packageId`, `category`, `type`, `entry`) matches the expected value;
+- compatibility explicitly allows the current Web edition;
+- the widget renderer is local/read-only and asks for no capability it does not need.
+
+The initial official widget packages are:
+
+```text
+swir.widget.clock   -> local clock/date widget, no permissions, no network
+swir.widget.system  -> read-only runtime/package-state widget, no network or privileged mutation
+```
+
+Both packages remain Web-only until an independently verified native widget host exists. Installing through SWIR Store makes the package available to the launcher and the verified desktop widget host after the package state is rebuilt; removing the package removes it from the host. Manually adding a legacy package ID to browser storage is not sufficient to make a widget render.
+
 ## Opening a file
 
 ```text
@@ -240,6 +258,8 @@ Optional 1.7 packages:
 - `swir.archive` — Archive Manager
 - `swir.pdf-viewer` — PDF Viewer
 - `swir.chat` — SWIR Chat
+- `swir.widget.clock` — Clock Widget (Web)
+- `swir.widget.system` — System Widget (Web)
 
 ## Future `.swirapp` archive
 
