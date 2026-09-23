@@ -1,4 +1,4 @@
-name: Repair final native suite integration gate
+name: Finalize verified native suite milestone
 
 on:
   push:
@@ -10,11 +10,11 @@ permissions:
   contents: write
 
 concurrency:
-  group: repair-final-native-suite
+  group: finalize-native-suite-milestone
   cancel-in-progress: false
 
 jobs:
-  implement:
+  finalize:
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     steps:
@@ -22,24 +22,32 @@ jobs:
         with:
           ref: system/native-suite-final-locale
           fetch-depth: 0
-      - name: Repair final native-suite gate
+      - name: Apply verified roadmap closure
         run: python3 scripts/repair-photo-runtime-locale.py
-      - name: Validate repair
+      - name: Validate roadmap, SVG and cleanup contract
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m py_compile system/apps/verify-native-daily-suite.py
-          grep -F 'swir.native-photo-studio-runtime-evidence/0.4' system/apps/verify-native-daily-suite.py >/dev/null
-          grep -F 'Photo Studio now closes the last identified locale/accessibility surface' system/SWIR-NATIVE-DAILY-SUITE-0.1.md >/dev/null
+          node scripts/generate-readme-progress.mjs --check
+          grep -F '| **58** | **7** | **65** | **89.2%** |' SWIR-OS-ARCHITECTURE.md >/dev/null
+          grep -F -- '- [x] essential native Linux application suite for dependable daily use' SWIR-OS-ARCHITECTURE.md >/dev/null
+          grep -F '58/65 = **89.2%**' README.md >/dev/null
+          grep -F '89.2%' assets/readme/progress-card.svg >/dev/null
+          grep -F '58 / 65 verified deliverables' assets/readme/progress-card.svg >/dev/null
+          grep -F '89.2%' assets/readme/progress-mini.svg >/dev/null
+          grep -F '58 / 65' assets/readme/progress-mini.svg >/dev/null
+          grep -F 'TEMPLATE / NOT PROJECT DATA' assets/readme/progress-template.svg >/dev/null
+          ! grep -RE '[█░▒▓]' README.md SWIR-OS-ARCHITECTURE.md
           git diff --check
-      - name: Commit verified repair
+      - name: Commit closure and remove one-shot repair tooling
         shell: bash
         run: |
           set -euo pipefail
-          git restore --source=HEAD -- .github/workflows/repair-photo-runtime-locale.yml scripts/repair-photo-runtime-locale.py
           git config user.name 'SWIR CI Repair'
           git config user.email 'actions@users.noreply.github.com'
-          git add system/apps/verify-native-daily-suite.py system/SWIR-NATIVE-DAILY-SUITE-0.1.md
+          git add README.md SWIR-OS-ARCHITECTURE.md system/SWIR-NATIVE-DAILY-SUITE-0.1.md \
+            assets/readme/progress-card.svg assets/readme/progress-mini.svg assets/readme/progress-template.svg
+          git rm .github/workflows/repair-photo-runtime-locale.yml scripts/repair-photo-runtime-locale.py
           git diff --cached --check
-          git commit -m 'CI: align native suite with Photo Studio runtime evidence'
+          git commit -m 'System: complete verified native daily-use suite milestone'
           git push origin HEAD:system/native-suite-final-locale
