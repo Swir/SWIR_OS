@@ -1,0 +1,84 @@
+name: Desktop Update Production Contract
+
+on:
+  push:
+    paths:
+      - '.github/workflows/desktop-release.yml'
+      - '.github/workflows/desktop-update-feed.yml'
+      - '.github/workflows/desktop-github-update-contract.yml'
+      - '.github/workflows/desktop-update-production-contract.yml'
+      - 'scripts/promote-desktop-update-feed.mjs'
+      - 'scripts/test-desktop-update-feed.mjs'
+      - 'scripts/test-desktop-update-feed-security.mjs'
+      - 'scripts/verify-desktop-update-production-contract.mjs'
+      - 'desktop/windows/UpdateBroker.cs'
+      - 'desktop/windows/UpdateStagingBroker.cs'
+      - 'desktop/windows/UpdateDownloadClient.cs'
+      - 'desktop/windows/DesktopGitHubUpdatePolicy.cs'
+      - 'desktop/windows/DesktopUpdateUserPolicy.cs'
+      - 'desktop/windows/*Update*SelfTests.cs'
+      - 'desktop/windows/SWIR.Desktop.*Update*.SelfTests.csproj'
+      - 'SWIR-OS-ARCHITECTURE.md'
+      - 'assets/readme/progress-card.svg'
+      - 'assets/readme/progress-mini.svg'
+  pull_request:
+    paths:
+      - '.github/workflows/desktop-release.yml'
+      - '.github/workflows/desktop-update-feed.yml'
+      - '.github/workflows/desktop-github-update-contract.yml'
+      - '.github/workflows/desktop-update-production-contract.yml'
+      - 'scripts/promote-desktop-update-feed.mjs'
+      - 'scripts/test-desktop-update-feed.mjs'
+      - 'scripts/test-desktop-update-feed-security.mjs'
+      - 'scripts/verify-desktop-update-production-contract.mjs'
+      - 'desktop/windows/UpdateBroker.cs'
+      - 'desktop/windows/UpdateStagingBroker.cs'
+      - 'desktop/windows/UpdateDownloadClient.cs'
+      - 'desktop/windows/DesktopGitHubUpdatePolicy.cs'
+      - 'desktop/windows/DesktopUpdateUserPolicy.cs'
+      - 'desktop/windows/*Update*SelfTests.cs'
+      - 'desktop/windows/SWIR.Desktop.*Update*.SelfTests.csproj'
+      - 'SWIR-OS-ARCHITECTURE.md'
+      - 'assets/readme/progress-card.svg'
+      - 'assets/readme/progress-mini.svg'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Verify production release/feed/runtime topology
+        run: node scripts/verify-desktop-update-production-contract.mjs
+
+      - name: Verify signed feed anti-downgrade promotion
+        run: node scripts/test-desktop-update-feed.mjs
+
+      - name: Verify signed feed and artifact trust boundary
+        run: node scripts/test-desktop-update-feed-security.mjs
+
+      - name: Verify runtime manifest and package trust
+        working-directory: desktop/windows
+        run: dotnet run --project SWIR.Desktop.Update.SelfTests.csproj --configuration Release
+
+      - name: Verify immutable GitHub release source policy
+        working-directory: desktop/windows
+        run: dotnet run --project SWIR.Desktop.GitHubUpdateSource.SelfTests.csproj --configuration Release
+
+      - name: Verify Automatic / Notify only / Manual integration
+        working-directory: desktop/windows
+        run: dotnet run --project SWIR.Desktop.UpdateUserPolicyIntegration.SelfTests.csproj --configuration Release
+
+      - name: Verify deterministic roadmap SVGs
+        run: node scripts/generate-readme-progress.mjs --check
