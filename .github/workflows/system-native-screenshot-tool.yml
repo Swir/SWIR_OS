@@ -47,7 +47,7 @@ jobs:
       - name: Compile and verify screenshot policy
         run: |
           set -euo pipefail
-          python3 -m py_compile system/apps/swir-screenshot.py system/tests/fake-screenshot-portal.py system/session/swir-shell.py
+          python3 -m py_compile system/apps/core_runtime.py system/apps/swir-screenshot.py system/tests/fake-screenshot-portal.py system/session/swir-shell.py
           python3 system/apps/swir-screenshot.py --self-test
           bash -n system/session/swir-session-launcher.sh system/session/provision-graphical-session.sh system/e2e/debian13-graphical-session-vm-e2e.sh
           desktop-file-validate system/apps/swir-screenshot.desktop
@@ -56,6 +56,9 @@ jobs:
           grep -F '"interactive": GLib.Variant("b", True)' system/apps/swir-screenshot.py >/dev/null
           grep -F 'MAX_CAPTURE_BYTES: Final = 64 * 1024 * 1024' system/apps/swir-screenshot.py >/dev/null
           grep -F 'MAX_PIXELS: Final = 40_000_000' system/apps/swir-screenshot.py >/dev/null
+          grep -F 'UserSettingsStore' system/apps/swir-screenshot.py >/dev/null
+          grep -F 'localizedTooltips' system/apps/swir-screenshot.py >/dev/null
+          grep -F 'evidenceOwnerOnly' system/apps/swir-screenshot.py >/dev/null
           ! grep -RE 'shell *= *True|os\.system\(|/dev/(fb|dri)|\b(grim|scrot|gnome-screenshot|spectacle|import)\b' system/apps/swir-screenshot.py
           ! grep -RE "/usr/bin/(sudo|pkexec|su)([[:space:]\"']|$)|/bin/su([[:space:]\"']|$)" system/apps/swir-screenshot.py
 
@@ -93,10 +96,22 @@ jobs:
         run: |
           set -euo pipefail
           RUNTIME="${{ runner.temp }}/swir-screenshot-runtime"
+          CONFIG="${{ runner.temp }}/swir-screenshot-config"
           OUT="$RUNTIME/output"
-          mkdir -p "$RUNTIME" "$OUT"
-          chmod 0700 "$RUNTIME" "$OUT"
+          mkdir -p "$RUNTIME" "$CONFIG/swir" "$OUT"
+          chmod 0700 "$RUNTIME" "$CONFIG" "$CONFIG/swir" "$OUT"
+          cat > "$CONFIG/swir/settings.json" <<'JSON'
+          {
+            "schema": "swir.user-settings/0.1",
+            "appearance": "dark",
+            "language": "pl-PL",
+            "clock24h": true,
+            "themeId": "builtin.swir-dark"
+          }
+          JSON
+          chmod 0600 "$CONFIG/swir/settings.json"
           export XDG_RUNTIME_DIR="$RUNTIME"
+          export XDG_CONFIG_HOME="$CONFIG"
           export WAYLAND_DISPLAY=wayland-swir-screenshot
           export GDK_BACKEND=wayland
           export SWIR_SCREENSHOT_FAKE_SOURCE="$RUNTIME/source.png"
@@ -139,9 +154,10 @@ jobs:
 
           python3 - "$RUNTIME/screenshot.json" "$OUT" <<'PY'
           import json, pathlib, stat, sys
-          evidence = json.load(open(sys.argv[1], encoding='utf-8'))
+          evidence_path = pathlib.Path(sys.argv[1])
+          evidence = json.load(open(evidence_path, encoding='utf-8'))
           out = pathlib.Path(sys.argv[2])
-          assert evidence['schema'] == 'swir.native-screenshot-runtime-evidence/0.1'
+          assert evidence['schema'] == 'swir.native-screenshot-runtime-evidence/0.2'
           assert evidence['passed'] is True
           assert evidence['applicationId'] == 'dev.swir.Screenshot'
           assert evidence['nativeToolkit'] == 'gtk4-gdkpixbuf'
@@ -152,10 +168,18 @@ jobs:
           assert evidence['sourceValidated'] is True and evidence['sourceUriScheme'] == 'file'
           assert evidence['remoteUriAccepted'] is False and evidence['shellCapture'] is False
           assert evidence['privilegedOperations'] is False and evidence['selfUpdater'] is False
+          assert evidence['requestedLanguage'] == 'pl-PL' and evidence['catalogLanguage'] == 'pl-PL'
+          assert evidence['translationFallback'] is False and evidence['textDirection'] == 'ltr'
+          assert evidence['localizedWindowTitle'] == 'Zrzut ekranu SWIR'
+          assert evidence['localizedCaptureLabel'] == 'Zrób zrzut ekranu'
+          assert evidence['localizedSurfaceVerified'] is True
+          assert evidence['captureButtonFocusable'] is True and evidence['localizedTooltips'] is True
+          assert evidence['evidenceOwnerOnly'] is True
           saved = out / evidence['savedFile']
           assert saved.is_file() and saved.stat().st_size > 0
           assert stat.S_IMODE(saved.stat().st_mode) == 0o600
           assert evidence['savedMode'] == '0600' and evidence['dimensions'] == [96, 64]
+          assert stat.S_IMODE(evidence_path.stat().st_mode) == 0o600
           PY
 
   debian13-target-runtime:
@@ -170,7 +194,7 @@ jobs:
           set -euo pipefail
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends desktop-file-utils python3 python3-gi gir1.2-gtk-4.0 gir1.2-gdkpixbuf-2.0
-          python3 -m py_compile system/apps/swir-screenshot.py system/tests/fake-screenshot-portal.py
+          python3 -m py_compile system/apps/core_runtime.py system/apps/swir-screenshot.py system/tests/fake-screenshot-portal.py
           python3 system/apps/swir-screenshot.py --self-test
           desktop-file-validate system/apps/swir-screenshot.desktop
           python3 - <<'PY'
