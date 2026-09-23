@@ -10,6 +10,7 @@ on:
       - 'swir-install-pipeline.js'
       - 'SWIR-APP-PACKAGE-1.0.md'
       - 'scripts/verify-web-widget-packages.mjs'
+      - 'scripts/build-signed-catalog-release.mjs'
       - '.github/workflows/web-widget-packages.yml'
   push:
     branches: [main]
@@ -21,6 +22,7 @@ on:
       - 'swir-install-pipeline.js'
       - 'SWIR-APP-PACKAGE-1.0.md'
       - 'scripts/verify-web-widget-packages.mjs'
+      - 'scripts/build-signed-catalog-release.mjs'
       - '.github/workflows/web-widget-packages.yml'
 
 permissions:
@@ -40,5 +42,8 @@ jobs:
           node --check swir-widgets.js
           node --check swir-v17.js
           node --check swir-packages.js
+          node --check scripts/build-signed-catalog-release.mjs
       - name: Verify package, trust and renderer boundaries
         run: node scripts/verify-web-widget-packages.mjs
+      - name: Verify Desktop signed catalog edition scoping
+        run: node scripts/build-signed-catalog-release.mjs --self-test
