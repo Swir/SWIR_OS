@@ -163,7 +163,7 @@ jobs:
 
           PYTHONPATH=system/apps python3 - <<'PY'
           import runpy
-          namespace = runpy.run_path('system/apps/swir-backup.py')
+          namespace = runpy.run_path('system/apps/swir-backup.py', run_name='swir_backup_locale_probe')
           resolve = namespace['backup_locale']
           fallback = resolve('fr-FR')
           assert fallback.requested_language == 'fr-FR'
