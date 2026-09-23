@@ -5,12 +5,14 @@ on:
     branches: [main]
     paths:
       - 'system/apps/swir-system-monitor.py'
+      - 'system/apps/core_runtime.py'
       - 'system/SWIR-NATIVE-TASK-MANAGER-0.1.md'
       - 'system/SWIR-NATIVE-DIAGNOSTICS-0.1.md'
       - '.github/workflows/system-native-task-manager.yml'
   pull_request:
     paths:
       - 'system/apps/swir-system-monitor.py'
+      - 'system/apps/core_runtime.py'
       - 'system/SWIR-NATIVE-TASK-MANAGER-0.1.md'
       - 'system/SWIR-NATIVE-DIAGNOSTICS-0.1.md'
       - '.github/workflows/system-native-task-manager.yml'
@@ -34,7 +36,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends python3-gi gir1.2-gtk-4.0
-      - name: Verify bounded same-user process control
+      - name: Verify bounded same-user process control and locale fallback
         run: |
           set -euo pipefail
           python3 -m py_compile system/apps/swir-system-monitor.py
@@ -46,6 +48,9 @@ jobs:
           grep -F 'processTerminationRequiresConfirmation": True' system/apps/swir-system-monitor.py >/dev/null
           grep -F 'processIdentityRevalidated": True' system/apps/swir-system-monitor.py >/dev/null
           grep -F 'processAncestorProtection": True' system/apps/swir-system-monitor.py >/dev/null
+          grep -F '"pl-PL": {' system/apps/swir-system-monitor.py >/dev/null
+          grep -F '"nb-NO": {' system/apps/swir-system-monitor.py >/dev/null
+          grep -F 'catalog = requested if requested in _TRANSLATIONS else "en"' system/apps/swir-system-monitor.py >/dev/null
           ! grep -F 'SIGKILL' system/apps/swir-system-monitor.py
           ! grep -RE '/usr/bin/(sudo|pkexec|su)|/bin/su|os\.killpg\(' system/apps/swir-system-monitor.py
       - name: Exercise real SIGTERM on an owned disposable child
@@ -90,13 +95,19 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends weston python3-gi gir1.2-gtk-4.0 systemd
-      - name: Map Task Manager and verify safety evidence
+      - name: Map localized Task Manager and verify safety/accessibility evidence
         run: |
           set -euo pipefail
           RUNTIME="${{ runner.temp }}/swir-task-manager-runtime"
-          mkdir -p "$RUNTIME"
-          chmod 0700 "$RUNTIME"
+          CONFIG="${{ runner.temp }}/swir-task-manager-config"
+          mkdir -p "$RUNTIME" "$CONFIG/swir"
+          chmod 0700 "$RUNTIME" "$CONFIG" "$CONFIG/swir"
+          cat >"$CONFIG/swir/settings.json" <<'JSON'
+          {"schema":"swir.user-settings/0.1","appearance":"dark","language":"pl-PL","clock24h":true,"themeId":"builtin.swir-dark"}
+          JSON
+          chmod 0600 "$CONFIG/swir/settings.json"
           export XDG_RUNTIME_DIR="$RUNTIME"
+          export XDG_CONFIG_HOME="$CONFIG"
           export WAYLAND_DISPLAY=wayland-swir-task-manager
           export GDK_BACKEND=wayland
 
@@ -117,13 +128,21 @@ jobs:
             python3 system/apps/swir-system-monitor.py
 
           python3 - "$EVIDENCE" <<'PY'
-          import json, sys
-          evidence = json.load(open(sys.argv[1], encoding='utf-8'))
-          assert evidence['schema'] == 'swir.native-system-monitor-runtime-evidence/0.1'
+          import json, os, stat, sys
+          path = sys.argv[1]
+          evidence = json.load(open(path, encoding='utf-8'))
+          assert evidence['schema'] == 'swir.native-system-monitor-runtime-evidence/0.2'
           assert evidence['passed'] is True
           assert evidence['applicationId'] == 'dev.swir.SystemMonitor'
           assert evidence['displayProtocol'] == 'wayland' and evidence['windowMapped'] is True
           assert evidence['privilegedOperations'] is False
+          assert evidence['localeRequested'] == 'pl-PL'
+          assert evidence['localeCatalog'] == 'pl-PL'
+          assert evidence['localeFallback'] is False
+          assert evidence['textDirection'] == 'ltr'
+          assert evidence['localizedSurfaceVerified'] is True
+          assert evidence['accessibilityFocusVerified'] is True
+          assert evidence['accessibilityTooltipsVerified'] is True
           assert evidence['processFilterMaxChars'] == 80
           assert evidence['processTerminationEnabled'] is True
           assert evidence['processTerminationSignal'] == 'SIGTERM'
@@ -134,6 +153,7 @@ jobs:
           assert evidence['processTerminationUsesShell'] is False
           assert evidence['processTerminationElevates'] is False
           assert evidence['diagnosticsReadOnly'] is True
+          assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
           PY
 
   debian13-target-runtime:

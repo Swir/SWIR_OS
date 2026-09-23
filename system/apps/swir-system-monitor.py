@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""SWIR System Monitor — native GTK4 task manager, resource viewer and diagnostics surface."""
+"""SWIR System Monitor — native GTK4 task manager and read-only diagnostics.
+
+The app is unprivileged. Process termination is restricted to explicit,
+same-user SIGTERM after identity revalidation. Diagnostics use only fixed,
+allow-listed absolute commands with bounded runtime/output and no shell.
+The runtime consumes the owner-only SWIR language preference and ships reviewed
+English, Polish and Norwegian Bokmål catalogs with deterministic English fallback.
+"""
 
 from __future__ import annotations
 
@@ -12,15 +19,21 @@ import sys
 import tempfile
 import threading
 from dataclasses import dataclass
-from typing import Callable, Final
+from typing import Callable, Final, Mapping
 
 import gi
 
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
+LIBDIR = pathlib.Path("/usr/local/lib/swir")
+if LIBDIR.is_dir() and str(LIBDIR) not in sys.path:
+    sys.path.insert(0, str(LIBDIR))
+
+from core_runtime import UserSettingsStore, normalize_language_tag  # noqa: E402
+
 APP_ID: Final = "dev.swir.SystemMonitor"
-EVIDENCE_SCHEMA: Final = "swir.native-system-monitor-runtime-evidence/0.1"
+EVIDENCE_SCHEMA: Final = "swir.native-system-monitor-runtime-evidence/0.2"
 MAX_PROCESS_ROWS: Final = 200
 MAX_PROCESS_NAME_CHARS: Final = 120
 MAX_FILTER_CHARS: Final = 80
@@ -55,6 +68,149 @@ window.swir-app { background: #02050A; color: #F4FAFF; }
 .swir-control { background: #07111C; color: #F4FAFF; border: 1px solid rgba(0,136,255,0.72); border-radius: 10px; padding: 7px 10px; }
 .swir-danger { background: #2A0A0A; color: #FFD9D9; border: 1px solid #F06A6A; border-radius: 10px; padding: 7px 12px; }
 """
+
+_TRANSLATIONS: Final[Mapping[str, Mapping[str, str]]] = {
+    "en": {
+        "window_title": "SWIR System Monitor",
+        "brand": "◆  SWIR System Monitor",
+        "processes_tab": "Processes",
+        "diagnostics_tab": "Diagnostics",
+        "filter_placeholder": "Filter by process name or PID",
+        "filter_tooltip": "Filter the bounded process list by process name or PID",
+        "end_process": "End Process",
+        "end_tooltip": "Send SIGTERM to the selected process owned by your user",
+        "process_help": "Select a process to inspect it. Ending a process requires confirmation and never elevates privileges.",
+        "diag_not_refreshed": "Diagnostics have not been refreshed yet.",
+        "refresh_diagnostics": "Refresh diagnostics",
+        "refresh_tooltip": "Refresh bounded read-only system diagnostics",
+        "metrics_error": "Could not read system metrics: {reason}",
+        "metrics": "Memory {used} / {total}  •  Load {l1} {l5} {l15}  •  Uptime {hours} h  •  Processes {count}",
+        "selected_endable": "Selected PID {pid} • {name} • {memory} • End Process sends SIGTERM only after explicit confirmation.",
+        "selected_protected": "Selected PID {pid} • {name}. This process is protected or not owned by your user.",
+        "confirm_title": "End {name}?",
+        "confirm_body": "SWIR will send SIGTERM to PID {pid}. Unsaved work in that process may be lost. The action is limited to your user and the process identity is revalidated immediately before signaling.",
+        "cancel": "Cancel",
+        "termination_cancelled": "Process termination cancelled. No signal was sent.",
+        "termination_failed": "Process was not ended: {reason}",
+        "termination_sent": "SIGTERM sent to PID {pid} ({name}). Refreshing process list.",
+        "diagnostics_refreshing": "Refreshing bounded read-only diagnostics…",
+        "diag_summary": "Read-only diagnostics  •  failed units: {failed_status} ({failed_count})  •  boot journal: {journal_status} ({journal_count} visible lines)",
+        "no_failed_rows": "[{status}] No readable failed-unit rows.",
+        "no_journal_rows": "[{status}] No readable warning/error rows.",
+        "diag_heading": "SWIR OS Diagnostics — read only",
+        "os": "OS",
+        "kernel": "Kernel",
+        "uptime": "Uptime",
+        "failed_units": "Failed systemd units",
+        "recent_warnings": "Recent boot warnings/errors — last {limit} lines max",
+        "safety": "Safety: fixed absolute command paths, no shell, no elevation, bounded timeout/output. The separate Processes tab may send same-user SIGTERM after explicit confirmation.",
+    },
+    "pl-PL": {
+        "window_title": "Monitor systemu SWIR",
+        "brand": "◆  MONITOR SYSTEMU SWIR",
+        "processes_tab": "Procesy",
+        "diagnostics_tab": "Diagnostyka",
+        "filter_placeholder": "Filtruj według nazwy procesu lub PID",
+        "filter_tooltip": "Filtruj ograniczoną listę procesów według nazwy lub PID",
+        "end_process": "Zakończ proces",
+        "end_tooltip": "Wyślij SIGTERM do wybranego procesu należącego do Twojego użytkownika",
+        "process_help": "Wybierz proces, aby go sprawdzić. Zakończenie wymaga potwierdzenia i nigdy nie podnosi uprawnień.",
+        "diag_not_refreshed": "Diagnostyka nie została jeszcze odświeżona.",
+        "refresh_diagnostics": "Odśwież diagnostykę",
+        "refresh_tooltip": "Odśwież ograniczoną diagnostykę systemu tylko do odczytu",
+        "metrics_error": "Nie udało się odczytać metryk systemu: {reason}",
+        "metrics": "Pamięć {used} / {total}  •  Obciążenie {l1} {l5} {l15}  •  Czas pracy {hours} h  •  Procesy {count}",
+        "selected_endable": "Wybrano PID {pid} • {name} • {memory} • Zakończenie wysyła tylko SIGTERM po jawnym potwierdzeniu.",
+        "selected_protected": "Wybrano PID {pid} • {name}. Ten proces jest chroniony lub nie należy do Twojego użytkownika.",
+        "confirm_title": "Zakończyć {name}?",
+        "confirm_body": "SWIR wyśle SIGTERM do PID {pid}. Niezapisana praca tego procesu może zostać utracona. Akcja jest ograniczona do Twojego użytkownika, a tożsamość procesu jest ponownie sprawdzana tuż przed sygnałem.",
+        "cancel": "Anuluj",
+        "termination_cancelled": "Anulowano zakończenie procesu. Nie wysłano sygnału.",
+        "termination_failed": "Proces nie został zakończony: {reason}",
+        "termination_sent": "Wysłano SIGTERM do PID {pid} ({name}). Odświeżanie listy procesów.",
+        "diagnostics_refreshing": "Odświeżanie ograniczonej diagnostyki tylko do odczytu…",
+        "diag_summary": "Diagnostyka tylko do odczytu  •  uszkodzone jednostki: {failed_status} ({failed_count})  •  dziennik startu: {journal_status} ({journal_count} widocznych wierszy)",
+        "no_failed_rows": "[{status}] Brak czytelnych wierszy uszkodzonych jednostek.",
+        "no_journal_rows": "[{status}] Brak czytelnych ostrzeżeń/błędów.",
+        "diag_heading": "Diagnostyka SWIR OS — tylko odczyt",
+        "os": "System",
+        "kernel": "Jądro",
+        "uptime": "Czas pracy",
+        "failed_units": "Uszkodzone jednostki systemd",
+        "recent_warnings": "Ostatnie ostrzeżenia/błędy uruchamiania — maks. {limit} wierszy",
+        "safety": "Bezpieczeństwo: stałe bezwzględne ścieżki poleceń, bez powłoki i podnoszenia uprawnień, ograniczony czas i wynik. Osobna karta Procesy może wysłać SIGTERM tylko do procesu tego samego użytkownika po jawnym potwierdzeniu.",
+    },
+    "nb-NO": {
+        "window_title": "SWIR-systemmonitor",
+        "brand": "◆  SWIR-SYSTEMMONITOR",
+        "processes_tab": "Prosesser",
+        "diagnostics_tab": "Diagnostikk",
+        "filter_placeholder": "Filtrer etter prosessnavn eller PID",
+        "filter_tooltip": "Filtrer den avgrensede prosesslisten etter navn eller PID",
+        "end_process": "Avslutt prosess",
+        "end_tooltip": "Send SIGTERM til valgt prosess som eies av brukeren din",
+        "process_help": "Velg en prosess for å undersøke den. Avslutning krever bekreftelse og hever aldri rettigheter.",
+        "diag_not_refreshed": "Diagnostikk er ikke oppdatert ennå.",
+        "refresh_diagnostics": "Oppdater diagnostikk",
+        "refresh_tooltip": "Oppdater avgrenset skrivebeskyttet systemdiagnostikk",
+        "metrics_error": "Kunne ikke lese systemmålinger: {reason}",
+        "metrics": "Minne {used} / {total}  •  Last {l1} {l5} {l15}  •  Oppetid {hours} t  •  Prosesser {count}",
+        "selected_endable": "Valgt PID {pid} • {name} • {memory} • Avslutt prosess sender bare SIGTERM etter eksplisitt bekreftelse.",
+        "selected_protected": "Valgt PID {pid} • {name}. Prosessen er beskyttet eller eies ikke av brukeren din.",
+        "confirm_title": "Avslutte {name}?",
+        "confirm_body": "SWIR sender SIGTERM til PID {pid}. Ulagret arbeid i prosessen kan gå tapt. Handlingen er begrenset til brukeren din, og prosessidentiteten kontrolleres på nytt rett før signalet sendes.",
+        "cancel": "Avbryt",
+        "termination_cancelled": "Prosessavslutning avbrutt. Ingen signaler ble sendt.",
+        "termination_failed": "Prosessen ble ikke avsluttet: {reason}",
+        "termination_sent": "SIGTERM sendt til PID {pid} ({name}). Oppdaterer prosesslisten.",
+        "diagnostics_refreshing": "Oppdaterer avgrenset skrivebeskyttet diagnostikk…",
+        "diag_summary": "Skrivebeskyttet diagnostikk  •  feilede enheter: {failed_status} ({failed_count})  •  oppstartslogg: {journal_status} ({journal_count} synlige linjer)",
+        "no_failed_rows": "[{status}] Ingen lesbare feilede enheter.",
+        "no_journal_rows": "[{status}] Ingen lesbare advarsler/feil.",
+        "diag_heading": "SWIR OS-diagnostikk — skrivebeskyttet",
+        "os": "OS",
+        "kernel": "Kjerne",
+        "uptime": "Oppetid",
+        "failed_units": "Feilede systemd-enheter",
+        "recent_warnings": "Nylige oppstartsadvarsler/-feil — maks. {limit} linjer",
+        "safety": "Sikkerhet: faste absolutte kommandostier, uten skall eller rettighetsheving, med avgrenset tid og utdata. Prosesser-fanen kan sende SIGTERM til samme bruker etter eksplisitt bekreftelse.",
+    },
+}
+
+
+@dataclass(frozen=True)
+class MonitorLocale:
+    requested_language: str
+    catalog_language: str
+    strings: Mapping[str, str]
+
+    @property
+    def fallback(self) -> bool:
+        return self.requested_language != self.catalog_language
+
+    @property
+    def text_direction(self) -> str:
+        return "rtl" if self.catalog_language.split("-", 1)[0] in {"ar", "he"} else "ltr"
+
+    def text(self, key: str, **values: object) -> str:
+        template = self.strings[key]
+        return template.format(**values) if values else template
+
+
+def monitor_locale(language: object) -> MonitorLocale:
+    requested = normalize_language_tag(language) or "en"
+    catalog = requested if requested in _TRANSLATIONS else "en"
+    return MonitorLocale(requested, catalog, _TRANSLATIONS[catalog])
+
+
+def _load_locale() -> MonitorLocale:
+    try:
+        settings = UserSettingsStore().load()
+        language = settings.get("language", "en")
+    except (OSError, RuntimeError, ValueError, json.JSONDecodeError):
+        language = "en"
+    return monitor_locale(language)
+
 
 @dataclass(frozen=True)
 class ProcessRow:
@@ -136,7 +292,6 @@ def _parse_start_ticks(stat_text: str) -> int:
     if close <= 0:
         raise ProcessTerminationError("process stat record is malformed")
     tail = stat_text[close + 1 :].strip().split()
-    # /proc/PID/stat field 22 (starttime); tail starts at field 3.
     if len(tail) <= 19 or not tail[19].isdigit():
         raise ProcessTerminationError("process start identity is unavailable")
     return int(tail[19])
@@ -181,15 +336,7 @@ def read_processes(limit: int = MAX_PROCESS_ROWS, proc_root: pathlib.Path = PROC
                         break
         except (ProcessTerminationError, FileNotFoundError, PermissionError, ProcessLookupError, OSError, UnicodeError):
             continue
-        rows.append(
-            ProcessRow(
-                pid=identity.pid,
-                name=identity.name,
-                rss_kib=rss_kib,
-                uid=identity.uid,
-                start_ticks=identity.start_ticks,
-            )
-        )
+        rows.append(ProcessRow(identity.pid, identity.name, rss_kib, identity.uid, identity.start_ticks))
     rows.sort(key=lambda row: (-row.rss_kib, row.pid))
     return rows[: max(0, min(int(limit), MAX_PROCESS_ROWS))]
 
@@ -215,7 +362,7 @@ def _ancestor_pids(proc_root: pathlib.Path = PROC_ROOT, start_pid: int | None = 
 
 
 def _send_sigterm_pidfd(pid: int) -> None:
-    """Send SIGTERM to one PID, preferring a pidfd to avoid PID-reuse races."""
+    """Send SIGTERM to one PID, preferring pidfd to avoid PID-reuse races."""
     if hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal"):
         fd = os.pidfd_open(pid, 0)
         try:
@@ -234,7 +381,6 @@ def terminate_same_user_process(
     protected_pids: set[int] | None = None,
     sender: Callable[[int], None] | None = None,
 ) -> None:
-    """Revalidate process identity and send only SIGTERM to a same-user process."""
     uid = os.getuid() if current_uid is None else int(current_uid)
     protected = _ancestor_pids(proc_root) if protected_pids is None else set(protected_pids)
     if target.pid <= 1 or target.pid in protected:
@@ -319,9 +465,7 @@ def run_read_only_command(argv: tuple[str, ...]) -> CommandResult:
             stdout = stdout.decode("utf-8", errors="replace")
         if isinstance(stderr, bytes):
             stderr = stderr.decode("utf-8", errors="replace")
-        return CommandResult(
-            "timeout", None, stdout[:MAX_COMMAND_OUTPUT_CHARS], stderr[:MAX_COMMAND_OUTPUT_CHARS]
-        )
+        return CommandResult("timeout", None, stdout[:MAX_COMMAND_OUTPUT_CHARS], stderr[:MAX_COMMAND_OUTPUT_CHARS])
     except OSError:
         return CommandResult("unavailable", None, "", "")
     return CommandResult(
@@ -343,7 +487,6 @@ def _write_fake_process(root: pathlib.Path, pid: int, uid: int, start_ticks: int
         f"Name:\t{name}\nUid:\t{uid}\t{uid}\t{uid}\t{uid}\nPPid:\t{ppid}\nVmRSS:\t1024 kB\n",
         encoding="utf-8",
     )
-    # Fields 3..21 contain 19 values before field 22=starttime.
     tail = ["S"] + [str(ppid)] + ["0"] * 17 + [str(start_ticks)] + ["0"] * 4
     (entry / "stat").write_text(f"{pid} ({name}) " + " ".join(tail) + "\n", encoding="utf-8")
     (entry / "comm").write_text(name + "\n", encoding="utf-8")
@@ -352,28 +495,26 @@ def _write_fake_process(root: pathlib.Path, pid: int, uid: int, start_ticks: int
 
 
 def _self_test() -> int:
+    assert monitor_locale("pl-PL").text("processes_tab") == "Procesy"
+    assert monitor_locale("nb-NO").text("diagnostics_tab") == "Diagnostikk"
+    fallback = monitor_locale("de-DE")
+    assert fallback.catalog_language == "en" and fallback.fallback is True
+    assert fallback.text_direction == "ltr"
+
     with tempfile.TemporaryDirectory(prefix="swir-task-manager-selftest-") as tmp:
         root = pathlib.Path(tmp)
         sent: list[int] = []
 
         safe = _write_fake_process(root, 4242, 1000, 777, "safe-test")
         terminate_same_user_process(
-            safe,
-            proc_root=root,
-            current_uid=1000,
-            protected_pids={1, 99},
-            sender=sent.append,
+            safe, proc_root=root, current_uid=1000, protected_pids={1, 99}, sender=sent.append
         )
         assert sent == [4242]
 
         foreign = _write_fake_process(root, 4343, 1001, 888, "foreign-test")
         try:
             terminate_same_user_process(
-                foreign,
-                proc_root=root,
-                current_uid=1000,
-                protected_pids={1},
-                sender=sent.append,
+                foreign, proc_root=root, current_uid=1000, protected_pids={1}, sender=sent.append
             )
         except ProcessTerminationError:
             pass
@@ -383,11 +524,7 @@ def _self_test() -> int:
         protected = _write_fake_process(root, 4444, 1000, 999, "protected-test")
         try:
             terminate_same_user_process(
-                protected,
-                proc_root=root,
-                current_uid=1000,
-                protected_pids={1, 4444},
-                sender=sent.append,
+                protected, proc_root=root, current_uid=1000, protected_pids={1, 4444}, sender=sent.append
             )
         except ProcessTerminationError:
             pass
@@ -401,11 +538,7 @@ def _self_test() -> int:
         )
         try:
             terminate_same_user_process(
-                reused,
-                proc_root=root,
-                current_uid=1000,
-                protected_pids={1},
-                sender=sent.append,
+                reused, proc_root=root, current_uid=1000, protected_pids={1}, sender=sent.append
             )
         except ProcessTerminationError:
             pass
@@ -416,13 +549,14 @@ def _self_test() -> int:
         assert rows and len(rows) <= MAX_PROCESS_ROWS
         assert MAX_FILTER_CHARS == 80
 
-    print("SWIR System Monitor task-manager self-test: OK")
+    print("SWIR System Monitor task-manager/i18n self-test: OK")
     return 0
 
 
 class SwirSystemMonitor(Gtk.Application):
     def __init__(self) -> None:
         super().__init__(application_id=APP_ID)
+        self.locale = _load_locale()
         self.window: Gtk.ApplicationWindow | None = None
         self.metrics: Gtk.Label | None = None
         self.listbox: Gtk.ListBox | None = None
@@ -443,6 +577,11 @@ class SwirSystemMonitor(Gtk.Application):
         self.diagnostics_running = False
         self.diagnostics_ready = False
         self.evidence_written = False
+        self._accessibility_focus_verified = False
+        self._accessibility_tooltips_verified = False
+
+    def t(self, key: str, **values: object) -> str:
+        return self.locale.text(key, **values)
 
     def do_startup(self) -> None:
         Gtk.Application.do_startup(self)
@@ -450,7 +589,7 @@ class SwirSystemMonitor(Gtk.Application):
         provider.load_from_data(CSS)
         display = Gdk.Display.get_default()
         if display is None:
-            raise RuntimeError("SWIR System Monitor requires a graphical display")
+            raise RuntimeError("SWIR System Monitor requires an active graphical display")
         Gtk.StyleContext.add_provider_for_display(display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
     def do_activate(self) -> None:
@@ -459,9 +598,10 @@ class SwirSystemMonitor(Gtk.Application):
             return
 
         window = Gtk.ApplicationWindow(application=self)
-        window.set_title("SWIR System Monitor")
+        window.set_title(self.t("window_title"))
         window.set_default_size(1040, 720)
         window.add_css_class("swir-app")
+        window.set_direction(Gtk.TextDirection.RTL if self.locale.text_direction == "rtl" else Gtk.TextDirection.LTR)
         self.window = window
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -469,7 +609,7 @@ class SwirSystemMonitor(Gtk.Application):
 
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         header.add_css_class("swir-header")
-        brand = Gtk.Label(label="◆  SWIR System Monitor")
+        brand = Gtk.Label(label=self.t("brand"))
         brand.add_css_class("swir-brand")
         brand.set_xalign(0)
         header.append(brand)
@@ -493,24 +633,23 @@ class SwirSystemMonitor(Gtk.Application):
 
         process_toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self.process_filter = Gtk.Entry()
-        self.process_filter.set_placeholder_text("Filter by process name or PID")
+        self.process_filter.set_placeholder_text(self.t("filter_placeholder"))
+        self.process_filter.set_tooltip_text(self.t("filter_tooltip"))
         self.process_filter.set_max_length(MAX_FILTER_CHARS)
         self.process_filter.set_hexpand(True)
         self.process_filter.add_css_class("swir-control")
         self.process_filter.connect("changed", self._on_process_filter_changed)
         process_toolbar.append(self.process_filter)
 
-        self.end_process_button = Gtk.Button(label="End Process")
+        self.end_process_button = Gtk.Button(label=self.t("end_process"))
         self.end_process_button.add_css_class("swir-danger")
         self.end_process_button.set_sensitive(False)
-        self.end_process_button.set_tooltip_text("Send SIGTERM to the selected process owned by your user")
+        self.end_process_button.set_tooltip_text(self.t("end_tooltip"))
         self.end_process_button.connect("clicked", self._on_end_process_clicked)
         process_toolbar.append(self.end_process_button)
         overview.append(process_toolbar)
 
-        self.process_status = Gtk.Label(
-            label="Select a process to inspect it. Ending a process requires confirmation and never elevates privileges."
-        )
+        self.process_status = Gtk.Label(label=self.t("process_help"))
         self.process_status.add_css_class("swir-muted")
         self.process_status.set_xalign(0)
         self.process_status.set_wrap(True)
@@ -524,7 +663,7 @@ class SwirSystemMonitor(Gtk.Application):
         self.listbox.connect("row-selected", self._on_process_selected)
         scroller.set_child(self.listbox)
         overview.append(scroller)
-        notebook.append_page(overview, Gtk.Label(label="Processes"))
+        notebook.append_page(overview, Gtk.Label(label=self.t("processes_tab")))
 
         diagnostics = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         diagnostics.set_margin_top(8)
@@ -533,13 +672,14 @@ class SwirSystemMonitor(Gtk.Application):
         diagnostics.set_margin_end(8)
 
         diag_toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self.diag_summary = Gtk.Label(label="Diagnostics have not been refreshed yet.")
+        self.diag_summary = Gtk.Label(label=self.t("diag_not_refreshed"))
         self.diag_summary.add_css_class("swir-metric")
         self.diag_summary.set_xalign(0)
         self.diag_summary.set_hexpand(True)
         self.diag_summary.set_selectable(True)
         diag_toolbar.append(self.diag_summary)
-        self.diag_refresh = Gtk.Button(label="Refresh diagnostics")
+        self.diag_refresh = Gtk.Button(label=self.t("refresh_diagnostics"))
+        self.diag_refresh.set_tooltip_text(self.t("refresh_tooltip"))
         self.diag_refresh.connect("clicked", self._on_refresh_diagnostics)
         diag_toolbar.append(self.diag_refresh)
         diagnostics.append(diag_toolbar)
@@ -555,7 +695,16 @@ class SwirSystemMonitor(Gtk.Application):
         self.diag_text.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
         diag_scroller.set_child(self.diag_text)
         diagnostics.append(diag_scroller)
-        notebook.append_page(diagnostics, Gtk.Label(label="Diagnostics"))
+        notebook.append_page(diagnostics, Gtk.Label(label=self.t("diagnostics_tab")))
+
+        self._accessibility_focus_verified = all(
+            widget.get_focusable()
+            for widget in (self.process_filter, self.end_process_button, self.diag_refresh)
+        )
+        self._accessibility_tooltips_verified = all(
+            bool(widget.get_tooltip_text())
+            for widget in (self.process_filter, self.end_process_button, self.diag_refresh)
+        )
 
         self._refresh()
         self._refresh_diagnostics()
@@ -592,7 +741,7 @@ class SwirSystemMonitor(Gtk.Application):
             load = os.getloadavg()
             processes = read_processes()
         except (OSError, ValueError) as exc:
-            self.metrics.set_text(f"Could not read system metrics: {exc}")
+            self.metrics.set_text(self.t("metrics_error", reason=exc))
             return True
 
         total = mem.get("MemTotal", 0)
@@ -602,9 +751,16 @@ class SwirSystemMonitor(Gtk.Application):
         self.last_mem_total_kib = total
         visible = self._filtered_processes(processes)
         self.metrics.set_text(
-            f"Memory {format_mib(used)} / {format_mib(total)}  •  "
-            f"Load {load[0]:.2f} {load[1]:.2f} {load[2]:.2f}  •  "
-            f"Uptime {uptime / 3600.0:.1f} h  •  Processes {len(processes)}"
+            self.t(
+                "metrics",
+                used=format_mib(used),
+                total=format_mib(total),
+                l1=f"{load[0]:.2f}",
+                l5=f"{load[1]:.2f}",
+                l15=f"{load[2]:.2f}",
+                hours=f"{uptime / 3600.0:.1f}",
+                count=len(processes),
+            )
         )
 
         self._clear_rows()
@@ -658,12 +814,16 @@ class SwirSystemMonitor(Gtk.Application):
         if self.process_status is not None:
             if can_end:
                 self.process_status.set_text(
-                    f"Selected PID {process.pid} • {process.name} • {format_mib(process.rss_kib)} • "
-                    "End Process sends SIGTERM only after explicit confirmation."
+                    self.t(
+                        "selected_endable",
+                        pid=process.pid,
+                        name=process.name,
+                        memory=format_mib(process.rss_kib),
+                    )
                 )
             else:
                 self.process_status.set_text(
-                    f"Selected PID {process.pid} • {process.name}. This process is protected or not owned by your user."
+                    self.t("selected_protected", pid=process.pid, name=process.name)
                 )
 
     def _on_end_process_clicked(self, _button: Gtk.Button) -> None:
@@ -675,35 +835,28 @@ class SwirSystemMonitor(Gtk.Application):
             modal=True,
             message_type=Gtk.MessageType.WARNING,
             buttons=Gtk.ButtonsType.NONE,
-            text=f"End {process.name}?",
+            text=self.t("confirm_title", name=process.name),
         )
-        dialog.format_secondary_text(
-            f"SWIR will send SIGTERM to PID {process.pid}. Unsaved work in that process may be lost. "
-            "The action is limited to your user and the process identity is revalidated immediately before signaling."
-        )
-        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
-        dialog.add_button("End Process", Gtk.ResponseType.ACCEPT)
+        dialog.format_secondary_text(self.t("confirm_body", pid=process.pid))
+        dialog.add_button(self.t("cancel"), Gtk.ResponseType.CANCEL)
+        dialog.add_button(self.t("end_process"), Gtk.ResponseType.ACCEPT)
         dialog.connect("response", self._on_end_process_response, process)
         dialog.present()
 
-    def _on_end_process_response(
-        self, dialog: Gtk.MessageDialog, response: int, process: ProcessRow
-    ) -> None:
+    def _on_end_process_response(self, dialog: Gtk.MessageDialog, response: int, process: ProcessRow) -> None:
         dialog.destroy()
         if response != Gtk.ResponseType.ACCEPT:
             if self.process_status is not None:
-                self.process_status.set_text("Process termination cancelled. No signal was sent.")
+                self.process_status.set_text(self.t("termination_cancelled"))
             return
         try:
             terminate_same_user_process(process)
         except ProcessTerminationError as exc:
             if self.process_status is not None:
-                self.process_status.set_text(f"Process was not ended: {exc}")
+                self.process_status.set_text(self.t("termination_failed", reason=exc))
         else:
             if self.process_status is not None:
-                self.process_status.set_text(
-                    f"SIGTERM sent to PID {process.pid} ({process.name}). Refreshing process list."
-                )
+                self.process_status.set_text(self.t("termination_sent", pid=process.pid, name=process.name))
         self._refresh()
 
     def _on_refresh_diagnostics(self, _button: Gtk.Button) -> None:
@@ -716,7 +869,7 @@ class SwirSystemMonitor(Gtk.Application):
         self.diagnostics_running = True
         self.diagnostics_ready = False
         self.diag_refresh.set_sensitive(False)
-        self.diag_summary.set_text("Refreshing bounded read-only diagnostics…")
+        self.diag_summary.set_text(self.t("diagnostics_refreshing"))
         threading.Thread(target=self._collect_diagnostics, name="swir-diagnostics", daemon=True).start()
 
     def _collect_diagnostics(self) -> None:
@@ -735,16 +888,8 @@ class SwirSystemMonitor(Gtk.Application):
 
     def _apply_diagnostics(self, snapshot: DiagnosticsSnapshot) -> bool:
         assert self.diag_summary is not None and self.diag_text is not None and self.diag_refresh is not None
-        failed_lines = (
-            _nonempty_lines(snapshot.failed.stdout, MAX_PROCESS_ROWS)
-            if snapshot.failed.status == "ok"
-            else []
-        )
-        journal_lines = (
-            _nonempty_lines(snapshot.journal.stdout, JOURNAL_LINE_LIMIT)
-            if snapshot.journal.status == "ok"
-            else []
-        )
+        failed_lines = _nonempty_lines(snapshot.failed.stdout, MAX_PROCESS_ROWS) if snapshot.failed.status == "ok" else []
+        journal_lines = _nonempty_lines(snapshot.journal.stdout, JOURNAL_LINE_LIMIT) if snapshot.journal.status == "ok" else []
         self.failed_units_status = snapshot.failed.status
         self.journal_status = snapshot.journal.status
         self.failed_units_count = len(failed_lines)
@@ -754,29 +899,25 @@ class SwirSystemMonitor(Gtk.Application):
         self.diag_refresh.set_sensitive(True)
 
         self.diag_summary.set_text(
-            f"Read-only diagnostics  •  failed units: {snapshot.failed.status} ({len(failed_lines)})  •  "
-            f"boot journal: {snapshot.journal.status} ({len(journal_lines)} visible lines)"
+            self.t(
+                "diag_summary",
+                failed_status=snapshot.failed.status,
+                failed_count=len(failed_lines),
+                journal_status=snapshot.journal.status,
+                journal_count=len(journal_lines),
+            )
         )
-        failed_body = (
-            "\n".join(failed_lines)
-            if failed_lines
-            else f"[{snapshot.failed.status}] No readable failed-unit rows."
-        )
-        journal_body = (
-            "\n".join(journal_lines)
-            if journal_lines
-            else f"[{snapshot.journal.status}] No readable warning/error rows."
-        )
+        failed_body = "\n".join(failed_lines) if failed_lines else self.t("no_failed_rows", status=snapshot.failed.status)
+        journal_body = "\n".join(journal_lines) if journal_lines else self.t("no_journal_rows", status=snapshot.journal.status)
         body = (
-            "SWIR OS Diagnostics — read only\n"
-            f"OS: {snapshot.os_name}\n"
-            f"Kernel: {snapshot.kernel_version}\n"
-            f"Uptime: {snapshot.uptime_seconds / 3600.0:.1f} h\n\n"
-            f"Failed systemd units ({snapshot.failed.status}):\n{failed_body}\n\n"
-            f"Recent boot warnings/errors — last {JOURNAL_LINE_LIMIT} lines max ({snapshot.journal.status}):\n"
+            f"{self.t('diag_heading')}\n"
+            f"{self.t('os')}: {snapshot.os_name}\n"
+            f"{self.t('kernel')}: {snapshot.kernel_version}\n"
+            f"{self.t('uptime')}: {snapshot.uptime_seconds / 3600.0:.1f} h\n\n"
+            f"{self.t('failed_units')} ({snapshot.failed.status}):\n{failed_body}\n\n"
+            f"{self.t('recent_warnings', limit=JOURNAL_LINE_LIMIT)} ({snapshot.journal.status}):\n"
             f"{journal_body}\n\n"
-            "Safety: fixed absolute command paths, no shell, no elevation, bounded timeout/output. "
-            "The separate Processes tab may send same-user SIGTERM after explicit confirmation."
+            f"{self.t('safety')}"
         )
         self.diag_text.get_buffer().set_text(body[:MAX_COMMAND_OUTPUT_CHARS])
         return False
@@ -795,14 +936,35 @@ class SwirSystemMonitor(Gtk.Application):
         runtime_text = os.environ.get("XDG_RUNTIME_DIR", "")
         if not runtime_text or path.parent.resolve() != pathlib.Path(runtime_text).resolve():
             raise RuntimeError("refusing SWIR System Monitor evidence path outside XDG_RUNTIME_DIR")
+        localized_surface = (
+            self.window is not None
+            and self.window.get_title() == self.t("window_title")
+            and self.process_filter is not None
+            and self.process_filter.get_placeholder_text() == self.t("filter_placeholder")
+            and self.diag_refresh is not None
+            and self.diag_refresh.get_label() == self.t("refresh_diagnostics")
+        )
         payload = {
             "schema": EVIDENCE_SCHEMA,
-            "passed": self.last_process_count > 0 and self.last_mem_total_kib > 0,
+            "passed": (
+                self.last_process_count > 0
+                and self.last_mem_total_kib > 0
+                and localized_surface
+                and self._accessibility_focus_verified
+                and self._accessibility_tooltips_verified
+            ),
             "applicationId": APP_ID,
             "nativeToolkit": "gtk4",
             "displayProtocol": "wayland",
             "windowMapped": True,
             "privilegedOperations": False,
+            "localeRequested": self.locale.requested_language,
+            "localeCatalog": self.locale.catalog_language,
+            "localeFallback": self.locale.fallback,
+            "textDirection": self.locale.text_direction,
+            "localizedSurfaceVerified": localized_surface,
+            "accessibilityFocusVerified": self._accessibility_focus_verified,
+            "accessibilityTooltipsVerified": self._accessibility_tooltips_verified,
             "processRowsBounded": MAX_PROCESS_ROWS,
             "visibleProcessCount": self.last_process_count,
             "memTotalKiB": self.last_mem_total_kib,
