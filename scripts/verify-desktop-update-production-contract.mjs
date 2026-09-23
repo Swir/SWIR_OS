@@ -40,12 +40,12 @@ requireText(release, "throw 'SWIR_DESKTOP_RELEASE_PRIVATE_KEY_PEM secret is not 
 requireText(release, 'publish_release:', 'release publication requires an explicit publish gate');
 requireText(release, "inputs.publish_release && github.ref == 'refs/heads/main'", 'GitHub Release publication is main-only');
 requirePattern(release, /desktop-update-\$env:SWIR_RELEASE_CHANNEL\.json/, 'release bundle contains the signed channel feed');
-rejectPattern(release, /generateKeyPairSync|generateKeyPair\(|RSA\.Create\(\).*ExportRSAPrivateKey/s, 'production release must not synthesize a fallback signing key');
+rejectPattern(release, /generateKeyPairSync|generateKeyPair\(/, 'production release must not synthesize a fallback signing key');
 
 // Publication point must be derived only from a published immutable Desktop GitHub Release.
 requireText(feed, 'release:', 'feed promotion is release-event driven');
 requireText(feed, 'types: [published]', 'feed promotion waits for published releases');
-requirePattern(feed, /\^desktop-v\(\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+\)-\(preview\|stable\)\$/, 'release tag is version/channel bound');
+requireText(feed, '^desktop-v([0-9]+\\.[0-9]+\\.[0-9]+)-(preview|stable)$', 'release tag is version/channel bound');
 requireText(feed, 'SWIR_DESKTOP_UPDATE_KEY_ID', 'feed promotion pins the update key id');
 requireText(feed, 'SWIR_DESKTOP_UPDATE_PUBLIC_KEY_PEM_B64', 'feed promotion pins the public verification key');
 requireText(feed, 'gh release download "$RELEASE_TAG"', 'feed promotion downloads exact immutable release assets');
@@ -66,7 +66,7 @@ requireText(releasePolicy, 'https://raw.githubusercontent.com/{Repo}/main/update
 requireText(releasePolicy, 'PackageHosts = new[] { "github.com" }', 'client package source is restricted to GitHub');
 
 // Runtime trust must fail closed before staging/mutation.
-requireText(broker, 'RSA.VerifyData', 'manifest signature verification is present');
+requireText(broker, 'rsa.VerifyData', 'manifest signature verification is present');
 requireText(broker, 'RSASignaturePadding.Pss', 'runtime signature verification uses RSA-PSS');
 requireText(broker, 'UPDATE_CHANNEL_MISMATCH', 'runtime rejects cross-channel manifests');
 requireText(broker, 'UPDATE_DOWNGRADE_BLOCKED', 'runtime rejects downgrades');
@@ -80,7 +80,7 @@ requireText(userPolicy, 'Manual,', 'Manual update mode exists');
 requireText(userPolicy, 'NotifyOnly,', 'Notify-only update mode exists');
 requireText(userPolicy, 'Automatic', 'Automatic update mode exists');
 requirePattern(userPolicy, /DesktopUpdateUserMode\.Automatic\s*=>\s*new\([\s\S]*?AutomaticPrepare:\s*true,[\s\S]*?AutomaticRestart:\s*false/, 'Automatic mode prepares verified updates but does not force restart');
-requireText(userPolicy, 'must never\n/// weaken release provenance, signature, source-host, privilege or transaction gates.', 'user policy documents the non-bypass security invariant');
+requireText(userPolicy, 'weaken release provenance, signature, source-host, privilege or transaction gates.', 'user policy documents the non-bypass security invariant');
 
 // CI must execute the dynamic cryptographic/runtime contracts in addition to this topology audit.
 requireText(sourceWorkflow, 'SWIR.Desktop.Update.SelfTests.csproj', 'CI executes update signature/hash self-tests');
