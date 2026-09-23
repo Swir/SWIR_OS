@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     paths:
+      - 'system/apps/core_runtime.py'
       - 'system/apps/backup_runtime.py'
       - 'system/apps/backup_runtime.selftest.py'
       - 'system/apps/swir-backup.py'
@@ -14,6 +15,7 @@ on:
       - '.github/workflows/system-native-backup-restore.yml'
   pull_request:
     paths:
+      - 'system/apps/core_runtime.py'
       - 'system/apps/backup_runtime.py'
       - 'system/apps/backup_runtime.selftest.py'
       - 'system/apps/swir-backup.py'
@@ -46,6 +48,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m py_compile \
+            system/apps/core_runtime.py \
             system/apps/backup_runtime.py \
             system/apps/backup_runtime.selftest.py \
             system/apps/swir-backup.py \
@@ -61,6 +64,8 @@ jobs:
           grep -F 'MAX_FILES: Final = 10_000' system/apps/backup_runtime.py >/dev/null
           grep -F 'MAX_TOTAL_BYTES: Final = 2 * 1024 * 1024 * 1024' system/apps/backup_runtime.py >/dev/null
           grep -F 'explicitRestoreConfirmation": True' system/apps/swir-backup.py >/dev/null
+          grep -F 'UserSettingsStore' system/apps/swir-backup.py >/dev/null
+          grep -F 'localizedTooltips' system/apps/swir-backup.py >/dev/null
           ! grep -RE 'shell *= *True|os\.system\(|subprocess\.' system/apps/backup_runtime.py system/apps/swir-backup.py
           ! grep -RE "/usr/bin/(sudo|pkexec|su)([[:space:]\"']|$)|/bin/su([[:space:]\"']|$)" system/apps/backup_runtime.py system/apps/swir-backup.py
 
@@ -75,18 +80,31 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends weston dbus-daemon desktop-file-utils python3-gi gir1.2-gtk-4.0
           sudo install -d -m 0755 /usr/local/lib/swir
+          sudo install -m 0644 system/apps/core_runtime.py /usr/local/lib/swir/core_runtime.py
           sudo install -m 0644 system/apps/backup_runtime.py /usr/local/lib/swir/backup_runtime.py
           sudo install -m 0755 system/apps/swir-backup.py /usr/local/bin/swir-backup
           sudo install -m 0644 system/apps/swir-backup.desktop /usr/share/applications/swir-backup.desktop
           sudo update-desktop-database /usr/share/applications
           PYTHONPATH=system/apps python3 system/apps/backup_runtime.selftest.py
-      - name: Map Backup on Wayland and execute disposable create-restore cycle
+      - name: Map localized Backup on Wayland and execute disposable create-restore cycle
         run: |
           set -euo pipefail
           RUNTIME="${{ runner.temp }}/swir-backup-runtime"
-          mkdir -p "$RUNTIME"
-          chmod 0700 "$RUNTIME"
+          CONFIG="${{ runner.temp }}/swir-backup-config"
+          mkdir -p "$RUNTIME" "$CONFIG/swir"
+          chmod 0700 "$RUNTIME" "$CONFIG" "$CONFIG/swir"
+          cat > "$CONFIG/swir/settings.json" <<'JSON'
+          {
+            "schema": "swir.user-settings/0.1",
+            "appearance": "dark",
+            "language": "pl-PL",
+            "clock24h": true,
+            "themeId": "builtin.swir-dark"
+          }
+          JSON
+          chmod 0600 "$CONFIG/swir/settings.json"
           export XDG_RUNTIME_DIR="$RUNTIME"
+          export XDG_CONFIG_HOME="$CONFIG"
           export WAYLAND_DISPLAY=wayland-swir-backup
           export GDK_BACKEND=wayland
 
@@ -109,7 +127,7 @@ jobs:
           python3 - "$RUNTIME/backup.json" <<'PY'
           import json, sys
           evidence = json.load(open(sys.argv[1], encoding='utf-8'))
-          assert evidence['schema'] == 'swir.native-backup-runtime-evidence/0.1'
+          assert evidence['schema'] == 'swir.native-backup-runtime-evidence/0.2'
           assert evidence['passed'] is True
           assert evidence['applicationId'] == 'dev.swir.Backup'
           assert evidence['nativeToolkit'] == 'gtk4'
@@ -124,6 +142,28 @@ jobs:
           assert evidence['maxFiles'] == 10000
           assert evidence['maxSingleFileBytes'] == 128 * 1024 * 1024
           assert evidence['maxTotalBytes'] == 2 * 1024 * 1024 * 1024
+          assert evidence['requestedLanguage'] == 'pl-PL' and evidence['catalogLanguage'] == 'pl-PL'
+          assert evidence['translationFallback'] is False and evidence['textDirection'] == 'ltr'
+          assert evidence['localizedWindowTitle'] == 'Kopia i przywracanie SWIR'
+          assert evidence['localizedCreateLabel'] == 'Wybierz folder kopii…'
+          assert evidence['localizedRestoreLabel'] == 'Przywróć zweryfikowaną kopię'
+          assert evidence['localizedSurfaceVerified'] is True
+          assert evidence['backupButtonFocusable'] is True
+          assert evidence['restoreChooserFocusable'] is True and evidence['restoreButtonFocusable'] is True
+          assert evidence['localizedTooltips'] is True
+          PY
+
+          PYTHONPATH=system/apps python3 - <<'PY'
+          import runpy
+          namespace = runpy.run_path('system/apps/swir-backup.py')
+          resolve = namespace['backup_locale']
+          fallback = resolve('fr-FR')
+          assert fallback.requested_language == 'fr-FR'
+          assert fallback.catalog_language == 'en' and fallback.fallback is True
+          assert fallback.text('window_title') == 'SWIR Backup & Restore'
+          norwegian = resolve('nb-NO')
+          assert norwegian.catalog_language == 'nb-NO' and norwegian.fallback is False
+          assert norwegian.text('choose_backup') == 'Velg mappe for sikkerhetskopi…'
           PY
 
   debian13-target-runtime:
