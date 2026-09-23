@@ -11,6 +11,7 @@ on:
       - 'swir-app-bridge.js'
       - 'swir-app-bridge-host.js'
       - 'scripts/check-web-sdk-template.mjs'
+      - 'scripts/test-web-sdk-template-runtime.mjs'
       - '.github/workflows/web-sdk-template-contract.yml'
   pull_request:
     paths:
@@ -21,6 +22,7 @@ on:
       - 'swir-app-bridge.js'
       - 'swir-app-bridge-host.js'
       - 'scripts/check-web-sdk-template.mjs'
+      - 'scripts/test-web-sdk-template-runtime.mjs'
       - '.github/workflows/web-sdk-template-contract.yml'
 
 permissions:
@@ -48,3 +50,6 @@ jobs:
 
       - name: Validate developer template against shipping SDK and bridge
         run: node scripts/check-web-sdk-template.mjs
+
+      - name: Execute isolated App Bridge runtime fixture
+        run: node scripts/test-web-sdk-template-runtime.mjs
