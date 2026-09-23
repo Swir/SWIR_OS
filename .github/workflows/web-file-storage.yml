@@ -1,0 +1,45 @@
+name: Web File Storage
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'swir-file-storage.js'
+      - 'swir-files.html'
+      - 'swir-v12.js'
+      - 'scripts/test-web-file-storage.mjs'
+      - '.github/workflows/web-file-storage.yml'
+      - 'SWIR-OS-ARCHITECTURE.md'
+      - 'assets/readme/progress-card.svg'
+      - 'assets/readme/progress-mini.svg'
+      - 'assets/readme/progress-template.svg'
+      - 'scripts/generate-readme-progress.mjs'
+  pull_request:
+    paths:
+      - 'swir-file-storage.js'
+      - 'swir-files.html'
+      - 'swir-v12.js'
+      - 'scripts/test-web-file-storage.mjs'
+      - '.github/workflows/web-file-storage.yml'
+      - 'SWIR-OS-ARCHITECTURE.md'
+      - 'assets/readme/progress-card.svg'
+      - 'assets/readme/progress-mini.svg'
+      - 'assets/readme/progress-template.svg'
+      - 'scripts/generate-readme-progress.mjs'
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify IndexedDB file storage contract
+        run: node scripts/test-web-file-storage.mjs
+      - name: Verify deterministic progress SVG assets
+        run: node scripts/generate-readme-progress.mjs --check
