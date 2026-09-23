@@ -36,9 +36,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          git restore --source=HEAD -- .github/workflows/system-native-photo-studio.yml
           git config user.name 'SWIR CI Repair'
           git config user.email 'actions@users.noreply.github.com'
-          git add system/apps/swir-photo-studio.py system/SWIR-NATIVE-PHOTO-STUDIO-0.1.md .github/workflows/system-native-photo-studio.yml
+          git add system/apps/swir-photo-studio.py system/SWIR-NATIVE-PHOTO-STUDIO-0.1.md
           git diff --cached --check
           git commit -m 'System: localize Photo Studio runtime surface'
           git push origin HEAD:system/native-suite-final-locale
