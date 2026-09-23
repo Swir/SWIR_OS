@@ -55,8 +55,6 @@ jobs:
             system/session/swir-shell.py
           PYTHONPATH=system/apps python3 system/apps/package_status_runtime.selftest.py
           PYTHONPATH=system/apps python3 system/apps/package_mutation_flow.selftest.py
-          PYTHONPATH=system/apps python3 system/apps/swir-software-center.py --self-test
-          PYTHONPATH=system/apps python3 system/apps/swir-update-center.py --self-test
 
           ! grep -RE 'shell *= *True|os\.system\(' \
             system/apps/package_status_runtime.py \
@@ -124,6 +122,9 @@ jobs:
           export WAYLAND_DISPLAY=wayland-swir-package-ui
           export GDK_BACKEND=wayland
           export PYTHONPATH="$GITHUB_WORKSPACE/system/apps"
+
+          python3 system/apps/swir-software-center.py --self-test
+          python3 system/apps/swir-update-center.py --self-test
 
           weston --backend=headless-backend.so --socket="$WAYLAND_DISPLAY" --idle-time=0 --log="$RUNTIME/weston.log" &
           WESTON_PID=$!
