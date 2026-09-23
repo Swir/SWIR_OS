@@ -74,9 +74,13 @@
 
   async function idbRead(){
     const db=await openDb();const tx=db.transaction([STATE_STORE,PAYLOAD_STORE],'readonly');
-    const state=await requestResult(tx.objectStore(STATE_STORE).get(RECORD_KEY),'IndexedDB state read failed');
+    const states=tx.objectStore(STATE_STORE),payloadStore=tx.objectStore(PAYLOAD_STORE);
+    const stateRequest=states.get(RECORD_KEY),payloadRequest=payloadStore.getAll();
+    const [state,payloads]=await Promise.all([
+      requestResult(stateRequest,'IndexedDB state read failed'),
+      requestResult(payloadRequest,'IndexedDB payload read failed')
+    ]);
     if(!state)return null;
-    const payloads=await requestResult(tx.objectStore(PAYLOAD_STORE).getAll(),'IndexedDB payload read failed');
     const parsed=parseState(state);const hasInline=parsed.items.some(i=>Object.prototype.hasOwnProperty.call(i,'content')||Object.prototype.hasOwnProperty.call(i,'dataUrl'));
     const hydrated={...parsed,items:hasInline?parsed.items:hydrateItems(parsed.items,payloads||[])};
     if(hasInline)await idbPut(hydrated);
