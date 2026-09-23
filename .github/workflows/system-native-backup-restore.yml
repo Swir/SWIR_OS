@@ -119,10 +119,18 @@ jobs:
           done
           [[ -S "$RUNTIME/$WAYLAND_DISPLAY" ]]
 
+          set +e
           timeout --signal=TERM --kill-after=5s 30s dbus-run-session -- \
             env LIBGL_ALWAYS_SOFTWARE=1 GTK_A11Y=none SWIR_APP_E2E=1 \
                 SWIR_APP_EVIDENCE_PATH="$RUNTIME/backup.json" \
-            /usr/local/bin/swir-backup
+            /usr/local/bin/swir-backup \
+            >"$RUNTIME/backup-app.log" 2>&1
+          APP_RC=$?
+          set -e
+          if [[ "$APP_RC" -ne 0 ]]; then
+            cat "$RUNTIME/backup-app.log" >&2 || true
+            exit "$APP_RC"
+          fi
 
           python3 - "$RUNTIME/backup.json" <<'PY'
           import json, sys
@@ -165,6 +173,17 @@ jobs:
           assert norwegian.catalog_language == 'nb-NO' and norwegian.fallback is False
           assert norwegian.text('choose_backup') == 'Velg mappe for sikkerhetskopi…'
           PY
+      - name: Upload Backup Restore failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-restore-failure-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/swir-backup-runtime/backup-app.log
+            ${{ runner.temp }}/swir-backup-runtime/backup.json
+            ${{ runner.temp }}/swir-backup-runtime/weston.log
+          if-no-files-found: warn
+          retention-days: 3
 
   debian13-target-runtime:
     runs-on: ubuntu-24.04
