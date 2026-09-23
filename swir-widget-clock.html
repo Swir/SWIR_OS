@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SWIR Clock Widget</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(circle at 80% 10%,#0088ff26,transparent 38%),#02050a;color:#f4faff;font-family:Inter,system-ui,"Segoe UI",sans-serif}.card{width:min(520px,calc(100vw - 28px));border:1px solid #62e5ff38;border-radius:22px;padding:26px;background:linear-gradient(145deg,#07111cf2,#02050af2);box-shadow:0 20px 70px #0008,0 0 34px #0088ff18}.k{color:#62e5ff;font:800 11px/1.2 ui-monospace,Consolas,monospace;letter-spacing:.14em}.time{margin-top:13px;font-size:clamp(48px,14vw,86px);font-weight:900;letter-spacing:-.06em}.date{margin-top:7px;color:#8da8b8;font-size:15px;line-height:1.5}.foot{margin-top:22px;padding-top:14px;border-top:1px solid #62e5ff1f;color:#6f8c9d;font:10px/1.5 ui-monospace,Consolas,monospace}</style>
+</head>
+<body>
+<main class="card" aria-live="off">
+  <div class="k">SWIR INSTALLABLE WIDGET</div>
+  <div id="time" class="time">--:--</div>
+  <div id="date" class="date">Local time</div>
+  <div class="foot">Read-only • local clock • no network • no permissions</div>
+</main>
+<script>
+(() => {
+  'use strict';
+  const time=document.getElementById('time'),date=document.getElementById('date');
+  const update=()=>{const now=new Date();time.textContent=new Intl.DateTimeFormat(undefined,{hour:'2-digit',minute:'2-digit',second:'2-digit'}).format(now);date.textContent=new Intl.DateTimeFormat(undefined,{weekday:'long',year:'numeric',month:'long',day:'numeric'}).format(now)};
+  update();setInterval(update,1000);
+})();
+</script>
+</body>
+</html>
