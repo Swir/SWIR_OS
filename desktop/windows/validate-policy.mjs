@@ -22,8 +22,17 @@ const sandbox = { window: {}, Object };
 vm.createContext(sandbox);
 vm.runInContext(catalogSource, sandbox, { filename: 'swir-packages.js', timeout: 1000 });
 
-const packages = Array.isArray(sandbox.window.SWIR_PACKAGE_CATALOG) ? sandbox.window.SWIR_PACKAGE_CATALOG : [];
-const expected = new Map(packages.map(pkg => [pkg.packageId, {
+const catalog = Array.isArray(sandbox.window.SWIR_PACKAGE_CATALOG) ? sandbox.window.SWIR_PACKAGE_CATALOG : [];
+const catalogErrors = [];
+const desktopPackages = catalog.filter(pkg => {
+  const editions = pkg?.compatibility?.editions;
+  if (!Array.isArray(editions) || editions.length < 1) {
+    catalogErrors.push(`${pkg?.packageId || pkg?.id || '<missing>'}: compatibility.editions is required for Desktop policy scoping`);
+    return false;
+  }
+  return editions.map(value => String(value).trim().toUpperCase()).includes('DESKTOP');
+});
+const expected = new Map(desktopPackages.map(pkg => [pkg.packageId, {
   packageId: pkg.packageId,
   entry: pkg.entry,
   permissions: [...(pkg.permissions || [])].sort()
@@ -34,7 +43,7 @@ const actual = new Map((policy.packages || []).map(pkg => [pkg.packageId, {
   permissions: [...(pkg.permissions || [])].sort()
 }]));
 
-const errors = [];
+const errors = [...catalogErrors];
 if (policy.schema !== 'swir.desktop-policy/0.1') errors.push(`Unsupported policy schema: ${policy.schema}`);
 for (const [packageId, exp] of expected) {
   const got = actual.get(packageId);
@@ -46,7 +55,7 @@ for (const [packageId, exp] of expected) {
   }
 }
 for (const packageId of actual.keys()) {
-  if (!expected.has(packageId)) errors.push(`Desktop policy has package not present in SWIR catalog: ${packageId}`);
+  if (!expected.has(packageId)) errors.push(`Desktop policy has package not present in the Desktop-compatible SWIR catalog: ${packageId}`);
 }
 if (new Set((policy.packages || []).map(pkg => pkg.packageId)).size !== (policy.packages || []).length) errors.push('Duplicate packageId in app-policy.json');
 
@@ -55,4 +64,4 @@ if (errors.length) {
   for (const error of errors) console.error(` - ${error}`);
   process.exit(1);
 }
-console.log(`Desktop policy OK: ${actual.size} package policies match swir-packages.js; permission allowlist is fail-closed`);
+console.log(`Desktop policy OK: ${actual.size} package policies match Desktop-compatible swir-packages.js entries; permission allowlist is fail-closed`);
