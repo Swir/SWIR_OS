@@ -12,8 +12,8 @@
 [![Desktop Windows Build](https://github.com/Swir/SWIR_OS/actions/workflows/desktop-windows-build.yml/badge.svg)](https://github.com/Swir/SWIR_OS/actions/workflows/desktop-windows-build.yml)
 [![Roadmap Contract](https://github.com/Swir/SWIR_OS/actions/workflows/roadmap-contract.yml/badge.svg)](https://github.com/Swir/SWIR_OS/actions/workflows/roadmap-contract.yml)
 
-![Roadmap](https://img.shields.io/badge/ROADMAP-89.2%25-02050A?style=for-the-badge&logoColor=62E5FF)
-![Completed](https://img.shields.io/badge/DONE-58%2F65-02050A?style=for-the-badge&logoColor=62E5FF)
+![Roadmap](https://img.shields.io/badge/ROADMAP-90.8%25-02050A?style=for-the-badge&logoColor=62E5FF)
+![Completed](https://img.shields.io/badge/DONE-59%2F65-02050A?style=for-the-badge&logoColor=62E5FF)
 ![Status](https://img.shields.io/badge/STATUS-IN%20PROGRESS-02050A?style=for-the-badge&logoColor=62E5FF)
 
 [![Author](https://img.shields.io/badge/Author-Swir-0088FF?style=flat-square&logo=github)](https://github.com/Swir)
@@ -31,9 +31,9 @@
 
 ## 📊 Project status
 
-<img width="100%" src="assets/readme/progress-card.svg" alt="SWIR OS roadmap progress — 89.2%, 58 of 65 verified deliverables" />
+<img width="100%" src="assets/readme/progress-card.svg" alt="SWIR OS roadmap progress — 90.8%, 59 of 65 verified deliverables" />
 
-**Measured scope:** full Web → Desktop → System `Version roadmap`. **Project progress:** 58/65 = **89.2%**. **Release readiness:** not ready; physical Live USB qualification, supported-device fwupd/LVFS validation, Desktop signing/update-feed work and other release gates remain open.
+**Measured scope:** full Web → Desktop → System `Version roadmap`. **Project progress:** 59/65 = **90.8%**. **Release readiness:** not ready; physical Live USB qualification, supported-device fwupd/LVFS validation, Desktop signing/update-feed work and other release gates remain open.
 
 SWIR OS is actively being developed as three connected editions: a browser-based Web Edition, a Windows Desktop Edition with native adapters, and a real Linux-native System Edition intended to run from removable media and install to disk as a standalone operating system.
 
@@ -46,7 +46,7 @@ SWIR OS is actively being developed as three connected editions: a browser-based
 ### Overall roadmap
 
 
-**58 of 65 measurable roadmap deliverables are complete.** The native System shell, Live USB, disk installation, detached boot, graphical-installer E2E and physical-hardware qualification are tracked explicitly rather than hidden inside generic bootable-image milestones. The authoritative checklist and progress math live in [`SWIR-OS-ARCHITECTURE.md`](SWIR-OS-ARCHITECTURE.md). A prototype, contract skeleton or CI job alone does not count as a completed roadmap item.
+**59 of 65 measurable roadmap deliverables are complete.** The native System shell, Live USB, disk installation, detached boot, graphical-installer E2E and physical-hardware qualification are tracked explicitly rather than hidden inside generic bootable-image milestones. The authoritative checklist and progress math live in [`SWIR-OS-ARCHITECTURE.md`](SWIR-OS-ARCHITECTURE.md). A prototype, contract skeleton or CI job alone does not count as a completed roadmap item.
 
 ---
 

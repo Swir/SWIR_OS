@@ -1,0 +1,35 @@
+{
+  "schema": "swir.app/1.0",
+  "id": "hello-template",
+  "packageId": "example.hello",
+  "name": "SWIR SDK Starter",
+  "version": "1.0.0",
+  "author": "Your Name",
+  "description": "Minimal permission-aware SWIR Web Edition application template.",
+  "category": "Developer",
+  "icon": "./examples/swir-app-template/icon.svg",
+  "accent": "#35e6ff",
+  "type": "iframe",
+  "entry": "./examples/swir-app-template/index.html",
+  "desktop": false,
+  "permissions": [
+    "storage"
+  ],
+  "associations": [],
+  "appData": "SWIR://APPDATA/HELLO_TEMPLATE",
+  "tags": [
+    "developer",
+    "template",
+    "sdk"
+  ],
+  "compatibility": {
+    "minOS": "1.7.0",
+    "minSDK": "1.6.1",
+    "platformApi": 2,
+    "editions": [
+      "WEB"
+    ]
+  },
+  "dependencies": [],
+  "optionalDependencies": []
+}

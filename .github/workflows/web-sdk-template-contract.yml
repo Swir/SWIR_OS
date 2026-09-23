@@ -1,0 +1,55 @@
+name: Web SDK Template Contract
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'examples/swir-app-template/**'
+      - 'SWIR-APP-DEVELOPER-GUIDE-1.0.md'
+      - 'SWIR-APP-PACKAGE-1.0.md'
+      - 'swir-sdk.js'
+      - 'swir-app-bridge.js'
+      - 'swir-app-bridge-host.js'
+      - 'scripts/check-web-sdk-template.mjs'
+      - 'scripts/test-web-sdk-template-runtime.mjs'
+      - '.github/workflows/web-sdk-template-contract.yml'
+  pull_request:
+    paths:
+      - 'examples/swir-app-template/**'
+      - 'SWIR-APP-DEVELOPER-GUIDE-1.0.md'
+      - 'SWIR-APP-PACKAGE-1.0.md'
+      - 'swir-sdk.js'
+      - 'swir-app-bridge.js'
+      - 'swir-app-bridge-host.js'
+      - 'scripts/check-web-sdk-template.mjs'
+      - 'scripts/test-web-sdk-template-runtime.mjs'
+      - '.github/workflows/web-sdk-template-contract.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-sdk-template-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: JavaScript syntax
+        run: node --check examples/swir-app-template/app.js
+
+      - name: Validate developer template against shipping SDK and bridge
+        run: node scripts/check-web-sdk-template.mjs
+
+      - name: Execute isolated App Bridge runtime fixture
+        run: node scripts/test-web-sdk-template-runtime.mjs
