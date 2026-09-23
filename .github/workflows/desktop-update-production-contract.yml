@@ -11,6 +11,8 @@ on:
       - 'scripts/test-desktop-update-feed.mjs'
       - 'scripts/test-desktop-update-feed-security.mjs'
       - 'scripts/verify-desktop-update-production-contract.mjs'
+      - 'scripts/verify-desktop-release-provenance.mjs'
+      - 'scripts/test-desktop-release-provenance.mjs'
       - 'desktop/windows/UpdateBroker.cs'
       - 'desktop/windows/UpdateStagingBroker.cs'
       - 'desktop/windows/UpdateDownloadClient.cs'
@@ -31,6 +33,8 @@ on:
       - 'scripts/test-desktop-update-feed.mjs'
       - 'scripts/test-desktop-update-feed-security.mjs'
       - 'scripts/verify-desktop-update-production-contract.mjs'
+      - 'scripts/verify-desktop-release-provenance.mjs'
+      - 'scripts/test-desktop-release-provenance.mjs'
       - 'desktop/windows/UpdateBroker.cs'
       - 'desktop/windows/UpdateStagingBroker.cs'
       - 'desktop/windows/UpdateDownloadClient.cs'
@@ -61,6 +65,9 @@ jobs:
 
       - name: Verify production release/feed/runtime topology
         run: node scripts/verify-desktop-update-production-contract.mjs
+
+      - name: Verify release provenance rejection cases
+        run: node scripts/test-desktop-release-provenance.mjs
 
       - name: Verify signed feed anti-downgrade promotion
         run: node scripts/test-desktop-update-feed.mjs

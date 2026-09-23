@@ -8,6 +8,8 @@ on:
       - '.github/workflows/desktop-release.yml'
       - '.github/workflows/desktop-package-signing-evidence.yml'
       - 'scripts/validate-desktop-package-production-contract.mjs'
+      - 'scripts/verify-package-signing-evidence-run-provenance.mjs'
+      - 'scripts/test-package-signing-evidence-run-provenance.mjs'
       - 'desktop/windows/DesktopPackageBridge.cs'
       - 'desktop/windows/DesktopPackageTrustRootStore.cs'
       - 'desktop/windows/DesktopPackageSignatureVerifier.cs'
@@ -23,6 +25,8 @@ on:
       - '.github/workflows/desktop-release.yml'
       - '.github/workflows/desktop-package-signing-evidence.yml'
       - 'scripts/validate-desktop-package-production-contract.mjs'
+      - 'scripts/verify-package-signing-evidence-run-provenance.mjs'
+      - 'scripts/test-package-signing-evidence-run-provenance.mjs'
       - 'desktop/windows/DesktopPackageBridge.cs'
       - 'desktop/windows/DesktopPackageTrustRootStore.cs'
       - 'desktop/windows/DesktopPackageSignatureVerifier.cs'
@@ -69,6 +73,9 @@ jobs:
 
       - name: Validate production package trust wiring
         run: node scripts/validate-desktop-package-production-contract.mjs
+
+      - name: Verify signing evidence run provenance rejection cases
+        run: node scripts/test-package-signing-evidence-run-provenance.mjs
 
       - name: Verify embedded signature and tamper rejection
         working-directory: desktop/windows

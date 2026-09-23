@@ -50,6 +50,25 @@ jobs:
           git fetch origin main
           git checkout main
           git merge --ff-only origin/main
+      - name: Verify release tag provenance and channel semantics
+        shell: bash
+        env:
+          CHANNEL: ${{ steps.release.outputs.channel }}
+        run: |
+          set -euo pipefail
+          git fetch --force origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+          TAG_COMMIT="$(git rev-list -n 1 "$RELEASE_TAG")"
+          if [[ -z "$TAG_COMMIT" ]]; then
+            echo "Desktop update feed promotion is blocked: release tag does not resolve to a commit." >&2
+            exit 1
+          fi
+          IS_PRERELEASE="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq '.isPrerelease')"
+          node scripts/verify-desktop-release-provenance.mjs \
+            --tag "$RELEASE_TAG" \
+            --channel "$CHANNEL" \
+            --tag-commit "$TAG_COMMIT" \
+            --main-ref origin/main \
+            --prerelease "$IS_PRERELEASE"
       - name: Materialize pinned public update trust root
         shell: bash
         run: |
