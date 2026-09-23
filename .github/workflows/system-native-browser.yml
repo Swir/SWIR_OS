@@ -60,6 +60,14 @@ jobs:
           PYTHONPATH=system/apps python3 system/apps/swir-browser.py --self-test
           PYTHONPATH=system/apps python3 system/apps/swir-software-center.py --self-test
           desktop-file-validate system/apps/swir-browser.desktop
+          grep -F 'Name[pl]=Przeglądarka SWIR' system/apps/swir-browser.desktop >/dev/null
+          grep -F 'Name[nb]=SWIR-nettleser' system/apps/swir-browser.desktop >/dev/null
+          grep -F 'GenericName[pl]=Przeglądarka internetowa' system/apps/swir-browser.desktop >/dev/null
+          grep -F 'GenericName[nb]=Nettleser' system/apps/swir-browser.desktop >/dev/null
+          grep -F 'Comment[pl]=Przeglądaj internet w natywnej przeglądarce SWIR OS' system/apps/swir-browser.desktop >/dev/null
+          grep -F 'Comment[nb]=Surf på nettet med den innebygde nettleseren i SWIR OS' system/apps/swir-browser.desktop >/dev/null
+          grep -F 'Keywords[pl]=internet;przeglądarka;sieć;prywatne;zakładki;' system/apps/swir-browser.desktop >/dev/null
+          grep -F 'Keywords[nb]=nett;nettleser;internett;privat;bokmerker;' system/apps/swir-browser.desktop >/dev/null
           grep -F 'MimeType=text/html;x-scheme-handler/http;x-scheme-handler/https;' system/apps/swir-browser.desktop >/dev/null
           grep -F 'Browser", (("/usr/local/bin/swir-browser",)' system/session/swir-shell.py >/dev/null
           grep -F 'system/apps/swir-browser.py' system/session/provision-graphical-session.sh >/dev/null
@@ -107,6 +115,20 @@ jobs:
 
           install -m 0644 system/apps/swir-browser.desktop "$DATA/applications/swir-browser.desktop"
           update-desktop-database "$DATA/applications"
+
+          python3 - "$DATA/applications/swir-browser.desktop" <<'PY'
+          import configparser, sys
+          parser = configparser.ConfigParser(interpolation=None, strict=True)
+          parser.optionxform = str
+          parser.read(sys.argv[1], encoding='utf-8')
+          entry = parser['Desktop Entry']
+          assert entry['Name[pl]'] == 'Przeglądarka SWIR'
+          assert entry['Name[nb]'] == 'SWIR-nettleser'
+          assert entry['Comment[pl]'].startswith('Przeglądaj internet')
+          assert entry['Comment[nb]'].startswith('Surf på nettet')
+          assert entry['GenericName[pl]'] == 'Przeglądarka internetowa'
+          assert entry['GenericName[nb]'] == 'Nettleser'
+          PY
 
           python3 - <<'PY'
           from core_runtime import UserSettingsStore
