@@ -68,6 +68,7 @@ jobs:
 
           pid = int(sys.argv[1])
           path = pathlib.Path('system/apps/swir-system-monitor.py')
+          sys.path.insert(0, str(path.parent.resolve()))
           spec = importlib.util.spec_from_file_location('swir_system_monitor_task_test', path)
           assert spec and spec.loader
           module = importlib.util.module_from_spec(spec)
