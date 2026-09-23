@@ -6,6 +6,7 @@ on:
     paths:
       - 'system/apps/swir-player.py'
       - 'system/apps/swir-player.desktop'
+      - 'system/apps/core_runtime.py'
       - 'system/session/swir-shell.py'
       - 'system/session/provision-graphical-session.sh'
       - 'system/SWIR-NATIVE-CORE-APPS-0.1.md'
@@ -14,6 +15,7 @@ on:
     paths:
       - 'system/apps/swir-player.py'
       - 'system/apps/swir-player.desktop'
+      - 'system/apps/core_runtime.py'
       - 'system/session/swir-shell.py'
       - 'system/session/provision-graphical-session.sh'
       - 'system/SWIR-NATIVE-CORE-APPS-0.1.md'
@@ -43,7 +45,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m py_compile system/apps/swir-player.py system/session/swir-shell.py
+          python3 -m py_compile system/apps/swir-player.py system/apps/core_runtime.py system/session/swir-shell.py
           desktop-file-validate system/apps/swir-player.desktop
           grep -F 'Name[pl]=Odtwarzacz SWIR' system/apps/swir-player.desktop >/dev/null
           grep -F 'Name[nb]=SWIR-spiller' system/apps/swir-player.desktop >/dev/null
@@ -61,6 +63,10 @@ jobs:
           grep -F 'gir1.2-gstreamer-1.0' system/session/provision-graphical-session.sh >/dev/null
           grep -F 'gstreamer1.0-gtk4' system/session/provision-graphical-session.sh >/dev/null
           grep -F 'MPRIS_NAME: Final = "org.mpris.MediaPlayer2.swir"' system/apps/swir-player.py >/dev/null
+          grep -F 'UserSettingsStore' system/apps/swir-player.py >/dev/null
+          grep -F '"pl-PL": {' system/apps/swir-player.py >/dev/null
+          grep -F '"nb-NO": {' system/apps/swir-player.py >/dev/null
+          grep -F 'window.set_direction(' system/apps/swir-player.py >/dev/null
           grep -F 'remoteUriInputAccepted": False' system/apps/swir-player.py >/dev/null
           grep -F 'codecUpdatePath": "system-package-update-center"' system/apps/swir-player.py >/dev/null
           ! grep -RE 'shell *= *True|os\.system\(' system/apps/swir-player.py
@@ -83,16 +89,26 @@ jobs:
           sudo install -m 0755 system/apps/swir-player.py /usr/local/bin/swir-player
           sudo install -m 0644 system/apps/swir-player.desktop /usr/share/applications/swir-player.desktop
           sudo update-desktop-database /usr/share/applications
-          python3 system/apps/swir-player.py --self-test
-      - name: Map Player on Wayland and preroll local media
+          PYTHONPATH="$GITHUB_WORKSPACE/system/apps" python3 system/apps/swir-player.py --self-test
+      - name: Map localized Player on Wayland and preroll local media
         shell: bash
         run: |
           set -euo pipefail
           RUNTIME="${{ runner.temp }}/swir-player-runtime"
           CONFIG="${{ runner.temp }}/swir-player-config"
           DATA="${{ runner.temp }}/swir-player-data"
-          mkdir -p "$RUNTIME" "$CONFIG" "$DATA"
-          chmod 0700 "$RUNTIME" "$CONFIG" "$DATA"
+          mkdir -p "$RUNTIME" "$CONFIG/swir" "$DATA"
+          chmod 0700 "$RUNTIME" "$CONFIG" "$CONFIG/swir" "$DATA"
+          cat > "$CONFIG/swir/settings.json" <<'JSON'
+          {
+            "schema": "swir.user-settings/0.1",
+            "appearance": "dark",
+            "language": "pl-PL",
+            "clock24h": true,
+            "themeId": "builtin.swir-dark"
+          }
+          JSON
+          chmod 0600 "$CONFIG/swir/settings.json"
           export XDG_RUNTIME_DIR="$RUNTIME"
           export XDG_CONFIG_HOME="$CONFIG"
           export XDG_DATA_HOME="$DATA"
@@ -131,15 +147,22 @@ jobs:
                 SWIR_PLAYER_E2E_MEDIA="$RUNTIME/e2e.wav" \
             python3 system/apps/swir-player.py
 
-          python3 - "$RUNTIME/player.json" "$DATA/swir/player/library.json" <<'PY'
+          python3 - "$RUNTIME/player.json" "$DATA/swir/player/library.json" "$CONFIG/swir/settings.json" <<'PY'
           import json, pathlib, stat, sys
           evidence = json.load(open(sys.argv[1], encoding='utf-8'))
           library = json.load(open(sys.argv[2], encoding='utf-8'))
+          settings_path = pathlib.Path(sys.argv[3])
           library_path = pathlib.Path(sys.argv[2])
-          assert evidence['schema'] == 'swir.native-player-runtime-evidence/0.1'
+          assert evidence['schema'] == 'swir.native-player-runtime-evidence/0.2'
           assert evidence['passed'] is True and evidence['applicationId'] == 'dev.swir.Player'
           assert evidence['nativeToolkit'] == 'gtk4-gstreamer'
           assert evidence['displayProtocol'] == 'wayland' and evidence['windowMapped'] is True
+          assert evidence['requestedLanguage'] == 'pl-PL'
+          assert evidence['catalogLanguage'] == 'pl-PL' and evidence['localeFallback'] is False
+          assert evidence['textDirection'] == 'ltr'
+          assert evidence['localizedWindowTitle'] == 'Odtwarzacz SWIR'
+          assert evidence['accessibilityFocusableControls'] >= 8
+          assert evidence['accessibilityTooltipControls'] >= 7
           assert evidence['gstreamerPlaybin'] is True
           assert isinstance(evidence['gstreamerGtk4VideoSinkAvailable'], bool)
           assert evidence['pipelinePrerollPassed'] is True
@@ -158,6 +181,7 @@ jobs:
           assert library['playlists']['E2E Playlist'] == [library['tracks'][0]['path']]
           assert stat.S_IMODE(library_path.stat().st_mode) == 0o600
           assert stat.S_IMODE(library_path.parent.stat().st_mode) == 0o700
+          assert stat.S_IMODE(settings_path.stat().st_mode) == 0o600
           PY
 
           gio mime audio/mpeg | grep -F 'swir-player.desktop' >/dev/null
@@ -178,7 +202,7 @@ jobs:
             desktop-file-utils python3 python3-gi gir1.2-gtk-4.0 gir1.2-gstreamer-1.0 \
             gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
             gstreamer1.0-libav gstreamer1.0-gtk4
-          python3 system/apps/swir-player.py --self-test
+          PYTHONPATH="$GITHUB_WORKSPACE/system/apps" python3 system/apps/swir-player.py --self-test
           desktop-file-validate system/apps/swir-player.desktop
           gst-inspect-1.0 playbin >/dev/null
           gst-inspect-1.0 gtk4paintablesink >/dev/null
