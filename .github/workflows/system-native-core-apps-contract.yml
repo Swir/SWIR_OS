@@ -205,12 +205,19 @@ jobs:
           assert stored['schema'] == 'swir.user-settings/0.1'
           assert stat.S_IMODE(pathlib.Path(sys.argv[7]).stat().st_mode) == 0o600
 
-          assert monitor['schema'] == 'swir.native-system-monitor-runtime-evidence/0.1'
+          assert monitor['schema'] == 'swir.native-system-monitor-runtime-evidence/0.2'
           assert monitor['passed'] is True and monitor['applicationId'] == 'dev.swir.SystemMonitor'
           assert monitor['nativeToolkit'] == 'gtk4' and monitor['displayProtocol'] == 'wayland'
           assert monitor['windowMapped'] is True and monitor['privilegedOperations'] is False
           assert 0 < monitor['visibleProcessCount'] <= monitor['processRowsBounded'] == 200
           assert monitor['memTotalKiB'] > 0
+          assert monitor['localizedSurfaceVerified'] is True
+          assert monitor['accessibilityFocusVerified'] is True
+          assert monitor['accessibilityTooltipsVerified'] is True
+          assert monitor['processTerminationSameUidOnly'] is True
+          assert monitor['processTerminationRequiresConfirmation'] is True
+          assert monitor['processIdentityRevalidated'] is True
+          assert monitor['diagnosticsReadOnly'] is True
 
           assert terminal['schema'] == 'swir.native-terminal-runtime-evidence/0.2'
           assert terminal['passed'] is True and terminal['applicationId'] == 'dev.swir.Terminal'

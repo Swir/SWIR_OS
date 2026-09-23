@@ -35,8 +35,9 @@ The 0.3 milestone now covers the dependable Product Baseline editing set: crop, 
 
 ## Runtime evidence
 
-The Wayland E2E contract emits `swir.native-photo-studio-runtime-evidence/0.3` and fails closed unless one mapped GTK4 session verifies:
+The Wayland E2E contract emits `swir.native-photo-studio-runtime-evidence/0.4` and fails closed unless one mapped GTK4 session verifies:
 
+- the owner-only SWIR language preference drives reviewed English, Polish and Norwegian Bokmål primary controls with deterministic English fallback, applied LTR/RTL direction, keyboard-focusable controls and localized tooltips;
 - source immutability;
 - undo/redo, rotate, resize and a non-default rectangular crop;
 - exposure, brightness, contrast and saturation producing real pixel changes;

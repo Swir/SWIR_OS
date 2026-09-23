@@ -16,13 +16,13 @@ The mandatory end-user application and experience scope is defined in [`SWIR-PRO
 <!-- ROADMAP-PROGRESS:START -->
 <p align="center">
   <a href="https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml"><img alt="CI" src="https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml/badge.svg"></a>
-  <img alt="Roadmap progress" src="https://img.shields.io/badge/ROADMAP-87.7%25-2ea043?style=for-the-badge">
-  <img alt="Completed" src="https://img.shields.io/badge/DONE-57%2F65-1f6feb?style=for-the-badge">
+  <img alt="Roadmap progress" src="https://img.shields.io/badge/ROADMAP-89.2%25-2ea043?style=for-the-badge">
+  <img alt="Completed" src="https://img.shields.io/badge/DONE-58%2F65-1f6feb?style=for-the-badge">
   <img alt="Status" src="https://img.shields.io/badge/STATUS-IN%20PROGRESS-7c3aed?style=for-the-badge">
 </p>
 
 <p align="center">
-  <img width="900" src="assets/readme/progress-mini.svg" alt="SWIR OS roadmap progress — 87.7%, 57 of 65 verified deliverables" />
+  <img width="900" src="assets/readme/progress-mini.svg" alt="SWIR OS roadmap progress — 89.2%, 58 of 65 verified deliverables" />
 </p>
 
 ## 📊 Overall progress
@@ -30,7 +30,7 @@ The mandatory end-user application and experience scope is defined in [`SWIR-PRO
 
 | ✅ Completed | ⏳ Remaining | 📦 Total | 🎯 Progress |
 |---:|---:|---:|---:|
-| **57** | **8** | **65** | **87.7%** |
+| **58** | **7** | **65** | **89.2%** |
 
 > **Progress rule:** the explicit `[x]/[ ]` deliverables in **Version roadmap** are the source of truth for the full Web → Desktop → System plan. Update the checklist first, then badges, numbers, percentage and deterministic SVG outputs. A prototype does not count as complete until the described deliverable is actually implemented and verified.
 <!-- ROADMAP-PROGRESS:END -->
@@ -324,7 +324,7 @@ The first-party SWIR Browser milestone is now verified on the native GTK4/WebKit
 
 The first-party SWIR Player milestone is now verified on the native GTK4/GStreamer path for local audio/video playback, with bounded owner-only library and playlist persistence, MPRIS2 media-key integration, Gio notifications, desktop MIME integration and the distro-managed Debian 13 GStreamer runtime. Its dedicated Wayland gate maps the real GTK4 window and prerolls generated local media, while the Debian 13 target gate verifies the GTK4 video sink. The player remains unprivileged and has no self-updater or direct package mutation. This closes the dedicated Player roadmap item only; the broader daily-use suite, including the remaining media/document utilities, is still open.
 
-The first-party SWIR Photo Studio basic-editing milestone is now verified on the native GTK4/GdkPixbuf path for local regular image files, with bounded input limits, rotate/flip/resize editing, a bounded 24-state undo/redo history and explicit atomic owner-only PNG/JPEG/WebP export while preserving the source file. The dedicated Wayland gate maps the real GTK4 window and exercises edit/export behavior, and the Debian 13 target gate verifies the distro-managed GTK4/GdkPixbuf runtime. The application remains unprivileged and has no self-updater or direct package mutation. This closes only the dedicated basic Photo Studio roadmap item; the broader daily-use suite and advanced Product Baseline editing capabilities remain open.
+The first-party SWIR Photo Studio milestone is verified on the native GTK4/GdkPixbuf path for bounded local regular image files with rotate/flip/resize, rectangular crop, exposure/brightness/contrast/saturation controls, filters, bounded text and line annotation, a bounded 24-state undo/redo history and explicit atomic owner-only PNG/JPEG/WebP export while preserving the source file. Its dedicated Wayland gate verifies the localized EN/PL/NO runtime surface, English fallback, text direction and keyboard-focus/tool-tip accessibility, while the Debian 13 target gate verifies the distro-managed GTK4/GdkPixbuf runtime. The application remains unprivileged with no self-updater or direct package mutation; together with the suite-wide exact-head gate this contributes to the completed essential native daily-use suite milestone.
 
 The installable SWIR Shell Theme/Skin framework milestone is now verified with bounded data-only `.swirtheme` packages, an exact token allowlist, accessibility contrast validation, owner-only atomic storage, Settings import/select/reset controls and fail-safe recovery to the immutable `builtin.swir-dark` theme. The dedicated Wayland gate maps real Settings and Shell windows, proves theme application and verifies missing-theme recovery. Theme packages cannot provide CSS selectors, scripts, commands, URLs or privileged code. This closes the dedicated shell theme/skin roadmap item; it does not imply arbitrary application theming or a theme marketplace.
 
@@ -461,7 +461,7 @@ Planned:
 - [x] SWIR desktop shell
 - [x] NetworkManager integration
 - [x] native Linux application execution
-- [ ] essential native Linux application suite for dependable daily use
+- [x] essential native Linux application suite for dependable daily use
 - [x] native SWIR Browser with Default Apps integration and one-click approved alternative browser installation
 - [x] installable SWIR Shell Theme/Skin framework with accessibility-safe recovery to the default theme
 - [x] native SWIR Player with library/playlists/media-key/notification integration

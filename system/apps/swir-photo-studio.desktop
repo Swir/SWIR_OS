@@ -1,7 +1,17 @@
 [Desktop Entry]
 Type=Application
 Name=SWIR Photo Studio
+Name[pl]=Studio zdjęć SWIR
+Name[nb]=SWIR fotostudio
+GenericName=Image Editor and Viewer
+GenericName[pl]=Edytor i przeglądarka obrazów
+GenericName[nb]=Bilderedigerer og bildeviser
 Comment=View and edit local images with native SWIR Photo Studio
+Comment[pl]=Przeglądaj i edytuj lokalne obrazy w natywnym Studio zdjęć SWIR
+Comment[nb]=Vis og rediger lokale bilder i det opprinnelige SWIR fotostudio
+Keywords=photo;image;viewer;editor;crop;annotation;
+Keywords[pl]=zdjęcia;obrazy;przeglądarka;edytor;kadrowanie;adnotacje;
+Keywords[nb]=foto;bilde;viser;redigering;beskjæring;merknader;
 Exec=/usr/local/bin/swir-photo-studio %F
 TryExec=/usr/local/bin/swir-photo-studio
 Icon=image-x-generic

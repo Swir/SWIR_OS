@@ -42,7 +42,7 @@ REQUIRED_MARKERS: Final = {
     "photo-studio": (
         "GdkPixbuf", "EditHistory", "_atomic_export", "def _crop_pixbuf(",
         "def _transform_pixels(", "def _annotate_text(", "def _draw_line(",
-        "swir.native-photo-studio-runtime-evidence/0.3",
+        "swir.native-photo-studio-runtime-evidence/0.4",
     ),
     "pdf-viewer": ("Poppler", "gi.require_version(\"Gtk\", \"4.0\")"),
     "archive-manager": ("_safe_member_parts", "O_NOFOLLOW", "O_EXCL", "--archive-self-test"),

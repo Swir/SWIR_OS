@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'system/apps/swir-browser.py'
+      - 'system/apps/core_runtime.py'
       - 'system/apps/swir-browser.desktop'
       - 'system/apps/swir-settings.py'
       - 'system/apps/swir-software-center.py'
@@ -15,6 +16,7 @@ on:
   pull_request:
     paths:
       - 'system/apps/swir-browser.py'
+      - 'system/apps/core_runtime.py'
       - 'system/apps/swir-browser.desktop'
       - 'system/apps/swir-settings.py'
       - 'system/apps/swir-software-center.py'
@@ -50,6 +52,7 @@ jobs:
           set -euo pipefail
           bash -n system/session/provision-graphical-session.sh
           python3 -m py_compile \
+            system/apps/core_runtime.py \
             system/apps/swir-browser.py \
             system/apps/swir-settings.py \
             system/apps/swir-software-center.py \
@@ -57,6 +60,14 @@ jobs:
           PYTHONPATH=system/apps python3 system/apps/swir-browser.py --self-test
           PYTHONPATH=system/apps python3 system/apps/swir-software-center.py --self-test
           desktop-file-validate system/apps/swir-browser.desktop
+          grep -F 'Name[pl]=Przeglądarka SWIR' system/apps/swir-browser.desktop >/dev/null
+          grep -F 'Name[nb]=SWIR-nettleser' system/apps/swir-browser.desktop >/dev/null
+          grep -F 'GenericName[pl]=Przeglądarka internetowa' system/apps/swir-browser.desktop >/dev/null
+          grep -F 'GenericName[nb]=Nettleser' system/apps/swir-browser.desktop >/dev/null
+          grep -F 'Comment[pl]=Przeglądaj internet w natywnej przeglądarce SWIR OS' system/apps/swir-browser.desktop >/dev/null
+          grep -F 'Comment[nb]=Surf på nettet med den innebygde nettleseren i SWIR OS' system/apps/swir-browser.desktop >/dev/null
+          grep -F 'Keywords[pl]=internet;przeglądarka;sieć;prywatne;zakładki;' system/apps/swir-browser.desktop >/dev/null
+          grep -F 'Keywords[nb]=nett;nettleser;internett;privat;bokmerker;' system/apps/swir-browser.desktop >/dev/null
           grep -F 'MimeType=text/html;x-scheme-handler/http;x-scheme-handler/https;' system/apps/swir-browser.desktop >/dev/null
           grep -F 'Browser", (("/usr/local/bin/swir-browser",)' system/session/swir-shell.py >/dev/null
           grep -F 'system/apps/swir-browser.py' system/session/provision-graphical-session.sh >/dev/null
@@ -65,6 +76,8 @@ jobs:
           grep -F 'NetworkSession.new_ephemeral()' system/apps/swir-browser.py >/dev/null
           grep -F 'permissionsExplicitAllowDeny": True' system/apps/swir-browser.py >/dev/null
           grep -F 'engineUpdatePath": "system-package-update-center"' system/apps/swir-browser.py >/dev/null
+          grep -F 'localizedChrome": True' system/apps/swir-browser.py >/dev/null
+          grep -F 'accessibilityFocusTooltips": accessibility_ok' system/apps/swir-browser.py >/dev/null
           grep -F 'browserDefaultMutationOnExplicitActionOnly": True' system/apps/swir-settings.py >/dev/null
           grep -F 'externalInstallAutoCommit": False' system/apps/swir-software-center.py >/dev/null
           grep -F '("/usr/local/bin/swir-software-center", "--install", "firefox-esr")' system/apps/swir-browser.py >/dev/null
@@ -84,7 +97,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             weston dbus-daemon python3-gi gir1.2-gtk-4.0 gir1.2-webkit-6.0 desktop-file-utils
           sudo install -m 0755 system/apps/swir-browser.py /usr/local/bin/swir-browser
-      - name: Map native browser and verify runtime evidence
+      - name: Map localized native browser and verify runtime evidence
         shell: bash
         run: |
           set -euo pipefail
@@ -102,6 +115,29 @@ jobs:
 
           install -m 0644 system/apps/swir-browser.desktop "$DATA/applications/swir-browser.desktop"
           update-desktop-database "$DATA/applications"
+
+          python3 - "$DATA/applications/swir-browser.desktop" <<'PY'
+          import configparser, sys
+          parser = configparser.ConfigParser(interpolation=None, strict=True)
+          parser.optionxform = str
+          parser.read(sys.argv[1], encoding='utf-8')
+          entry = parser['Desktop Entry']
+          assert entry['Name[pl]'] == 'Przeglądarka SWIR'
+          assert entry['Name[nb]'] == 'SWIR-nettleser'
+          assert entry['Comment[pl]'].startswith('Przeglądaj internet')
+          assert entry['Comment[nb]'].startswith('Surf på nettet')
+          assert entry['GenericName[pl]'] == 'Przeglądarka internetowa'
+          assert entry['GenericName[nb]'] == 'Nettleser'
+          PY
+
+          python3 - <<'PY'
+          from core_runtime import UserSettingsStore
+          store = UserSettingsStore()
+          settings = store.load()
+          settings['language'] = 'pl-PL'
+          saved = store.save(settings)
+          assert saved['language'] == 'pl-PL'
+          PY
 
           weston --backend=headless-backend.so --socket="$WAYLAND_DISPLAY" --idle-time=0 --log="$RUNTIME/weston.log" &
           WESTON_PID=$!
@@ -154,7 +190,7 @@ jobs:
           python3 - "$RUNTIME/browser.json" <<'PY'
           import json, sys
           evidence = json.load(open(sys.argv[1], encoding='utf-8'))
-          assert evidence['schema'] == 'swir.native-browser-runtime-evidence/0.1'
+          assert evidence['schema'] == 'swir.native-browser-runtime-evidence/0.2'
           assert evidence['passed'] is True and evidence['applicationId'] == 'dev.swir.Browser'
           assert evidence['nativeToolkit'] == 'gtk4-webkitgtk6'
           assert evidence['displayProtocol'] == 'wayland' and evidence['windowMapped'] is True
@@ -173,7 +209,16 @@ jobs:
           assert evidence['unsafeMainSchemesBlocked'] is True
           assert evidence['historyRowsBounded'] == 500
           assert evidence['bookmarkRowsBounded'] == 200
+          assert evidence['localeRequested'] == 'pl-PL'
+          assert evidence['localeCatalog'] == 'pl-PL'
+          assert evidence['localeFallback'] is False
+          assert evidence['textDirection'] == 'ltr'
+          assert evidence['localizedChrome'] is True
+          assert evidence['accessibilityFocusTooltips'] is True
           PY
+
+          [[ "$(stat -c '%a' "$CONFIG/swir/settings.json")" = 600 ]]
+          [[ "$(stat -c '%a' "$RUNTIME/browser.json")" = 600 ]]
 
       - name: Verify Settings discovers SWIR Browser without changing defaults
         shell: bash

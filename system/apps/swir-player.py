@@ -3,9 +3,9 @@
 
 The player is an unprivileged first-party application. It opens local regular
 files only, stores a bounded owner-only media library and playlists, integrates
-with the desktop through MPRIS2 for media keys, and publishes Gio
-notifications. Codec/runtime updates remain on the signed SWIR system package
-path; the player has no self-updater or privilege shortcut.
+with MPRIS2/media keys and Gio notifications, and consumes the bounded per-user
+SWIR locale preference. Codec/runtime updates stay on the signed SWIR system
+package path; the player has no self-updater or privilege shortcut.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ import pathlib
 import sys
 import tempfile
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, Mapping
 
 import gi
 
@@ -25,9 +25,15 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Gst", "1.0")
 from gi.repository import Gdk, Gio, GLib, Gst, Gtk  # noqa: E402
 
+LIBDIR = pathlib.Path("/usr/local/lib/swir")
+if LIBDIR.is_dir() and str(LIBDIR) not in sys.path:
+    sys.path.insert(0, str(LIBDIR))
+
+from core_runtime import UserSettingsStore, normalize_language_tag  # noqa: E402
+
 APP_ID: Final = "dev.swir.Player"
 MPRIS_NAME: Final = "org.mpris.MediaPlayer2.swir"
-EVIDENCE_SCHEMA: Final = "swir.native-player-runtime-evidence/0.1"
+EVIDENCE_SCHEMA: Final = "swir.native-player-runtime-evidence/0.2"
 LIBRARY_SCHEMA: Final = "swir.player-library/0.1"
 MAX_LIBRARY_TRACKS: Final = 1000
 MAX_PLAYLISTS: Final = 100
@@ -52,49 +58,145 @@ scale trough { background: rgba(98,229,255,0.16); }
 scale highlight { background: #0088FF; }
 """
 
+_TRANSLATIONS: Final[Mapping[str, Mapping[str, str]]] = {
+    "en": {
+        "window_title": "SWIR Player",
+        "brand": "▶  SWIR PLAYER",
+        "add_media": "Add media",
+        "add_media_tooltip": "Add a local audio or video file",
+        "library": "Library • Favorites",
+        "add_favorite": "Add current to Favorites",
+        "add_favorite_tooltip": "Add the current track to Favorites",
+        "choose_media": "Choose a local audio or video file",
+        "previous_tooltip": "Previous track",
+        "play_tooltip": "Play or pause",
+        "stop_tooltip": "Stop playback",
+        "next_tooltip": "Next track",
+        "seek_tooltip": "Seek in the current track",
+        "volume_tooltip": "Playback volume",
+        "status_idle": "Local files only • MPRIS media-key integration",
+        "dialog_title": "Add local media to SWIR Player",
+        "only_local": "Only local media files are accepted.",
+        "open_failed": "Could not open media: {reason}",
+        "library_failed": "Library update failed: {reason}",
+        "track_unavailable": "Track unavailable: {reason}",
+        "playing": "Playing",
+        "ready": "Ready",
+        "playback_error": "Playback error: {reason}",
+        "now_playing": "Now playing",
+        "choose_first": "Choose a track first.",
+        "favorite_added": "Added to Favorites.",
+        "playlist_failed": "Playlist update failed: {reason}",
+    },
+    "pl-PL": {
+        "window_title": "Odtwarzacz SWIR",
+        "brand": "▶  ODTWARZACZ SWIR",
+        "add_media": "Dodaj multimedia",
+        "add_media_tooltip": "Dodaj lokalny plik audio lub wideo",
+        "library": "Biblioteka • Ulubione",
+        "add_favorite": "Dodaj bieżący do Ulubionych",
+        "add_favorite_tooltip": "Dodaj bieżący utwór do Ulubionych",
+        "choose_media": "Wybierz lokalny plik audio lub wideo",
+        "previous_tooltip": "Poprzedni utwór",
+        "play_tooltip": "Odtwórz lub wstrzymaj",
+        "stop_tooltip": "Zatrzymaj odtwarzanie",
+        "next_tooltip": "Następny utwór",
+        "seek_tooltip": "Przewiń bieżący utwór",
+        "volume_tooltip": "Głośność odtwarzania",
+        "status_idle": "Tylko pliki lokalne • integracja klawiszy multimedialnych MPRIS",
+        "dialog_title": "Dodaj lokalne multimedia do Odtwarzacza SWIR",
+        "only_local": "Akceptowane są wyłącznie lokalne pliki multimedialne.",
+        "open_failed": "Nie udało się otworzyć multimediów: {reason}",
+        "library_failed": "Nie udało się zaktualizować biblioteki: {reason}",
+        "track_unavailable": "Utwór jest niedostępny: {reason}",
+        "playing": "Odtwarzanie",
+        "ready": "Gotowe",
+        "playback_error": "Błąd odtwarzania: {reason}",
+        "now_playing": "Teraz odtwarzane",
+        "choose_first": "Najpierw wybierz utwór.",
+        "favorite_added": "Dodano do Ulubionych.",
+        "playlist_failed": "Nie udało się zaktualizować playlisty: {reason}",
+    },
+    "nb-NO": {
+        "window_title": "SWIR-spiller",
+        "brand": "▶  SWIR-SPILLER",
+        "add_media": "Legg til medier",
+        "add_media_tooltip": "Legg til en lokal lyd- eller videofil",
+        "library": "Bibliotek • Favoritter",
+        "add_favorite": "Legg gjeldende til i Favoritter",
+        "add_favorite_tooltip": "Legg gjeldende spor til i Favoritter",
+        "choose_media": "Velg en lokal lyd- eller videofil",
+        "previous_tooltip": "Forrige spor",
+        "play_tooltip": "Spill av eller pause",
+        "stop_tooltip": "Stopp avspilling",
+        "next_tooltip": "Neste spor",
+        "seek_tooltip": "Søk i gjeldende spor",
+        "volume_tooltip": "Avspillingsvolum",
+        "status_idle": "Kun lokale filer • MPRIS-integrasjon for medietaster",
+        "dialog_title": "Legg til lokale medier i SWIR-spiller",
+        "only_local": "Bare lokale mediefiler godtas.",
+        "open_failed": "Kunne ikke åpne mediet: {reason}",
+        "library_failed": "Kunne ikke oppdatere biblioteket: {reason}",
+        "track_unavailable": "Sporet er utilgjengelig: {reason}",
+        "playing": "Spiller",
+        "ready": "Klar",
+        "playback_error": "Avspillingsfeil: {reason}",
+        "now_playing": "Spilles nå",
+        "choose_first": "Velg et spor først.",
+        "favorite_added": "Lagt til i Favoritter.",
+        "playlist_failed": "Kunne ikke oppdatere spillelisten: {reason}",
+    },
+}
+
 MPRIS_XML = """
 <node>
   <interface name="org.mpris.MediaPlayer2">
-    <method name="Raise"/>
-    <method name="Quit"/>
-    <property name="CanQuit" type="b" access="read"/>
-    <property name="CanRaise" type="b" access="read"/>
-    <property name="HasTrackList" type="b" access="read"/>
-    <property name="Identity" type="s" access="read"/>
-    <property name="DesktopEntry" type="s" access="read"/>
-    <property name="SupportedUriSchemes" type="as" access="read"/>
+    <method name="Raise"/><method name="Quit"/>
+    <property name="CanQuit" type="b" access="read"/><property name="CanRaise" type="b" access="read"/>
+    <property name="HasTrackList" type="b" access="read"/><property name="Identity" type="s" access="read"/>
+    <property name="DesktopEntry" type="s" access="read"/><property name="SupportedUriSchemes" type="as" access="read"/>
     <property name="SupportedMimeTypes" type="as" access="read"/>
   </interface>
   <interface name="org.mpris.MediaPlayer2.Player">
-    <method name="Next"/>
-    <method name="Previous"/>
-    <method name="Pause"/>
-    <method name="PlayPause"/>
-    <method name="Stop"/>
-    <method name="Play"/>
+    <method name="Next"/><method name="Previous"/><method name="Pause"/><method name="PlayPause"/><method name="Stop"/><method name="Play"/>
     <method name="Seek"><arg direction="in" type="x" name="Offset"/></method>
-    <method name="SetPosition">
-      <arg direction="in" type="o" name="TrackId"/>
-      <arg direction="in" type="x" name="Position"/>
-    </method>
-    <property name="PlaybackStatus" type="s" access="read"/>
-    <property name="LoopStatus" type="s" access="readwrite"/>
-    <property name="Rate" type="d" access="readwrite"/>
-    <property name="Shuffle" type="b" access="readwrite"/>
-    <property name="Metadata" type="a{sv}" access="read"/>
-    <property name="Volume" type="d" access="readwrite"/>
-    <property name="Position" type="x" access="read"/>
-    <property name="MinimumRate" type="d" access="read"/>
-    <property name="MaximumRate" type="d" access="read"/>
-    <property name="CanGoNext" type="b" access="read"/>
-    <property name="CanGoPrevious" type="b" access="read"/>
-    <property name="CanPlay" type="b" access="read"/>
-    <property name="CanPause" type="b" access="read"/>
-    <property name="CanSeek" type="b" access="read"/>
+    <method name="SetPosition"><arg direction="in" type="o" name="TrackId"/><arg direction="in" type="x" name="Position"/></method>
+    <property name="PlaybackStatus" type="s" access="read"/><property name="LoopStatus" type="s" access="readwrite"/>
+    <property name="Rate" type="d" access="readwrite"/><property name="Shuffle" type="b" access="readwrite"/>
+    <property name="Metadata" type="a{sv}" access="read"/><property name="Volume" type="d" access="readwrite"/>
+    <property name="Position" type="x" access="read"/><property name="MinimumRate" type="d" access="read"/>
+    <property name="MaximumRate" type="d" access="read"/><property name="CanGoNext" type="b" access="read"/>
+    <property name="CanGoPrevious" type="b" access="read"/><property name="CanPlay" type="b" access="read"/>
+    <property name="CanPause" type="b" access="read"/><property name="CanSeek" type="b" access="read"/>
     <property name="CanControl" type="b" access="read"/>
   </interface>
 </node>
 """
+
+
+@dataclass(frozen=True)
+class PlayerLocale:
+    requested_language: str
+    catalog_language: str
+    strings: Mapping[str, str]
+
+    @property
+    def fallback(self) -> bool:
+        return self.requested_language != self.catalog_language
+
+    @property
+    def text_direction(self) -> str:
+        return "rtl" if self.catalog_language.split("-", 1)[0] in {"ar", "he"} else "ltr"
+
+    def text(self, key: str, **values: object) -> str:
+        template = self.strings[key]
+        return template.format(**values) if values else template
+
+
+def player_locale(language: object) -> PlayerLocale:
+    requested = normalize_language_tag(language) or "en"
+    catalog = requested if requested in _TRANSLATIONS else "en"
+    return PlayerLocale(requested, catalog, _TRANSLATIONS[catalog])
 
 
 class PlayerPolicyError(RuntimeError):
@@ -108,10 +210,8 @@ def _data_root() -> pathlib.Path:
 
 
 def _reject_symlink_path(path: pathlib.Path, *, allow_missing_leaf: bool = False) -> None:
-    current = pathlib.Path(path.anchor or "/")
+    current = pathlib.Path(path.anchor or "/") if path.is_absolute() else pathlib.Path.cwd()
     parts = path.parts[1:] if path.is_absolute() else path.parts
-    if not path.is_absolute():
-        current = pathlib.Path.cwd()
     for index, part in enumerate(parts):
         current = current / part
         try:
@@ -154,9 +254,7 @@ def _atomic_json(path: pathlib.Path, payload: object) -> None:
 
 def _is_supported_media(path: pathlib.Path) -> bool:
     mime, _encoding = mimetypes.guess_type(path.name)
-    if mime and mime.startswith(SUPPORTED_PREFIXES):
-        return True
-    return path.suffix.lower() in SUPPORTED_FALLBACK_SUFFIXES
+    return bool((mime and mime.startswith(SUPPORTED_PREFIXES)) or path.suffix.lower() in SUPPORTED_FALLBACK_SUFFIXES)
 
 
 def _validated_local_media(raw: str | pathlib.Path) -> pathlib.Path:
@@ -190,8 +288,7 @@ class Track:
 
     @classmethod
     def from_path(cls, path: pathlib.Path) -> "Track":
-        mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-        return cls(path=str(path), title=path.stem[:200], mime=mime)
+        return cls(str(path), path.stem[:200], mimetypes.guess_type(path.name)[0] or "application/octet-stream")
 
     def as_json(self) -> dict[str, str]:
         return {"path": self.path, "title": self.title, "mime": self.mime}
@@ -214,8 +311,7 @@ class LibraryStore:
             raise PlayerPolicyError("player library is invalid JSON") from exc
         if not isinstance(raw, dict) or raw.get("schema") != LIBRARY_SCHEMA:
             raise PlayerPolicyError("player library schema is invalid")
-        items = raw.get("tracks")
-        playlists = raw.get("playlists")
+        items, playlists = raw.get("tracks"), raw.get("playlists")
         if not isinstance(items, list) or len(items) > MAX_LIBRARY_TRACKS:
             raise PlayerPolicyError("player library track count is invalid")
         if not isinstance(playlists, dict) or len(playlists) > MAX_PLAYLISTS:
@@ -225,14 +321,12 @@ class LibraryStore:
         for item in items:
             if not isinstance(item, dict):
                 raise PlayerPolicyError("player library track entry is invalid")
-            path = item.get("path")
-            title = item.get("title")
-            mime = item.get("mime")
-            if not all(isinstance(value, str) for value in (path, title, mime)):
+            path, title, mime = item.get("path"), item.get("title"), item.get("mime")
+            if not all(isinstance(v, str) for v in (path, title, mime)):
                 raise PlayerPolicyError("player library track fields are invalid")
             if len(os.fsencode(path)) > MAX_PATH_BYTES or len(title) > 200 or len(mime) > 100:
                 raise PlayerPolicyError("player library track fields exceed bounds")
-            tracks.append(Track(path=path, title=title, mime=mime))
+            tracks.append(Track(path, title, mime))
             known.add(path)
         clean_playlists: dict[str, list[str]] = {}
         for name, values in playlists.items():
@@ -251,15 +345,11 @@ class LibraryStore:
         self.playlists = clean_playlists or {"Favorites": []}
 
     def save(self) -> None:
-        payload = {
+        _atomic_json(self.path, {
             "schema": LIBRARY_SCHEMA,
-            "tracks": [track.as_json() for track in self.tracks[:MAX_LIBRARY_TRACKS]],
-            "playlists": {
-                name: paths[:MAX_PLAYLIST_TRACKS]
-                for name, paths in list(self.playlists.items())[:MAX_PLAYLISTS]
-            },
-        }
-        _atomic_json(self.path, payload)
+            "tracks": [t.as_json() for t in self.tracks[:MAX_LIBRARY_TRACKS]],
+            "playlists": {n: p[:MAX_PLAYLIST_TRACKS] for n, p in list(self.playlists.items())[:MAX_PLAYLISTS]},
+        })
 
     def add(self, path: pathlib.Path) -> Track:
         track = Track.from_path(path)
@@ -306,22 +396,9 @@ class MprisBridge:
             self.connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
         except GLib.Error:
             return False
-        self.owner_id = Gio.bus_own_name_on_connection(
-            self.connection,
-            MPRIS_NAME,
-            Gio.BusNameOwnerFlags.NONE,
-            None,
-            None,
-        )
+        self.owner_id = Gio.bus_own_name_on_connection(self.connection, MPRIS_NAME, Gio.BusNameOwnerFlags.NONE, None, None)
         for interface in self.node.interfaces:
-            export_id = self.connection.register_object(
-                "/org/mpris/MediaPlayer2",
-                interface,
-                self._method_call,
-                self._get_property,
-                self._set_property,
-            )
-            self.export_ids.append(export_id)
+            self.export_ids.append(self.connection.register_object("/org/mpris/MediaPlayer2", interface, self._method_call, self._get_property, self._set_property))
         return bool(self.owner_id and self.export_ids)
 
     def stop(self) -> None:
@@ -338,33 +415,23 @@ class MprisBridge:
 
     def _method_call(self, _connection, _sender, _object_path, interface, method, params, invocation) -> None:
         if interface == "org.mpris.MediaPlayer2":
-            if method == "Raise":
-                if self.player.window:
-                    self.player.window.present()
+            if method == "Raise" and self.player.window:
+                self.player.window.present()
             elif method == "Quit":
                 self.player.quit()
             invocation.return_value(None)
             return
-        handlers = {
-            "Next": self.player.next_track,
-            "Previous": self.player.previous_track,
-            "Pause": self.player.pause,
-            "PlayPause": self.player.play_pause,
-            "Stop": self.player.stop,
-            "Play": self.player.play,
-        }
+        handlers = {"Next": self.player.next_track, "Previous": self.player.previous_track, "Pause": self.player.pause, "PlayPause": self.player.play_pause, "Stop": self.player.stop, "Play": self.player.play}
         if method in handlers:
             handlers[method]()
             invocation.return_value(None)
             return
         if method == "Seek":
-            offset = int(params.unpack()[0])
-            self.player.seek_relative(offset)
+            self.player.seek_relative(int(params.unpack()[0]))
             invocation.return_value(None)
             return
         if method == "SetPosition":
-            _track_id, position = params.unpack()
-            self.player.seek_absolute(int(position))
+            self.player.seek_absolute(int(params.unpack()[1]))
             invocation.return_value(None)
             return
         invocation.return_dbus_error("org.mpris.MediaPlayer2.Error.NotSupported", "method not supported")
@@ -372,43 +439,25 @@ class MprisBridge:
     def _get_property(self, _connection, _sender, _object_path, interface, prop):
         if interface == "org.mpris.MediaPlayer2":
             values = {
-                "CanQuit": GLib.Variant("b", True),
-                "CanRaise": GLib.Variant("b", True),
-                "HasTrackList": GLib.Variant("b", False),
-                "Identity": GLib.Variant("s", "SWIR Player"),
-                "DesktopEntry": GLib.Variant("s", "swir-player"),
+                "CanQuit": GLib.Variant("b", True), "CanRaise": GLib.Variant("b", True), "HasTrackList": GLib.Variant("b", False),
+                "Identity": GLib.Variant("s", "SWIR Player"), "DesktopEntry": GLib.Variant("s", "swir-player"),
                 "SupportedUriSchemes": GLib.Variant("as", ["file"]),
-                "SupportedMimeTypes": GLib.Variant(
-                    "as",
-                    ["audio/mpeg", "audio/ogg", "audio/flac", "audio/wav", "video/mp4", "video/webm", "video/x-matroska"],
-                ),
+                "SupportedMimeTypes": GLib.Variant("as", ["audio/mpeg", "audio/ogg", "audio/flac", "audio/wav", "video/mp4", "video/webm", "video/x-matroska"]),
             }
             return values.get(prop)
-        status = self.player.playback_status
-        metadata = self.player.mpris_metadata()
         values = {
-            "PlaybackStatus": GLib.Variant("s", status),
-            "LoopStatus": GLib.Variant("s", "None"),
-            "Rate": GLib.Variant("d", 1.0),
-            "Shuffle": GLib.Variant("b", False),
-            "Metadata": GLib.Variant("a{sv}", metadata),
-            "Volume": GLib.Variant("d", self.player.volume),
-            "Position": GLib.Variant("x", self.player.position_us()),
-            "MinimumRate": GLib.Variant("d", 1.0),
-            "MaximumRate": GLib.Variant("d", 1.0),
-            "CanGoNext": GLib.Variant("b", self.player.has_tracks()),
-            "CanGoPrevious": GLib.Variant("b", self.player.has_tracks()),
-            "CanPlay": GLib.Variant("b", self.player.current_track is not None),
-            "CanPause": GLib.Variant("b", self.player.current_track is not None),
-            "CanSeek": GLib.Variant("b", self.player.current_track is not None),
-            "CanControl": GLib.Variant("b", True),
+            "PlaybackStatus": GLib.Variant("s", self.player.playback_status), "LoopStatus": GLib.Variant("s", "None"),
+            "Rate": GLib.Variant("d", 1.0), "Shuffle": GLib.Variant("b", False), "Metadata": GLib.Variant("a{sv}", self.player.mpris_metadata()),
+            "Volume": GLib.Variant("d", self.player.volume), "Position": GLib.Variant("x", self.player.position_us()),
+            "MinimumRate": GLib.Variant("d", 1.0), "MaximumRate": GLib.Variant("d", 1.0),
+            "CanGoNext": GLib.Variant("b", self.player.has_tracks()), "CanGoPrevious": GLib.Variant("b", self.player.has_tracks()),
+            "CanPlay": GLib.Variant("b", self.player.current_track is not None), "CanPause": GLib.Variant("b", self.player.current_track is not None),
+            "CanSeek": GLib.Variant("b", self.player.current_track is not None), "CanControl": GLib.Variant("b", True),
         }
         return values.get(prop)
 
     def _set_property(self, _connection, _sender, _object_path, interface, prop, value) -> bool:
-        if interface != "org.mpris.MediaPlayer2.Player":
-            return False
-        if prop == "Volume":
+        if interface == "org.mpris.MediaPlayer2.Player" and prop == "Volume":
             self.player.set_volume(float(value.unpack()))
             return True
         return False
@@ -422,13 +471,7 @@ class MprisBridge:
             if value is not None:
                 changed[name] = value
         try:
-            self.connection.emit_signal(
-                None,
-                "/org/mpris/MediaPlayer2",
-                "org.freedesktop.DBus.Properties",
-                "PropertiesChanged",
-                GLib.Variant("(sa{sv}as)", ("org.mpris.MediaPlayer2.Player", changed, [])),
-            )
+            self.connection.emit_signal(None, "/org/mpris/MediaPlayer2", "org.freedesktop.DBus.Properties", "PropertiesChanged", GLib.Variant("(sa{sv}as)", ("org.mpris.MediaPlayer2.Player", changed, [])))
         except GLib.Error:
             pass
 
@@ -444,6 +487,13 @@ class SwirPlayer(Gtk.Application):
         self.title_label: Gtk.Label | None = None
         self.seek_scale: Gtk.Scale | None = None
         self.play_button: Gtk.Button | None = None
+        self.settings_store = UserSettingsStore()
+        try:
+            language = self.settings_store.load().get("language", "en")
+        except (OSError, RuntimeError, ValueError, json.JSONDecodeError):
+            language = "en"
+        self.locale = player_locale(language)
+        self.accessibility_controls: list[Gtk.Widget] = []
         self.library = LibraryStore()
         try:
             self.library.load()
@@ -473,15 +523,24 @@ class SwirPlayer(Gtk.Application):
                 self.pipeline.set_property("video-sink", video_sink)
         else:
             sink = Gst.ElementFactory.make("gtk4paintablesink", "swir-video")
+            self.video_sink = sink
             if sink is not None:
                 self.pipeline.set_property("video-sink", sink)
-                self.video_sink = sink
-            else:
-                self.video_sink = None
         self.pipeline.set_property("volume", self.volume)
         bus = self.pipeline.get_bus()
         bus.add_signal_watch()
         bus.connect("message", self._on_bus_message)
+
+    def _t(self, key: str, **values: object) -> str:
+        return self.locale.text(key, **values)
+
+    def _button(self, label: str, tooltip_key: str, *, primary: bool = False) -> Gtk.Button:
+        button = Gtk.Button(label=label)
+        button.set_focusable(True)
+        button.set_tooltip_text(self._t(tooltip_key))
+        button.add_css_class("swir-primary" if primary else "swir-button")
+        self.accessibility_controls.append(button)
+        return button
 
     def do_startup(self) -> None:
         Gtk.Application.do_startup(self)
@@ -541,54 +600,50 @@ class SwirPlayer(Gtk.Application):
             self.window.present()
             return
         window = Gtk.ApplicationWindow(application=self)
-        window.set_title("SWIR Player")
+        window.set_title(self._t("window_title"))
         window.set_default_size(1100, 720)
         window.add_css_class("swir-app")
+        window.set_direction(Gtk.TextDirection.RTL if self.locale.text_direction == "rtl" else Gtk.TextDirection.LTR)
         self.window = window
-
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         window.set_child(root)
-
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         header.add_css_class("swir-header")
-        brand = Gtk.Label(label="▶  SWIR PLAYER")
+        brand = Gtk.Label(label=self._t("brand"))
         brand.add_css_class("swir-brand")
         brand.set_xalign(0)
         header.append(brand)
         spacer = Gtk.Box()
         spacer.set_hexpand(True)
         header.append(spacer)
-        add_button = Gtk.Button(label="Add media")
-        add_button.add_css_class("swir-primary")
+        add_button = self._button(self._t("add_media"), "add_media_tooltip", primary=True)
         add_button.connect("clicked", lambda *_: self._choose_media())
         header.append(add_button)
         root.append(header)
-
         body = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
         body.set_hexpand(True)
         body.set_vexpand(True)
         body.set_position(350)
         root.append(body)
-
         library_panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         library_panel.add_css_class("swir-panel")
-        library_title = Gtk.Label(label="Library • Favorites")
+        library_title = Gtk.Label(label=self._t("library"))
         library_title.add_css_class("swir-brand")
         library_title.set_xalign(0)
         library_panel.append(library_title)
         self.track_list = Gtk.ListBox()
         self.track_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self.track_list.set_focusable(True)
         self.track_list.connect("row-activated", self._on_row_activated)
+        self.accessibility_controls.append(self.track_list)
         scroller = Gtk.ScrolledWindow()
         scroller.set_vexpand(True)
         scroller.set_child(self.track_list)
         library_panel.append(scroller)
-        fav = Gtk.Button(label="Add current to Favorites")
-        fav.add_css_class("swir-button")
+        fav = self._button(self._t("add_favorite"), "add_favorite_tooltip")
         fav.connect("clicked", self._add_current_to_favorites)
         library_panel.append(fav)
         body.set_start_child(library_panel)
-
         player_panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         player_panel.add_css_class("swir-panel")
         self.picture = Gtk.Picture()
@@ -601,48 +656,47 @@ class SwirPlayer(Gtk.Application):
             except (TypeError, GLib.Error):
                 pass
         player_panel.append(self.picture)
-
-        self.title_label = Gtk.Label(label="Choose a local audio or video file")
+        self.title_label = Gtk.Label(label=self._t("choose_media"))
         self.title_label.add_css_class("swir-brand")
         player_panel.append(self.title_label)
-
         controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        prev_button = Gtk.Button(label="⏮")
+        prev_button = self._button("⏮", "previous_tooltip")
         prev_button.connect("clicked", lambda *_: self.previous_track())
         controls.append(prev_button)
-        self.play_button = Gtk.Button(label="▶")
-        self.play_button.add_css_class("swir-primary")
+        self.play_button = self._button("▶", "play_tooltip", primary=True)
         self.play_button.connect("clicked", lambda *_: self.play_pause())
         controls.append(self.play_button)
-        stop_button = Gtk.Button(label="■")
+        stop_button = self._button("■", "stop_tooltip")
         stop_button.connect("clicked", lambda *_: self.stop())
         controls.append(stop_button)
-        next_button = Gtk.Button(label="⏭")
+        next_button = self._button("⏭", "next_tooltip")
         next_button.connect("clicked", lambda *_: self.next_track())
         controls.append(next_button)
-
         self.seek_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 0.1)
         self.seek_scale.set_hexpand(True)
         self.seek_scale.set_draw_value(False)
+        self.seek_scale.set_focusable(True)
+        self.seek_scale.set_tooltip_text(self._t("seek_tooltip"))
+        self.accessibility_controls.append(self.seek_scale)
         seek_gesture = Gtk.GestureClick()
         seek_gesture.connect("pressed", lambda *_: setattr(self, "_seek_drag", True))
         seek_gesture.connect("released", self._seek_released)
         self.seek_scale.add_controller(seek_gesture)
         controls.append(self.seek_scale)
-
         volume = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 1, 0.01)
         volume.set_value(self.volume)
         volume.set_size_request(130, -1)
+        volume.set_focusable(True)
+        volume.set_tooltip_text(self._t("volume_tooltip"))
         volume.connect("value-changed", lambda scale: self.set_volume(scale.get_value()))
+        self.accessibility_controls.append(volume)
         controls.append(volume)
         player_panel.append(controls)
-
-        self.status_label = Gtk.Label(label="Local files only • MPRIS media-key integration")
+        self.status_label = Gtk.Label(label=self._t("status_idle"))
         self.status_label.add_css_class("swir-muted")
         self.status_label.set_xalign(0)
         player_panel.append(self.status_label)
         body.set_end_child(player_panel)
-
         self._refresh_library()
         GLib.timeout_add(500, self._tick)
         window.connect("map", self._on_mapped)
@@ -651,7 +705,7 @@ class SwirPlayer(Gtk.Application):
     def _choose_media(self) -> None:
         if not self.window:
             return
-        dialog = Gtk.FileDialog(title="Add local media to SWIR Player")
+        dialog = Gtk.FileDialog(title=self._t("dialog_title"))
         dialog.set_modal(True)
         dialog.open(self.window, None, self._file_chosen)
 
@@ -660,16 +714,16 @@ class SwirPlayer(Gtk.Application):
             gio_file = dialog.open_finish(result)
             path_text = gio_file.get_path()
             if not path_text:
-                raise PlayerPolicyError("only local media files are accepted")
+                raise PlayerPolicyError(self._t("only_local"))
             self._add_and_select(_validated_local_media(path_text), autoplay=True)
         except (GLib.Error, PlayerPolicyError) as exc:
-            self._set_status(f"Could not open media: {exc}")
+            self._set_status(self._t("open_failed", reason=exc))
 
     def _add_and_select(self, path: pathlib.Path, *, autoplay: bool) -> None:
         try:
             track = self.library.add(path)
         except (OSError, PlayerPolicyError) as exc:
-            self._set_status(f"Library update failed: {exc}")
+            self._set_status(self._t("library_failed", reason=exc))
             return
         self._refresh_library()
         self._select_track(track, autoplay=autoplay)
@@ -706,11 +760,11 @@ class SwirPlayer(Gtk.Application):
         try:
             path = _validated_local_media(track.path)
         except PlayerPolicyError as exc:
-            self._set_status(f"Track unavailable: {exc}")
+            self._set_status(self._t("track_unavailable", reason=exc))
             return
         self.current_track = Track.from_path(path)
         try:
-            self.current_index = next(index for index, item in enumerate(self.library.tracks) if item.path == str(path))
+            self.current_index = next(i for i, item in enumerate(self.library.tracks) if item.path == str(path))
         except StopIteration:
             self.current_index = -1
         self.pipeline.set_state(Gst.State.NULL)
@@ -721,7 +775,7 @@ class SwirPlayer(Gtk.Application):
             self.title_label.set_text(self.current_track.title)
         if self.play_button:
             self.play_button.set_label("⏸" if autoplay else "▶")
-        self._set_status(f"{'Playing' if autoplay else 'Ready'} • {path.name}")
+        self._set_status(f"{self._t('playing') if autoplay else self._t('ready')} • {path.name}")
         self._notify_track()
         self._mpris.changed()
 
@@ -744,10 +798,7 @@ class SwirPlayer(Gtk.Application):
         self._mpris.changed(("PlaybackStatus",))
 
     def play_pause(self) -> None:
-        if self.playback_status == "Playing":
-            self.pause()
-        else:
-            self.play()
+        self.pause() if self.playback_status == "Playing" else self.play()
 
     def stop(self) -> None:
         self.pipeline.set_state(Gst.State.READY)
@@ -757,16 +808,14 @@ class SwirPlayer(Gtk.Application):
         self._mpris.changed(("PlaybackStatus",))
 
     def next_track(self) -> None:
-        if not self.library.tracks:
-            return
-        self.current_index = (self.current_index + 1) % len(self.library.tracks)
-        self._select_track(self.library.tracks[self.current_index], autoplay=True)
+        if self.library.tracks:
+            self.current_index = (self.current_index + 1) % len(self.library.tracks)
+            self._select_track(self.library.tracks[self.current_index], autoplay=True)
 
     def previous_track(self) -> None:
-        if not self.library.tracks:
-            return
-        self.current_index = (self.current_index - 1) % len(self.library.tracks)
-        self._select_track(self.library.tracks[self.current_index], autoplay=True)
+        if self.library.tracks:
+            self.current_index = (self.current_index - 1) % len(self.library.tracks)
+            self._select_track(self.library.tracks[self.current_index], autoplay=True)
 
     def has_tracks(self) -> bool:
         return bool(self.library.tracks)
@@ -785,47 +834,34 @@ class SwirPlayer(Gtk.Application):
         return int(value // 1000) if ok and value > 0 else 0
 
     def seek_absolute(self, position_us: int) -> None:
-        if self.current_track is None:
-            return
-        bounded = max(0, int(position_us)) * 1000
-        self.pipeline.seek_simple(Gst.Format.TIME, Gst.SeekFlags.FLUSH | Gst.SeekFlags.KEY_UNIT, bounded)
+        if self.current_track is not None:
+            self.pipeline.seek_simple(Gst.Format.TIME, Gst.SeekFlags.FLUSH | Gst.SeekFlags.KEY_UNIT, max(0, int(position_us)) * 1000)
 
     def seek_relative(self, offset_us: int) -> None:
         self.seek_absolute(max(0, self.position_us() + int(offset_us)))
 
     def _seek_released(self, _gesture, _presses, _x, _y) -> None:
         self._seek_drag = False
-        if not self.seek_scale:
-            return
-        duration = self.duration_us()
-        if duration:
+        if self.seek_scale and (duration := self.duration_us()):
             self.seek_absolute(int(duration * (self.seek_scale.get_value() / 100.0)))
 
     def _tick(self) -> bool:
-        if self.seek_scale and not self._seek_drag:
-            duration = self.duration_us()
-            if duration:
-                self.seek_scale.set_value(min(100.0, self.position_us() * 100.0 / duration))
+        if self.seek_scale and not self._seek_drag and (duration := self.duration_us()):
+            self.seek_scale.set_value(min(100.0, self.position_us() * 100.0 / duration))
         return True
 
     def _on_bus_message(self, _bus: Gst.Bus, message: Gst.Message) -> None:
         if message.type == Gst.MessageType.ERROR:
             error, debug = message.parse_error()
             self.playback_status = "Stopped"
-            self._set_status(f"Playback error: {error.message[:160]}")
+            self._set_status(self._t("playback_error", reason=error.message[:160]))
             print(f"SWIR Player GStreamer error: {error}; {debug}", file=sys.stderr)
             self._mpris.changed(("PlaybackStatus",))
         elif message.type == Gst.MessageType.EOS:
             self.next_track()
         elif message.type == Gst.MessageType.STATE_CHANGED and message.src == self.pipeline:
             _old, new, _pending = message.parse_state_changed()
-            mapping = {
-                Gst.State.PLAYING: "Playing",
-                Gst.State.PAUSED: "Paused",
-                Gst.State.READY: "Stopped",
-                Gst.State.NULL: "Stopped",
-            }
-            status = mapping.get(new)
+            status = {Gst.State.PLAYING: "Playing", Gst.State.PAUSED: "Paused", Gst.State.READY: "Stopped", Gst.State.NULL: "Stopped"}.get(new)
             if status and status != self.playback_status:
                 self.playback_status = status
                 self._mpris.changed(("PlaybackStatus",))
@@ -833,20 +869,20 @@ class SwirPlayer(Gtk.Application):
     def _notify_track(self) -> None:
         if self.current_track is None:
             return
-        notification = Gio.Notification.new("Now playing")
+        notification = Gio.Notification.new(self._t("now_playing"))
         notification.set_body(self.current_track.title)
         notification.set_default_action("app.play-pause")
         self.send_notification("now-playing", notification)
 
     def _add_current_to_favorites(self, _button: Gtk.Button) -> None:
         if self.current_track is None:
-            self._set_status("Choose a track first.")
+            self._set_status(self._t("choose_first"))
             return
         try:
             self.library.add_to_playlist("Favorites", self.current_track)
-            self._set_status("Added to Favorites.")
+            self._set_status(self._t("favorite_added"))
         except (OSError, PlayerPolicyError) as exc:
-            self._set_status(f"Playlist update failed: {exc}")
+            self._set_status(self._t("playlist_failed", reason=exc))
 
     def _set_status(self, text: str) -> None:
         if self.status_label:
@@ -855,9 +891,8 @@ class SwirPlayer(Gtk.Application):
     def mpris_metadata(self) -> dict[str, GLib.Variant]:
         if self.current_track is None:
             return {}
-        track_id = f"/dev/swir/Player/track/{max(0, self.current_index)}"
         return {
-            "mpris:trackid": GLib.Variant("o", track_id),
+            "mpris:trackid": GLib.Variant("o", f"/dev/swir/Player/track/{max(0, self.current_index)}"),
             "xesam:title": GLib.Variant("s", self.current_track.title),
             "xesam:url": GLib.Variant("s", pathlib.Path(self.current_track.path).as_uri()),
             "mpris:length": GLib.Variant("x", self.duration_us()),
@@ -890,6 +925,8 @@ class SwirPlayer(Gtk.Application):
         if path.parent.resolve() != runtime:
             raise RuntimeError("refusing player evidence outside XDG_RUNTIME_DIR")
         library_path = self.library.path
+        focusable = [widget for widget in self.accessibility_controls if widget.get_focusable()]
+        tooltip_controls = [widget for widget in focusable if bool(widget.get_tooltip_text())]
         payload = {
             "schema": EVIDENCE_SCHEMA,
             "passed": bool(preroll_ok and self._mpris_started),
@@ -897,6 +934,13 @@ class SwirPlayer(Gtk.Application):
             "nativeToolkit": "gtk4-gstreamer",
             "displayProtocol": "wayland",
             "windowMapped": True,
+            "requestedLanguage": self.locale.requested_language,
+            "catalogLanguage": self.locale.catalog_language,
+            "localeFallback": self.locale.fallback,
+            "textDirection": self.locale.text_direction,
+            "localizedWindowTitle": self.window.get_title() if self.window else "",
+            "accessibilityFocusableControls": len(focusable),
+            "accessibilityTooltipControls": len(tooltip_controls),
             "gstreamerPlaybin": True,
             "gstreamerGtk4VideoSinkAvailable": self.video_sink_available,
             "pipelinePrerollPassed": preroll_ok,
@@ -924,6 +968,11 @@ class SwirPlayer(Gtk.Application):
 
 
 def _self_test() -> int:
+    assert player_locale("pl_PL.UTF-8").catalog_language == "pl-PL"
+    assert player_locale("no_NO.UTF-8").catalog_language == "nb-NO"
+    fallback = player_locale("de-DE")
+    assert fallback.catalog_language == "en" and fallback.fallback is True
+    assert player_locale("pl-PL").text("window_title") == "Odtwarzacz SWIR"
     with tempfile.TemporaryDirectory(prefix="swir-player-selftest-") as temp:
         root = pathlib.Path(temp)
         data = root / "data"

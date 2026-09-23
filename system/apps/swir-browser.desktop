@@ -1,7 +1,17 @@
 [Desktop Entry]
 Type=Application
 Name=SWIR Browser
+Name[pl]=Przeglądarka SWIR
+Name[nb]=SWIR-nettleser
+GenericName=Web Browser
+GenericName[pl]=Przeglądarka internetowa
+GenericName[nb]=Nettleser
 Comment=Browse the web with the native SWIR OS browser
+Comment[pl]=Przeglądaj internet w natywnej przeglądarce SWIR OS
+Comment[nb]=Surf på nettet med den innebygde nettleseren i SWIR OS
+Keywords=web;browser;internet;private;bookmarks;
+Keywords[pl]=internet;przeglądarka;sieć;prywatne;zakładki;
+Keywords[nb]=nett;nettleser;internett;privat;bokmerker;
 Exec=/usr/local/bin/swir-browser %u
 TryExec=/usr/local/bin/swir-browser
 Icon=web-browser

@@ -5,11 +5,13 @@ on:
     branches: [main]
     paths:
       - 'system/apps/swir-system-monitor.py'
+      - 'system/apps/core_runtime.py'
       - 'system/SWIR-NATIVE-DIAGNOSTICS-0.1.md'
       - '.github/workflows/system-native-diagnostics.yml'
   pull_request:
     paths:
       - 'system/apps/swir-system-monitor.py'
+      - 'system/apps/core_runtime.py'
       - 'system/SWIR-NATIVE-DIAGNOSTICS-0.1.md'
       - '.github/workflows/system-native-diagnostics.yml'
   workflow_dispatch:
@@ -40,6 +42,8 @@ jobs:
           grep -F 'shell=False' system/apps/swir-system-monitor.py >/dev/null
           grep -F 'diagnosticsReadOnly": True' system/apps/swir-system-monitor.py >/dev/null
           grep -F 'evidenceIncludesLogContent": False' system/apps/swir-system-monitor.py >/dev/null
+          grep -F '"pl-PL": {' system/apps/swir-system-monitor.py >/dev/null
+          grep -F '"nb-NO": {' system/apps/swir-system-monitor.py >/dev/null
           ! grep -RE 'subprocess\.(run|Popen).*\b(sudo|pkexec)\b' system/apps/swir-system-monitor.py
           python3 - <<'PY'
           import ast
@@ -71,14 +75,20 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends weston python3-gi gir1.2-gtk-4.0 systemd
-      - name: Map SWIR System Monitor diagnostics on headless Wayland
+      - name: Map localized diagnostics on headless Wayland
         shell: bash
         run: |
           set -euo pipefail
           RUNTIME="${{ runner.temp }}/swir-runtime"
-          mkdir -p "$RUNTIME"
-          chmod 0700 "$RUNTIME"
+          CONFIG="${{ runner.temp }}/swir-diagnostics-config"
+          mkdir -p "$RUNTIME" "$CONFIG/swir"
+          chmod 0700 "$RUNTIME" "$CONFIG" "$CONFIG/swir"
+          cat >"$CONFIG/swir/settings.json" <<'JSON'
+          {"schema":"swir.user-settings/0.1","appearance":"dark","language":"nb-NO","clock24h":true,"themeId":"builtin.swir-dark"}
+          JSON
+          chmod 0600 "$CONFIG/swir/settings.json"
           export XDG_RUNTIME_DIR="$RUNTIME"
+          export XDG_CONFIG_HOME="$CONFIG"
           export WAYLAND_DISPLAY=wayland-swir-diagnostics
           export GDK_BACKEND=wayland
 
@@ -100,15 +110,23 @@ jobs:
             python3 system/apps/swir-system-monitor.py
 
           python3 - "$EVIDENCE" <<'PY'
-          import json, sys
-          evidence = json.load(open(sys.argv[1], encoding='utf-8'))
-          assert evidence['schema'] == 'swir.native-system-monitor-runtime-evidence/0.1'
+          import json, os, stat, sys
+          path = sys.argv[1]
+          evidence = json.load(open(path, encoding='utf-8'))
+          assert evidence['schema'] == 'swir.native-system-monitor-runtime-evidence/0.2'
           assert evidence['passed'] is True
           assert evidence['applicationId'] == 'dev.swir.SystemMonitor'
           assert evidence['nativeToolkit'] == 'gtk4'
           assert evidence['displayProtocol'] == 'wayland'
           assert evidence['windowMapped'] is True
           assert evidence['privilegedOperations'] is False
+          assert evidence['localeRequested'] == 'nb-NO'
+          assert evidence['localeCatalog'] == 'nb-NO'
+          assert evidence['localeFallback'] is False
+          assert evidence['textDirection'] == 'ltr'
+          assert evidence['localizedSurfaceVerified'] is True
+          assert evidence['accessibilityFocusVerified'] is True
+          assert evidence['accessibilityTooltipsVerified'] is True
           assert 0 < evidence['visibleProcessCount'] <= evidence['processRowsBounded'] == 200
           assert evidence['memTotalKiB'] > 0
           assert evidence['diagnosticsReadOnly'] is True
@@ -123,6 +141,7 @@ jobs:
           assert 0 <= evidence['failedUnitsCount'] <= 200
           assert 0 <= evidence['journalVisibleLineCount'] <= 50
           assert evidence['evidenceIncludesLogContent'] is False
+          assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
           for forbidden in ('failedUnitsOutput', 'journalOutput', 'journalLines', 'kernelVersion', 'osRelease'):
               assert forbidden not in evidence
           PY

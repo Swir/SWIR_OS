@@ -1,6 +1,6 @@
 # SWIR Native Task Manager 0.1
 
-Status: implemented System Edition process-control foundation inside the native **SWIR System Monitor**.
+Status: implemented System Edition process-control foundation inside the native **SWIR System Monitor**, including reviewed runtime locale/accessibility evidence.
 
 ## Purpose
 
@@ -14,10 +14,16 @@ The Processes tab provides a bounded native view of current Linux processes plus
 - Immediately before signaling, SWIR re-reads the target and rejects ownership, start-time or name changes so a recycled PID is not silently targeted.
 - Only a process whose real UID equals `os.getuid()` can be ended.
 - PID 1, the System Monitor itself and its discovered ancestor/session chain are protected.
-- The only signal exposed by this surface is `SIGTERM`; there is no `SIGKILL`, process-group kill or arbitrary signal selector.
+- The only signal exposed by this surface is `SIGTERM`; there is no force-kill, process-group kill or arbitrary signal selector.
 - Linux pidfd signaling is preferred where the runtime supports `os.pidfd_open` and `signal.pidfd_send_signal`; the bounded fallback is a single-PID `os.kill(..., SIGTERM)` after identity revalidation.
 - The GUI requires an explicit confirmation dialog and warns that unsaved work in the target application may be lost.
-- No `sudo`, `su`, `pkexec`, Polkit request, shell command or privileged helper is used by process termination.
+- No privilege broker, shell command or privileged helper is used by process termination.
+
+## Locale and accessibility
+
+The real GTK4 surface consumes the bounded owner-only SWIR `language` preference from `core_runtime.UserSettingsStore`. Reviewed catalogs cover English, Polish and Norwegian Bokmål; unsupported or malformed selections render the English catalog. Window chrome, process filtering/help, confirmation/status text and the Processes/Diagnostics tabs use the selected catalog and the rendered catalog controls text direction.
+
+The process filter, End Process action and diagnostics refresh action remain keyboard-focusable and expose localized tooltips. Runtime evidence records only locale/catalog/fallback/direction and boolean accessibility assertions; it does not export process names or diagnostic payload.
 
 ## Diagnostics boundary
 
@@ -25,8 +31,8 @@ The separate Diagnostics tab remains read-only. Its fixed `systemctl` and `journ
 
 ## Verification
 
-`.github/workflows/system-native-task-manager.yml` verifies syntax and the pure policy self-test, rejects forbidden escalation/SIGKILL/process-group paths, exercises a real SIGTERM against a disposable child owned by the CI user, maps the real GTK4 application on headless Wayland and checks bounded runtime evidence. A Debian 13 container gate verifies the target Python/GTK4 runtime and pidfd support. The existing diagnostics and native-core workflows continue to run when the shared System Monitor changes.
+`.github/workflows/system-native-task-manager.yml` verifies syntax and the pure policy/i18n self-test, rejects forbidden escalation/force-kill/process-group paths, exercises a real SIGTERM against a disposable child owned by the CI user, persists a Polish SWIR user profile, maps the real GTK4 application on headless Wayland and checks localized surface, focus/tooltips, owner-only evidence permissions and the existing bounded safety contract. A Debian 13 container gate verifies the target Python/GTK4 runtime and pidfd support. The diagnostics and native-core workflows continue to run when the shared System Monitor changes.
 
 ## Roadmap accounting
 
-This materially improves the Task Manager / System Monitor part of the native daily-use suite, but it does **not** by itself close the umbrella `essential native Linux application suite for dependable daily use` roadmap item. Canonical roadmap progress must remain unchanged until that existing deliverable is actually complete and verified.
+This materially improves the Task Manager / System Monitor part of the native daily-use suite, but it does **not** by itself close the umbrella `essential native Linux application suite for dependable daily use` roadmap item. Canonical roadmap progress remains unchanged until that existing deliverable is actually complete and verified.

@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'system/apps/swir-photo-studio.py'
+      - 'system/apps/core_runtime.py'
       - 'system/apps/swir-photo-studio.desktop'
       - 'system/session/swir-shell.py'
       - 'system/session/provision-graphical-session.sh'
@@ -14,6 +15,7 @@ on:
   pull_request:
     paths:
       - 'system/apps/swir-photo-studio.py'
+      - 'system/apps/core_runtime.py'
       - 'system/apps/swir-photo-studio.desktop'
       - 'system/session/swir-shell.py'
       - 'system/session/provision-graphical-session.sh'
@@ -43,9 +45,17 @@ jobs:
       - name: Compile and verify Photo Studio integration policy
         run: |
           set -euo pipefail
-          python3 -m py_compile system/apps/swir-photo-studio.py system/session/swir-shell.py
+          python3 -m py_compile system/apps/swir-photo-studio.py system/apps/core_runtime.py system/session/swir-shell.py
           python3 system/apps/swir-photo-studio.py --self-test
           desktop-file-validate system/apps/swir-photo-studio.desktop
+          grep -F 'Name[pl]=Studio zdjęć SWIR' system/apps/swir-photo-studio.desktop >/dev/null
+          grep -F 'Name[nb]=SWIR fotostudio' system/apps/swir-photo-studio.desktop >/dev/null
+          grep -F 'GenericName[pl]=Edytor i przeglądarka obrazów' system/apps/swir-photo-studio.desktop >/dev/null
+          grep -F 'GenericName[nb]=Bilderedigerer og bildeviser' system/apps/swir-photo-studio.desktop >/dev/null
+          grep -F 'Comment[pl]=Przeglądaj i edytuj lokalne obrazy w natywnym Studio zdjęć SWIR' system/apps/swir-photo-studio.desktop >/dev/null
+          grep -F 'Comment[nb]=Vis og rediger lokale bilder i det opprinnelige SWIR fotostudio' system/apps/swir-photo-studio.desktop >/dev/null
+          grep -F 'Keywords[pl]=zdjęcia;obrazy;przeglądarka;edytor;kadrowanie;adnotacje;' system/apps/swir-photo-studio.desktop >/dev/null
+          grep -F 'Keywords[nb]=foto;bilde;viser;redigering;beskjæring;merknader;' system/apps/swir-photo-studio.desktop >/dev/null
           bash -n system/session/provision-graphical-session.sh
           grep -F 'Photo Studio", (("/usr/local/bin/swir-photo-studio",)' system/session/swir-shell.py >/dev/null
           grep -F 'system/apps/swir-photo-studio.py' system/session/provision-graphical-session.sh >/dev/null
@@ -55,7 +65,9 @@ jobs:
           grep -F 'MAX_PIXELS: Final = 40_000_000' system/apps/swir-photo-studio.py >/dev/null
           grep -F 'MAX_ANNOTATION_CHARS: Final = 64' system/apps/swir-photo-studio.py >/dev/null
           grep -F 'MAX_LINE_WIDTH: Final = 12' system/apps/swir-photo-studio.py >/dev/null
-          grep -F 'swir.native-photo-studio-runtime-evidence/0.3' system/apps/swir-photo-studio.py >/dev/null
+          grep -F 'swir.native-photo-studio-runtime-evidence/0.4' system/apps/swir-photo-studio.py >/dev/null
+          grep -F 'from core_runtime import UserSettingsStore, normalize_language_tag' system/apps/swir-photo-studio.py >/dev/null
+          grep -F 'catalog = requested if requested in _TRANSLATIONS else "en"' system/apps/swir-photo-studio.py >/dev/null
           grep -F 'def _crop_pixbuf(' system/apps/swir-photo-studio.py >/dev/null
           grep -F 'def _transform_pixels(' system/apps/swir-photo-studio.py >/dev/null
           grep -F 'def _annotate_text(' system/apps/swir-photo-studio.py >/dev/null
@@ -83,6 +95,8 @@ jobs:
             weston dbus-daemon desktop-file-utils libglib2.0-bin \
             python3-gi gir1.2-gtk-4.0 gir1.2-gdkpixbuf-2.0
           sudo install -m 0755 system/apps/swir-photo-studio.py /usr/local/bin/swir-photo-studio
+          sudo install -d -m 0755 /usr/local/lib/swir
+          sudo install -m 0644 system/apps/core_runtime.py /usr/local/lib/swir/core_runtime.py
           sudo install -m 0644 system/apps/swir-photo-studio.desktop /usr/share/applications/swir-photo-studio.desktop
           sudo update-desktop-database /usr/share/applications
           python3 system/apps/swir-photo-studio.py --self-test
@@ -91,8 +105,14 @@ jobs:
           set -euo pipefail
           RUNTIME="${{ runner.temp }}/swir-photo-runtime"
           EXPORT_DIR="$RUNTIME/export"
-          mkdir -p "$RUNTIME" "$EXPORT_DIR"
-          chmod 0700 "$RUNTIME" "$EXPORT_DIR"
+          CONFIG_DIR="$RUNTIME/config"
+          mkdir -p "$RUNTIME" "$EXPORT_DIR" "$CONFIG_DIR/swir"
+          chmod 0700 "$RUNTIME" "$EXPORT_DIR" "$CONFIG_DIR" "$CONFIG_DIR/swir"
+          cat > "$CONFIG_DIR/swir/settings.json" <<'JSON'
+          {"schema":"swir.user-settings/0.1","appearance":"dark","language":"pl-PL","clock24h":true,"themeId":"builtin.swir-dark"}
+          JSON
+          chmod 0600 "$CONFIG_DIR/swir/settings.json"
+          export XDG_CONFIG_HOME="$CONFIG_DIR"
           export XDG_RUNTIME_DIR="$RUNTIME"
           export WAYLAND_DISPLAY=wayland-swir-photo
           export GDK_BACKEND=wayland
@@ -124,17 +144,21 @@ jobs:
                 SWIR_APP_EVIDENCE_PATH="$RUNTIME/photo.json" \
                 SWIR_PHOTO_E2E_IMAGE="$RUNTIME/source.png" \
                 SWIR_PHOTO_E2E_EXPORT_DIR="$EXPORT_DIR" \
-            python3 system/apps/swir-photo-studio.py
+            /usr/local/bin/swir-photo-studio
 
           python3 - "$RUNTIME/photo.json" "$RUNTIME/source.png" "$EXPORT_DIR" <<'PY'
           import json, pathlib, stat, sys
           evidence = json.load(open(sys.argv[1], encoding='utf-8'))
           source = pathlib.Path(sys.argv[2])
           export_dir = pathlib.Path(sys.argv[3])
-          assert evidence['schema'] == 'swir.native-photo-studio-runtime-evidence/0.3'
+          assert evidence['schema'] == 'swir.native-photo-studio-runtime-evidence/0.4'
           assert evidence['passed'] is True
           assert evidence['applicationId'] == 'dev.swir.PhotoStudio'
           assert evidence['nativeToolkit'] == 'gtk4-gdkpixbuf'
+          assert evidence['localeRequested'] == 'pl-PL' and evidence['localeCatalog'] == 'pl-PL'
+          assert evidence['localeFallback'] is False and evidence['textDirection'] == 'ltr' and evidence['textDirectionApplied'] is True
+          assert evidence['localizedWindowTitle'] == 'Studio zdjęć SWIR' and evidence['localizedOpenLabel'] == 'Otwórz obraz' and evidence['localizedUndoLabel'] == 'Cofnij'
+          assert evidence['localizedSurfaceVerified'] is True and evidence['accessibilityFocusVerified'] is True and evidence['accessibilityTooltipsVerified'] is True
           assert evidence['displayProtocol'] == 'wayland' and evidence['windowMapped'] is True
           assert evidence['sourceReadOnly'] is True and source.is_file()
           assert evidence['localFilesOnly'] is True and evidence['remoteUriInputAccepted'] is False
