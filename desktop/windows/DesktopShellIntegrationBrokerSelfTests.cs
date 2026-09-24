@@ -157,6 +157,18 @@ internal static class DesktopShellIntegrationBrokerSelfTests
             Require(string.IsNullOrEmpty(captured.Arguments), "Konofix launch must not inject arguments");
             Require(captured.WorkingDirectory == install, "Konofix working directory mismatch");
 
+            var foregroundCalled = false;
+            var existing = new DesktopKonofixLauncher(
+                resolver: () => executable,
+                versionVerifier: _ => true,
+                starter: _ => throw new InvalidOperationException("existing client must not spawn a duplicate"),
+                approvedRoots: new[] { root },
+                runningResolver: _ => new ExistingKonofixProcess(31337, new IntPtr(7)),
+                foreground: handle => { foregroundCalled = handle == new IntPtr(7); return foregroundCalled; });
+            var activated = existing.Launch();
+            Require(!activated.Started && activated.AlreadyRunning && activated.Focused, "existing Konofix client must be reused/focused");
+            Require(activated.ProcessId == 31337 && foregroundCalled, "existing Konofix process identity/focus was not preserved");
+
             var missing = new DesktopKonofixLauncher(() => null, _ => true, _ => 1, new[] { root });
             ExpectKonofixFailure("KONOFIX_NOT_INSTALLED", () => missing.Launch());
 

@@ -334,7 +334,10 @@
     }
     try {
       const result = await shell[method]();
-      toast(app.title, result?.started ? "Konofix launched." : "Native launch completed.");
+      const message = result?.alreadyRunning
+        ? (result?.focused ? "Konofix is already running — window restored." : "Konofix is already running.")
+        : (result?.started ? "Konofix launched." : "Native launch completed.");
+      toast(app.title, message);
     } catch (error) {
       const code = String(error?.code || "");
       const message = code === "KONOFIX_NOT_INSTALLED"

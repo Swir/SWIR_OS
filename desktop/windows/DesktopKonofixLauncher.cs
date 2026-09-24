@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Microsoft.Win32;
 
 namespace Swir.Desktop.Host;
@@ -14,12 +15,16 @@ internal sealed class DesktopKonofixLauncher
     private readonly Func<string?> _resolver;
     private readonly Func<string, bool> _versionVerifier;
     private readonly Func<ProcessStartInfo, int> _starter;
+    private readonly Func<string, ExistingKonofixProcess?> _runningResolver;
+    private readonly Func<IntPtr, bool> _foreground;
 
     internal DesktopKonofixLauncher(
         Func<string?>? resolver = null,
         Func<string, bool>? versionVerifier = null,
         Func<ProcessStartInfo, int>? starter = null,
-        IEnumerable<string>? approvedRoots = null)
+        IEnumerable<string>? approvedRoots = null,
+        Func<string, ExistingKonofixProcess?>? runningResolver = null,
+        Func<IntPtr, bool>? foreground = null)
     {
         _approvedRoots = (approvedRoots ?? DefaultRoots())
             .Where(value => !string.IsNullOrWhiteSpace(value))
@@ -29,6 +34,8 @@ internal sealed class DesktopKonofixLauncher
         _versionVerifier = versionVerifier ?? HasExpectedFileVersion;
         _resolver = resolver ?? ResolveInstalledExecutable;
         _starter = starter ?? StartProcess;
+        _runningResolver = runningResolver ?? FindRunningQualifiedClient;
+        _foreground = foreground ?? SetForegroundWindow;
     }
 
     internal object Describe()
@@ -57,6 +64,13 @@ internal sealed class DesktopKonofixLauncher
             throw new DesktopKonofixException("KONOFIX_NOT_INSTALLED", "Konofix Chat 0.5.1 is not installed in an approved user or Program Files location.");
 
         executable = RequireQualifiedExecutable(executable);
+        var existing = _runningResolver(executable);
+        if (existing is not null)
+        {
+            var focused = existing.MainWindowHandle != IntPtr.Zero && _foreground(existing.MainWindowHandle);
+            return new KonofixLaunchResult(Schema, ProductName, ExpectedVersion, false, existing.ProcessId, false, false, true, focused);
+        }
+
         var start = new ProcessStartInfo
         {
             FileName = executable,
@@ -74,7 +88,7 @@ internal sealed class DesktopKonofixLauncher
         if (pid <= 0)
             throw new DesktopKonofixException("KONOFIX_LAUNCH_FAILED", "Windows did not return a valid Konofix process id.");
 
-        return new KonofixLaunchResult(Schema, ProductName, ExpectedVersion, true, pid, false, false);
+        return new KonofixLaunchResult(Schema, ProductName, ExpectedVersion, true, pid, false, false, false, false);
     }
 
     private string? TryResolveQualifiedExecutable()
@@ -229,15 +243,46 @@ internal sealed class DesktopKonofixLauncher
         return text.Trim();
     }
 
+    private static ExistingKonofixProcess? FindRunningQualifiedClient(string executable)
+    {
+        var expected = Path.GetFullPath(executable);
+        var processName = Path.GetFileNameWithoutExtension(expected);
+        foreach (var process in Process.GetProcessesByName(processName))
+        {
+            using (process)
+            {
+                try
+                {
+                    var runningPath = process.MainModule?.FileName;
+                    if (string.IsNullOrWhiteSpace(runningPath)) continue;
+                    if (!string.Equals(Path.GetFullPath(runningPath), expected, StringComparison.OrdinalIgnoreCase)) continue;
+                    return new ExistingKonofixProcess(process.Id, process.MainWindowHandle);
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
+                {
+                    // Never trust process name alone when path inspection fails.
+                }
+            }
+        }
+        return null;
+    }
+
     private static int StartProcess(ProcessStartInfo info)
     {
         using var process = Process.Start(info) ?? throw new InvalidOperationException("Process.Start returned null.");
         return process.Id;
     }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
 }
 
+internal sealed record ExistingKonofixProcess(int ProcessId, IntPtr MainWindowHandle);
+
 internal sealed record KonofixLaunchResult(
-    string Schema, string Product, string Version, bool Started, int ProcessId, bool ShellExecution, bool LegacyDataImported);
+    string Schema, string Product, string Version, bool Started, int ProcessId, bool ShellExecution, bool LegacyDataImported,
+    bool AlreadyRunning, bool Focused);
 
 internal sealed class DesktopKonofixException(string code, string message, Exception? innerException = null)
     : Exception(message, innerException)
