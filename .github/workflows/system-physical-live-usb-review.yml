@@ -1,0 +1,134 @@
+name: System Physical Live USB Review Gate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'system/e2e/verify-physical-live-usb-sequence.py'
+      - 'system/e2e/verify-physical-live-usb-sequence.selftest.py'
+      - 'system/e2e/verify-physical-live-usb-review.py'
+      - 'system/e2e/verify-physical-live-usb-review.selftest.py'
+      - 'system/e2e/new-physical-live-usb-review.py'
+      - 'system/e2e/new-physical-live-usb-review.selftest.py'
+      - 'system/SWIR-PHYSICAL-LIVE-USB-REVIEW-GATE-0.1.md'
+      - '.github/workflows/system-physical-live-usb-review.yml'
+  pull_request:
+    paths:
+      - 'system/e2e/verify-physical-live-usb-sequence.py'
+      - 'system/e2e/verify-physical-live-usb-sequence.selftest.py'
+      - 'system/e2e/verify-physical-live-usb-review.py'
+      - 'system/e2e/verify-physical-live-usb-review.selftest.py'
+      - 'system/e2e/new-physical-live-usb-review.py'
+      - 'system/e2e/new-physical-live-usb-review.selftest.py'
+      - 'system/SWIR-PHYSICAL-LIVE-USB-REVIEW-GATE-0.1.md'
+      - '.github/workflows/system-physical-live-usb-review.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: system-physical-live-usb-review-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  review-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Compile physical qualification review tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            system/e2e/verify-physical-live-usb-sequence.py \
+            system/e2e/verify-physical-live-usb-sequence.selftest.py \
+            system/e2e/verify-physical-live-usb-review.py \
+            system/e2e/verify-physical-live-usb-review.selftest.py \
+            system/e2e/new-physical-live-usb-review.py \
+            system/e2e/new-physical-live-usb-review.selftest.py
+
+      - name: Re-run underlying two-phase sequence contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 system/e2e/verify-physical-live-usb-sequence.selftest.py | tee "${RUNNER_TEMP}/sequence-selftest.json"
+          python3 - "${RUNNER_TEMP}/sequence-selftest.json" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1], encoding="utf-8"))
+          assert data["passed"] is True
+          assert data["roadmapCompletionClaimed"] is False
+          PY
+
+      - name: Verify fail-closed operator review binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 system/e2e/verify-physical-live-usb-review.selftest.py | tee "${RUNNER_TEMP}/review-selftest.json"
+          python3 - "${RUNNER_TEMP}/review-selftest.json" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1], encoding="utf-8"))
+          assert data["passed"] is True
+          assert data["validReviewAccepted"] is True
+          assert data["missingObservationRejected"] is True
+          assert data["crossEvidenceBindingRejected"] is True
+          assert data["malformedImageProvenanceRejected"] is True
+          assert data["unsupportedClaimRejected"] is True
+          assert data["tamperRejected"] is True
+          assert data["roadmapCompletionClaimed"] is False
+          PY
+
+      - name: Verify privacy-minimized review creation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 system/e2e/new-physical-live-usb-review.selftest.py | tee "${RUNNER_TEMP}/creator-selftest.json"
+          python3 - "${RUNNER_TEMP}/creator-selftest.json" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1], encoding="utf-8"))
+          assert data["passed"] is True
+          assert data["exclusive0600OutputVerified"] is True
+          assert data["rawHardwareScopeRedactionVerified"] is True
+          assert data["incompleteObservationRefused"] is True
+          assert data["generatedReviewVerified"] is True
+          assert data["roadmapCompletionClaimed"] is False
+          PY
+
+      - name: Fail closed on destructive or privilege-escalating drift
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import ast
+          from pathlib import Path
+
+          production = [
+              Path("system/e2e/verify-physical-live-usb-sequence.py"),
+              Path("system/e2e/verify-physical-live-usb-review.py"),
+              Path("system/e2e/new-physical-live-usb-review.py"),
+          ]
+          forbidden = {
+              "sudo", "pkexec", "su", "mkfs", "wipefs", "sgdisk", "parted",
+              "fdisk", "mount", "umount", "dd", "reboot", "poweroff",
+          }
+          for path in production:
+              tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+              for node in ast.walk(tree):
+                  if isinstance(node, ast.Call):
+                      for kw in node.keywords:
+                          if kw.arg == "shell" and isinstance(kw.value, ast.Constant) and kw.value.value is True:
+                              raise SystemExit(f"{path}: shell=True is forbidden")
+                  if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                      text = node.value.strip()
+                      first = text.split(None, 1)[0] if text else ""
+                      if first.rsplit("/", 1)[-1] in forbidden:
+                          raise SystemExit(f"{path}: destructive/privileged command literal forbidden: {text}")
+          PY
+          grep -F '"physicalHardwareRoadmapCompletionClaimed": False' system/e2e/verify-physical-live-usb-review.py >/dev/null
+          grep -F '"physicalHardwareRoadmapCompletionClaimed": False' system/e2e/new-physical-live-usb-review.py >/dev/null
+          grep -F 'does not change the roadmap' system/SWIR-PHYSICAL-LIVE-USB-REVIEW-GATE-0.1.md >/dev/null
+          grep -F 'checkbox by itself' system/SWIR-PHYSICAL-LIVE-USB-REVIEW-GATE-0.1.md >/dev/null
