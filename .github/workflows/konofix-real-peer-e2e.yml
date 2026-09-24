@@ -1,0 +1,125 @@
+name: SWIR Konofix Real Peer E2E
+
+on:
+  push:
+    paths:
+      - 'integrations/konofix/**'
+      - 'desktop/windows/DesktopKonofixLauncher.cs'
+      - 'desktop/windows/DesktopKonofixReleaseSmoke.cs'
+      - '.github/workflows/konofix-real-peer-e2e.yml'
+  pull_request:
+    paths:
+      - 'integrations/konofix/**'
+      - 'desktop/windows/DesktopKonofixLauncher.cs'
+      - 'desktop/windows/DesktopKonofixReleaseSmoke.cs'
+      - '.github/workflows/konofix-real-peer-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  published-two-client-peer-e2e:
+    name: published-two-client-peer-e2e
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install exact published client and exercise two real P2P runtimes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows' -or -not $env:RUNNER_TEMP) {
+            throw 'Real-peer E2E is restricted to a disposable Windows GitHub Actions runner.'
+          }
+
+          $stage = Join-Path $env:RUNNER_TEMP ('swir-konofix-peer-stage-' + [guid]::NewGuid().ToString('N'))
+          $installRoot = Join-Path $env:RUNNER_TEMP ('swir-konofix-peer-install-' + [guid]::NewGuid().ToString('N'))
+          $installer = Join-Path $stage 'Konofix-Chat-0.5.1-x64-Setup.exe'
+          $stateA = Join-Path $env:RUNNER_TEMP ('swir-konofix-peer-a-' + [guid]::NewGuid().ToString('N'))
+          $stateB = Join-Path $env:RUNNER_TEMP ('swir-konofix-peer-b-' + [guid]::NewGuid().ToString('N'))
+          $webviewA = Join-Path $stateA 'WebView2'
+          $webviewB = Join-Path $stateB 'WebView2'
+          $processA = $null
+          $processB = $null
+          $oldLocal = $env:LOCALAPPDATA
+          $oldRoaming = $env:APPDATA
+          $oldBrowserArguments = $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
+          $oldUserData = $env:WEBVIEW2_USER_DATA_FOLDER
+
+          function Wait-SwirProcess($Process, [int]$Seconds, [string]$Label) {
+            if (-not $Process.WaitForExit($Seconds * 1000)) {
+              $Process.Kill($true)
+              throw "$Label timed out."
+            }
+            if ($Process.ExitCode -ne 0) { throw "$Label failed: exit code $($Process.ExitCode)." }
+          }
+
+          function Get-FreePort {
+            $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+            $listener.Start()
+            try { return ([Net.IPEndPoint]$listener.LocalEndpoint).Port }
+            finally { $listener.Stop() }
+          }
+
+          function Start-IsolatedKonofix([string]$Executable, [string]$Root, [string]$WebViewRoot, [int]$Port, [string]$Label) {
+            $local = Join-Path $Root 'Local'
+            $roaming = Join-Path $Root 'Roaming'
+            New-Item -ItemType Directory -Path $local, $roaming, $WebViewRoot -Force | Out-Null
+            $env:LOCALAPPDATA = $local
+            $env:APPDATA = $roaming
+            $env:WEBVIEW2_USER_DATA_FOLDER = $WebViewRoot
+            $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-address=127.0.0.1 --remote-debugging-port=$Port"
+            $stdout = Join-Path $Root "$Label.stdout.log"
+            $stderr = Join-Path $Root "$Label.stderr.log"
+            return Start-Process -FilePath $Executable -WorkingDirectory (Split-Path -Parent $Executable) -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          }
+
+          try {
+            python integrations/konofix/prepare.py --output $stage
+            python integrations/konofix/prepare.py --verify $installer
+            $setup = Start-Process -FilePath $installer -ArgumentList "/S /D=$installRoot" -WindowStyle Hidden -PassThru
+            Wait-SwirProcess $setup 120 'Published Konofix NSIS installation'
+            $chat = Join-Path $installRoot 'konofix-chat.exe'
+            if (-not (Test-Path -LiteralPath $chat -PathType Leaf)) { throw 'Published installer created no Konofix Chat executable.' }
+
+            $portA = Get-FreePort
+            do { $portB = Get-FreePort } while ($portB -eq $portA)
+            $processA = Start-IsolatedKonofix $chat $stateA $webviewA $portA 'client-a'
+            $processB = Start-IsolatedKonofix $chat $stateB $webviewB $portB 'client-b'
+
+            node integrations/konofix/real_peer_smoke.mjs $portA $portB
+            if ($LASTEXITCODE -ne 0) { throw 'Published Konofix two-client P2P smoke failed.' }
+            $processA.Refresh(); $processB.Refresh()
+            if ($processA.HasExited -or $processB.HasExited) { throw 'A published Konofix client exited unexpectedly during peer smoke.' }
+            Write-Host 'Published Konofix 0.5.1: two isolated real clients exchanged public/protected-room/private messages and reconnected.'
+          } finally {
+            $env:LOCALAPPDATA = $oldLocal
+            $env:APPDATA = $oldRoaming
+            $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $oldBrowserArguments
+            $env:WEBVIEW2_USER_DATA_FOLDER = $oldUserData
+            foreach ($process in @($processA, $processB)) {
+              if ($null -ne $process -and -not $process.HasExited) {
+                $process.Kill($true)
+                $process.WaitForExit()
+              }
+            }
+            $uninstaller = Join-Path $installRoot 'uninstall.exe'
+            if (Test-Path -LiteralPath $uninstaller -PathType Leaf) {
+              $uninstall = Start-Process -FilePath $uninstaller -ArgumentList "/S _?=$installRoot" -WindowStyle Hidden -PassThru
+              Wait-SwirProcess $uninstall 60 'Published Konofix cleanup'
+            }
+            foreach ($path in @($installRoot, $stage, $stateA, $stateB)) {
+              if ([string]::IsNullOrWhiteSpace($path)) { continue }
+              $full = [IO.Path]::GetFullPath($path)
+              $tempRoot = [IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\') + '\'
+              if (-not $full.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase)) { throw "Refusing cleanup outside RUNNER_TEMP: $full" }
+              Remove-Item -LiteralPath $full -Recurse -Force -ErrorAction SilentlyContinue
+            }
+          }
