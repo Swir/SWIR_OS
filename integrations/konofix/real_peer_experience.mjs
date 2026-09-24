@@ -154,11 +154,12 @@ for (const port of [portA, portB]) {
 }
 
 // Session ignore: a genuine incoming private notification is an accessible modal.
-// The preceding reconnect smoke intentionally leaves B's private conversation
-// open; close that real UI state first so this assertion exercises the incoming
-// notification path rather than the correct already-open-conversation path.
+// The preceding reconnect removes B's rendered private dialog without invoking
+// its module-local close callback. Reopen the real A conversation, then close it
+// through the published UI so the next peer message must take the notice path.
 // Ignoring suppresses later notices from that peer but does not delete messages;
 // manually reopening the conversation restores access to its session history.
+await openPrivate(portB, nickA);
 await closePrivate(portB);
 await openPrivate(portA, nickB);
 await sendPrivate(portA, ignoredToken);
