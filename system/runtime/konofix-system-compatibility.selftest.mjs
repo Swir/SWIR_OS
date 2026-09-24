@@ -49,8 +49,12 @@ const manifest = createKonofixSystemManifest(evidence, { prefixRoot });
 assert.equal(manifest.id, 'info.swir.konofixchat');
 assert.equal(manifest.executionClass, 'windows-compat');
 assert.equal(manifest.provider, 'swir.compat.wine');
+assert.equal(manifest.package.sourceRef, KonofixSystemCompatibilityIdentity.sourceCommit);
+assert.equal(manifest.package.sha256, executableSha256);
+assert.equal(manifest.trust.sourceClass, 'swir-signed');
+assert.equal(manifest.trust.repositoryId, 'official');
 assert.equal(manifest.trust.signatureRequired, true);
-assert.equal(manifest.trust.installedExecutableSha256, executableSha256);
+assert.deepEqual(Object.keys(manifest.trust).sort(), ['repositoryId', 'signatureRequired', 'sourceClass']);
 
 prepareManagedPrefix(manifest, { trustVerified: true, prefixRoot });
 const runtimeRoot = path.join(temp, 'runtimes');

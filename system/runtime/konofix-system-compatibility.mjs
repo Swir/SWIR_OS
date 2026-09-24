@@ -100,14 +100,19 @@ export function createKonofixSystemManifest(evidence, options = {}) {
     targetEditions: ['system'],
     executionClass: 'windows-compat',
     provider: KonofixSystemCompatibilityIdentity.provider,
-    package: Object.freeze({ name: 'Konofix Chat', version: KonofixSystemCompatibilityIdentity.version, nativeEntryPoint: verified.executable }),
+    package: Object.freeze({
+      name: 'Konofix Chat',
+      version: KonofixSystemCompatibilityIdentity.version,
+      channel: 'stable',
+      sourceRef: KonofixSystemCompatibilityIdentity.sourceCommit,
+      nativeEntryPoint: verified.executable,
+      sha256: verified.executableSha256
+    }),
     compatibility: Object.freeze({ prefixPolicy: 'per-app', windowsArchitecture: KonofixSystemCompatibilityIdentity.windowsArchitecture, runtimeChannel: 'system-managed' }),
     trust: Object.freeze({
       sourceClass: 'swir-signed',
-      signatureRequired: true,
-      upstreamSourceCommit: KonofixSystemCompatibilityIdentity.sourceCommit,
-      upstreamInstallerSha256: KonofixSystemCompatibilityIdentity.installerSha256,
-      installedExecutableSha256: verified.executableSha256
+      repositoryId: 'official',
+      signatureRequired: true
     }),
     permissions: [],
     rollback: true
