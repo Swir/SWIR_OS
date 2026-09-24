@@ -4,12 +4,22 @@ on:
   push:
     paths:
       - 'integrations/konofix/prepare_linux_source.py'
+      - 'integrations/konofix/stage_linux_system.py'
+      - 'integrations/konofix/test_stage_linux_system.py'
+      - 'integrations/konofix/verify_linux_system_stage.py'
       - 'integrations/konofix/upstream.json'
+      - 'system/apps/konofix-chat.desktop'
+      - 'system/image/build-live-usb-img.sh'
       - '.github/workflows/system-konofix-native-linux-v2.yml'
   pull_request:
     paths:
       - 'integrations/konofix/prepare_linux_source.py'
+      - 'integrations/konofix/stage_linux_system.py'
+      - 'integrations/konofix/test_stage_linux_system.py'
+      - 'integrations/konofix/verify_linux_system_stage.py'
       - 'integrations/konofix/upstream.json'
+      - 'system/apps/konofix-chat.desktop'
+      - 'system/image/build-live-usb-img.sh'
       - '.github/workflows/system-konofix-native-linux-v2.yml'
   workflow_dispatch:
 
@@ -64,6 +74,32 @@ jobs:
           npm run build
           cargo build --locked --release --manifest-path src-tauri/Cargo.toml --bin konofix-chat
           test -x src-tauri/target/release/konofix-chat
+      - name: Stage the exact native build into a disposable System root
+        shell: bash
+        working-directory: swir-os
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/swir-konofix-system-root"
+          rm -rf "$root"
+          python3 integrations/konofix/stage_linux_system.py \
+            --source "$GITHUB_WORKSPACE/konofix-upstream" \
+            --root "$root" \
+            --desktop system/apps/konofix-chat.desktop
+          python3 integrations/konofix/verify_linux_system_stage.py --root "$root"
+          test -x "$root/opt/swir/apps/konofix/konofix-chat"
+          test -f "$root/usr/share/applications/konofix-chat.desktop"
+          test -f "$root/usr/share/swir/provenance/konofix-chat.json"
+
+      - name: Verify Live USB builder enforces Konofix provenance when present or required
+        shell: bash
+        working-directory: swir-os
+        run: |
+          set -euo pipefail
+          bash -n system/image/build-live-usb-img.sh
+          grep -F -- '--require-konofix-native' system/image/build-live-usb-img.sh >/dev/null
+          grep -F 'Konofix native rootfs verification failed' system/image/build-live-usb-img.sh >/dev/null
+          grep -F 'Konofix native payload changed while assembling Live USB media' system/image/build-live-usb-img.sh >/dev/null
+
       - name: Map the real native Linux Konofix window under Xvfb
         shell: bash
         working-directory: konofix-upstream

@@ -8,6 +8,16 @@ package or update authority.
 
 ## Current implementation boundary
 
+System Edition now has an explicit native-image inclusion boundary. The reviewed
+Linux candidate is staged only after exact source/overlay verification, and the
+Live USB assembler verifies its provenance both in the source rootfs and again
+after the root filesystem has been copied into the media build. A build may use
+`--require-konofix-native` to fail closed when the payload is absent. This binds
+the exact candidate bytes to image assembly, but it still does **not** qualify
+Linux peer interoperability or prove the app was launched from the final installed
+system; those runtime gates remain open.
+
+
 `integrations/konofix/prepare.py` prepares the reviewed **Konofix Chat 0.5.1
 Stable Windows x64 installer** from a pinned release URL, size and SHA-256.
 It is functional download/verification code, **not a completed chat integration**:
