@@ -1,11 +1,15 @@
 param(
     [Parameter(Mandatory = $true)][string]$Path,
-    [int]$TimeoutSeconds = 20
+    [int]$TimeoutSeconds = 20,
+    [string]$ClientProcessName = 'konofix-chat-swir-ci-a'
 )
 
 $ErrorActionPreference = 'Stop'
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows' -or [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
     throw 'Native file-picker automation is restricted to a disposable Windows GitHub Actions runner.'
+}
+if ($ClientProcessName -notmatch '^konofix-chat-swir-ci-[ab]$') {
+    throw 'Unexpected Konofix CI client process name.'
 }
 
 $resolved = (Resolve-Path -LiteralPath $Path -ErrorAction Stop).Path
@@ -18,15 +22,17 @@ if (-not $fullPath.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase))
     throw "Refusing to select a file outside RUNNER_TEMP: $fullPath"
 }
 
+$clientProcesses = @(Get-Process -Name $ClientProcessName -ErrorAction SilentlyContinue)
+if ($clientProcesses.Count -ne 1) {
+    throw "Expected exactly one running $ClientProcessName process; found $($clientProcesses.Count)."
+}
+$clientPid = [int]$clientProcesses[0].Id
+
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 
 $root = [System.Windows.Automation.AutomationElement]::RootElement
-$title = 'Wyślij plik przez Konofix Chat'
-$titleCondition = New-Object System.Windows.Automation.PropertyCondition(
-    [System.Windows.Automation.AutomationElement]::NameProperty,
-    $title
-)
+$trueCondition = [System.Windows.Automation.Condition]::TrueCondition
 $editIdCondition = New-Object System.Windows.Automation.PropertyCondition(
     [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
     '1148'
@@ -40,9 +46,26 @@ $editCondition = New-Object System.Windows.Automation.PropertyCondition(
     [System.Windows.Automation.ControlType]::Edit
 )
 
+function Find-KonofixFileDialog {
+    $windows = $root.FindAll([System.Windows.Automation.TreeScope]::Children, $trueCondition)
+    $fallback = $null
+    foreach ($window in $windows) {
+        try {
+            if ([int]$window.Current.ProcessId -ne $clientPid) { continue }
+            $className = [string]$window.Current.ClassName
+            $name = [string]$window.Current.Name
+            if ($className -eq '#32770') { return $window }
+            if ($name -eq 'Wyślij plik przez Konofix Chat' -or $name -match '^(Open|Otwórz|Choose|Wybierz|Select)') {
+                $fallback = $window
+            }
+        } catch {}
+    }
+    return $fallback
+}
+
 $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
 while ([DateTime]::UtcNow -lt $deadline) {
-    $dialog = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $titleCondition)
+    $dialog = Find-KonofixFileDialog
     if ($null -eq $dialog) {
         Start-Sleep -Milliseconds 150
         continue
@@ -84,11 +107,21 @@ while ([DateTime]::UtcNow -lt $deadline) {
     $closeDeadline = [DateTime]::UtcNow.AddSeconds(5)
     while ([DateTime]::UtcNow -lt $closeDeadline) {
         Start-Sleep -Milliseconds 100
-        if ($null -eq $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $titleCondition)) {
+        if ($null -eq (Find-KonofixFileDialog)) {
             Write-Host "Selected disposable Konofix transfer fixture: $([IO.Path]::GetFileName($fullPath))"
             exit 0
         }
     }
     throw 'Konofix file dialog did not close after selection.'
 }
-throw "Timed out waiting for Konofix file dialog '$title'."
+
+$snapshot = @()
+$top = $root.FindAll([System.Windows.Automation.TreeScope]::Children, $trueCondition)
+foreach ($window in $top) {
+    try {
+        if ([int]$window.Current.ProcessId -eq $clientPid) {
+            $snapshot += "name='$($window.Current.Name)' class='$($window.Current.ClassName)'"
+        }
+    } catch {}
+}
+throw "Timed out waiting for the Konofix file dialog for PID $clientPid. Client windows: $($snapshot -join '; ')"

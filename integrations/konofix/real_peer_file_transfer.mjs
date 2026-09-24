@@ -97,7 +97,7 @@ function runPicker(path) {
   return new Promise((resolveValue, reject) => {
     const child = spawn('powershell.exe', [
       '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-      '-File', pickerScript, '-Path', path, '-TimeoutSeconds', '20',
+      '-File', pickerScript, '-Path', path, '-TimeoutSeconds', '20', '-ClientProcessName', 'konofix-chat-swir-ci-a',
     ], { stdio: 'inherit', windowsHide: true });
     const timer = setTimeout(() => {
       child.kill();
