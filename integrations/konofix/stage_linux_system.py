@@ -66,9 +66,9 @@ def write_new(path: Path, data: bytes, mode: int) -> None:
     try:
         with os.fdopen(fd, "wb", closefd=False) as stream:
             stream.write(data); stream.flush(); os.fsync(stream.fileno())
-        os.fchmod(fd, mode)
     finally:
         os.close(fd)
+    os.chmod(path, mode)
 
 def stage(source: Path, root: Path, desktop: Path) -> dict:
     binary, icon = validate_source(source)
