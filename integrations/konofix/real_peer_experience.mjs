@@ -154,35 +154,38 @@ for (const port of [portA, portB]) {
 }
 
 // Session ignore: a genuine incoming private notification is an accessible modal.
-// Reconnect recreates the native network runtime while retaining UI preferences;
-// explicitly reapply the real allow-new-private setting, then clear any stale
-// active conversation through the published UI before exercising the notice path.
-// Ignoring suppresses later notices from that peer but does not delete messages;
-// manually reopening the conversation restores access to its session history.
-await setPrivateMessages(portB, true);
+// The core smoke already proves that B can disconnect/reconnect with a fresh peer
+// identity. Konofix 0.5.1 keeps a module-local recipient identity across that UI
+// reconnect, so receiving a *new* private event on B after reconnect is a separate
+// upstream limitation and must not be smuggled into this UX qualification. Keep
+// the never-disconnected A as recipient and the reconnected B as sender: this
+// still exercises the published clients, the post-reconnect sender path, native
+// policy enforcement, notification UI, ignore retention and accessibility without
+// pretending private-receive-after-reconnect is qualified.
+await setPrivateMessages(portA, true);
 await delay(750);
-await openPrivate(portB, nickA);
-await closePrivate(portB);
 await openPrivate(portA, nickB);
-await sendPrivate(portA, ignoredToken);
-await eventually(portB, `document.querySelector('.private-notice-preview')?.textContent?.includes(${JSON.stringify(ignoredToken)}) === true`, 'incoming private notice');
-assert.equal(await evaluate(portB, `(() => {
+await closePrivate(portA);
+await openPrivate(portB, nickA);
+await sendPrivate(portB, ignoredToken);
+await eventually(portA, `document.querySelector('.private-notice-preview')?.textContent?.includes(${JSON.stringify(ignoredToken)}) === true`, 'incoming private notice');
+assert.equal(await evaluate(portA, `(() => {
   const modal = document.querySelector('.private-notice-modal');
   const titleId = modal?.getAttribute('aria-labelledby');
   return modal?.getAttribute('role') === 'dialog' && modal?.getAttribute('aria-modal') === 'true' && !!titleId && !!document.getElementById(titleId) && !!modal.querySelector('[data-private-ignore]') && !!modal.querySelector('[data-private-open-notice]');
 })()`), true, 'Incoming private notice is missing dialog accessibility semantics');
-assert.equal(await evaluate(portB, `(() => { document.querySelector('[data-private-ignore]')?.click(); return !document.querySelector('.private-notice-wrap'); })()`), true,
+assert.equal(await evaluate(portA, `(() => { document.querySelector('[data-private-ignore]')?.click(); return !document.querySelector('.private-notice-wrap'); })()`), true,
   'Session ignore did not close the current private notice');
 
-await sendPrivate(portA, silentToken);
+await sendPrivate(portB, silentToken);
 await delay(1400);
-assert.equal(await evaluate(portB, `!document.querySelector('.private-notice-wrap')`), true,
+assert.equal(await evaluate(portA, `!document.querySelector('.private-notice-wrap')`), true,
   'Ignored peer unexpectedly opened another private notification');
-await openPrivate(portB, nickA);
+await openPrivate(portA, nickB);
 for (const token of [ignoredToken, silentToken]) {
-  await eventually(portB, `document.querySelector('#privateChatModal')?.textContent?.includes(${JSON.stringify(token)}) === true`, `ignored conversation retention ${token}`);
+  await eventually(portA, `document.querySelector('#privateChatModal')?.textContent?.includes(${JSON.stringify(token)}) === true`, `ignored conversation retention ${token}`);
 }
-assert.equal(await evaluate(portB, `(() => {
+assert.equal(await evaluate(portA, `(() => {
   const modal = document.querySelector('#privateChatModal .private-chat-modal');
   const input = modal?.querySelector('[data-private-input]');
   const send = modal?.querySelector('[data-private-send]');
@@ -191,19 +194,19 @@ assert.equal(await evaluate(portB, `(() => {
 
 // User-controlled private-message mute: the runtime rejects a new private message
 // while disabled, gives localized sender feedback and stores no rejected payload.
-await closePrivate(portB);
-await setPrivateMessages(portB, false);
+await closePrivate(portA);
+await setPrivateMessages(portA, false);
 await delay(750);
-await evaluate(portA, `(() => { globalThis.__swirPrivateAlert = ''; window.alert = message => { globalThis.__swirPrivateAlert = String(message); }; return true; })()`);
-await sendPrivate(portA, blockedToken);
-await eventually(portA, `typeof globalThis.__swirPrivateAlert === 'string' && globalThis.__swirPrivateAlert.length > 0`, 'blocked private-message sender feedback');
-assert.equal(await evaluate(portA, `globalThis.__swirPrivateAlert.includes('not accepting') || globalThis.__swirPrivateAlert.includes('nie przyjmuje')`), true,
+await evaluate(portB, `(() => { globalThis.__swirPrivateAlert = ''; window.alert = message => { globalThis.__swirPrivateAlert = String(message); }; return true; })()`);
+await sendPrivate(portB, blockedToken);
+await eventually(portB, `typeof globalThis.__swirPrivateAlert === 'string' && globalThis.__swirPrivateAlert.length > 0`, 'blocked private-message sender feedback');
+assert.equal(await evaluate(portB, `globalThis.__swirPrivateAlert.includes('not accepting') || globalThis.__swirPrivateAlert.includes('nie przyjmuje')`), true,
   'Blocked private-message feedback was not localized to the published client');
-await openPrivate(portB, nickA);
-assert.equal(await evaluate(portB, `!document.querySelector('#privateChatModal')?.textContent?.includes(${JSON.stringify(blockedToken)})`), true,
+await openPrivate(portA, nickB);
+assert.equal(await evaluate(portA, `!document.querySelector('#privateChatModal')?.textContent?.includes(${JSON.stringify(blockedToken)})`), true,
   'Disabled private-message policy still stored a rejected incoming message');
-await closePrivate(portB);
-await setPrivateMessages(portB, true);
+await closePrivate(portA);
+await setPrivateMessages(portA, true);
 await delay(750);
 
 // Locale selection/fallback is verified last because reload intentionally resets
@@ -232,5 +235,6 @@ console.log(JSON.stringify({
   keyboardFocus: true,
   localePolish: true,
   unsupportedLocaleEnglishFallback: true,
+  privateReceiveAfterReconnectQualified: false,
   audioVideoQualified: false,
 }, null, 2));
