@@ -157,6 +157,17 @@ async function waitForMessage(port, token, selector = '#messages') {
   return eventually(port, `document.querySelector(${JSON.stringify(selector)})?.textContent?.includes(${JSON.stringify(token)}) === true`, `message ${token}`);
 }
 
+async function enterWorld(port) {
+  const entered = await evaluate(port, `(() => {
+    const button = document.querySelector('button[data-room="world"]');
+    if (!button) return false;
+    button.click();
+    return true;
+  })()`);
+  assert.equal(entered, true, 'World room button was unavailable');
+  await eventually(port, `document.querySelector('button[data-room="world"]')?.classList.contains('active') === true`, 'world room activation');
+}
+
 async function createProtectedRoom(port) {
   assert.equal(await evaluate(port, `(() => { document.querySelector('#newRoom')?.click(); return !!document.querySelector('#secureRoomCreateModal'); })()`), true,
     'Secure room dialog did not open');
@@ -251,7 +262,11 @@ await waitForMessage(portA, privateTokenB, '#privateChatModal');
 
 await disconnect(portB);
 await connect(portB, nickB2, [address]);
-await waitForPeer(portA, nickB2);
+await Promise.all([waitForPeer(portA, nickB2), waitForPeer(portB, nickA)]);
+// The earlier smoke stayed in the protected room on A while B reconnected in
+// world, so a valid reconnect message was sent to a different room and timed
+// out. Re-establish an explicit shared-room precondition before the assertion.
+await Promise.all([enterWorld(portA), enterWorld(portB)]);
 await sendPublic(portB, reconnectToken);
 await waitForMessage(portA, reconnectToken);
 
