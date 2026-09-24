@@ -69,6 +69,31 @@ class StageLinuxSystemTests(unittest.TestCase):
         with patch.object(stage_mod, "git", side_effect=bad), self.assertRaises(stage_mod.StageError):
             stage_mod.stage(self.source, self.root, self.desktop)
 
+    def test_accepts_exact_tauri_build_generated_schema_set(self):
+        def built(_root, *args):
+            if args == ("rev-parse", "HEAD"):
+                return stage_mod.SOURCE_COMMIT
+            if args == ("status", "--porcelain", "--untracked-files=all"):
+                return "\n".join(sorted(stage_mod.EXPECTED_STATUS | stage_mod.EXPECTED_BUILD_GENERATED_STATUS))
+            raise AssertionError(args)
+        with patch.object(stage_mod, "git", side_effect=built):
+            result = stage_mod.stage(self.source, self.root, self.desktop)
+        self.assertEqual(result["sourceCommit"], stage_mod.SOURCE_COMMIT)
+
+    def test_refuses_unexpected_generated_schema(self):
+        def dirty_generated(_root, *args):
+            if args == ("rev-parse", "HEAD"):
+                return stage_mod.SOURCE_COMMIT
+            if args == ("status", "--porcelain", "--untracked-files=all"):
+                return "\n".join(sorted(
+                    stage_mod.EXPECTED_STATUS
+                    | stage_mod.EXPECTED_BUILD_GENERATED_STATUS
+                    | {"?? src-tauri/gen/schemas/unreviewed-schema.json"}
+                ))
+            raise AssertionError(args)
+        with patch.object(stage_mod, "git", side_effect=dirty_generated), self.assertRaises(stage_mod.StageError):
+            stage_mod.stage(self.source, self.root, self.desktop)
+
     def test_refuses_unreviewed_source_change(self):
         def dirty(_root, *args):
             if args == ("rev-parse", "HEAD"):

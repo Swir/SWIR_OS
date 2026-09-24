@@ -11,6 +11,16 @@ EXPECTED_STATUS = {
     " M src-tauri/src/main.rs",
     "?? src-tauri/icons/icon.png",
 }
+# Tauri 2 emits these deterministic, untracked JSON schemas during a release
+# build. They are tooling output rather than reviewed source-overlay changes.
+# Accept exactly this fixed set after the binary has been built; any additional
+# generated or arbitrary untracked path still fails closed.
+EXPECTED_BUILD_GENERATED_STATUS = {
+    "?? src-tauri/gen/schemas/acl-manifests.json",
+    "?? src-tauri/gen/schemas/capabilities.json",
+    "?? src-tauri/gen/schemas/desktop-schema.json",
+    "?? src-tauri/gen/schemas/linux-schema.json",
+}
 BINARY_REL = Path("src-tauri/target/release/konofix-chat")
 ICON_REL = Path("src-tauri/icons/icon.png")
 APP_DEST = Path("opt/swir/apps/konofix/konofix-chat")
@@ -43,7 +53,8 @@ def validate_source(source: Path) -> tuple[Path, Path]:
     if git(source, "rev-parse", "HEAD").strip() != SOURCE_COMMIT:
         raise StageError("source is not the pinned Konofix 0.5.1 commit")
     status = set(filter(None, git(source, "status", "--porcelain", "--untracked-files=all").splitlines()))
-    if status != EXPECTED_STATUS:
+    allowed_states = (EXPECTED_STATUS, EXPECTED_STATUS | EXPECTED_BUILD_GENERATED_STATUS)
+    if status not in allowed_states:
         raise StageError(f"unexpected source overlay state: {sorted(status)}")
     return source / BINARY_REL, source / ICON_REL
 
