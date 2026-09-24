@@ -71,22 +71,29 @@ while ([DateTime]::UtcNow -lt $deadline) {
         continue
     }
 
-    $edit = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $editIdCondition)
-    if ($null -eq $edit) {
-        $edits = $dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, $editCondition)
-        foreach ($candidate in $edits) {
-            try {
-                if ($candidate.Current.IsEnabled) {
-                    $null = $candidate.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
-                    $edit = $candidate
-                    break
-                }
-            } catch {}
-        }
-    }
-    if ($null -eq $edit) { throw 'Konofix file dialog exposed no editable filename control.' }
+    $candidates = @()
+    $preferred = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $editIdCondition)
+    if ($null -ne $preferred) { $candidates += $preferred }
+    $edits = $dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, $editCondition)
+    foreach ($candidate in $edits) { $candidates += $candidate }
 
-    $valuePattern = $edit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+    $edit = $null
+    $valuePattern = $null
+    foreach ($candidate in $candidates) {
+        try {
+            if (-not $candidate.Current.IsEnabled) { continue }
+            $candidatePattern = $null
+            if ($candidate.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$candidatePattern)) {
+                $edit = $candidate
+                $valuePattern = $candidatePattern
+                break
+            }
+        } catch {}
+    }
+    if ($null -eq $edit -or $null -eq $valuePattern) {
+        throw 'Konofix file dialog exposed no editable filename control with ValuePattern.'
+    }
+
     $valuePattern.SetValue($fullPath)
 
     $buttons = $dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonCondition)
