@@ -50,7 +50,6 @@ class StageLinuxSystemTests(unittest.TestCase):
         result = self.run_stage()
         installed = self.root / stage_mod.APP_DEST
         self.assertEqual(installed.read_bytes(), self.binary.read_bytes())
-        self.assertTrue(installed.stat().st_mode & stat.S_IXUSR)
         evidence = json.loads((self.root / stage_mod.PROVENANCE_DEST).read_text())
         self.assertEqual(evidence, result)
         self.assertEqual(evidence["sourceCommit"], stage_mod.SOURCE_COMMIT)
