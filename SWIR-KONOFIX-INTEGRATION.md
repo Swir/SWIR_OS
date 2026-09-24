@@ -13,9 +13,13 @@ Linux candidate is staged only after exact source/overlay verification, and the
 Live USB assembler verifies its provenance both in the source rootfs and again
 after the root filesystem has been copied into the media build. A build may use
 `--require-konofix-native` to fail closed when the payload is absent. This binds
-the exact candidate bytes to image assembly, but it still does **not** qualify
-Linux peer interoperability or prove the app was launched from the final installed
-system; those runtime gates remain open.
+the exact candidate bytes to image assembly. The same staged binary is also
+runtime-smoked as an unprivileged process in a clean Debian 13 userspace with
+the exact System launch path and a real mapped Tauri/WebKitGTK window; the
+runtime container has networking disabled after its distro dependencies are
+built. This still does **not** qualify Linux peer interoperability or prove the
+app was launched from the final installed System image, so those gates remain
+open.
 
 
 `integrations/konofix/prepare.py` prepares the reviewed **Konofix Chat 0.5.1

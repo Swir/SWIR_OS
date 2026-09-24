@@ -5,6 +5,7 @@ on:
     paths:
       - 'integrations/konofix/prepare_linux_source.py'
       - 'integrations/konofix/stage_linux_system.py'
+      - 'integrations/konofix/debian13_runtime_smoke.sh'
       - 'integrations/konofix/test_stage_linux_system.py'
       - 'integrations/konofix/verify_linux_system_stage.py'
       - 'integrations/konofix/upstream.json'
@@ -15,6 +16,7 @@ on:
     paths:
       - 'integrations/konofix/prepare_linux_source.py'
       - 'integrations/konofix/stage_linux_system.py'
+      - 'integrations/konofix/debian13_runtime_smoke.sh'
       - 'integrations/konofix/test_stage_linux_system.py'
       - 'integrations/konofix/verify_linux_system_stage.py'
       - 'integrations/konofix/upstream.json'
@@ -29,7 +31,7 @@ permissions:
 jobs:
   native-linux-candidate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -90,6 +92,26 @@ jobs:
           test -f "$root/usr/share/applications/konofix-chat.desktop"
           test -f "$root/usr/share/swir/provenance/konofix-chat.json"
 
+      - name: Qualify the staged System binary in Debian 13 userspace
+        shell: bash
+        working-directory: swir-os
+        run: |
+          set -euo pipefail
+          runtime_dockerfile="$RUNNER_TEMP/konofix-debian13-runtime.Dockerfile"
+          cat > "$runtime_dockerfile" <<'DOCKERFILE'
+          FROM debian:trixie-slim
+          RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+              ca-certificates dbus-x11 xvfb x11-utils util-linux \
+              libgtk-3-0t64 libwebkit2gtk-4.1-0 libayatana-appindicator3-1 librsvg2-2 libxdo3 \
+              && rm -rf /var/lib/apt/lists/*
+          DOCKERFILE
+          docker build --pull --file "$runtime_dockerfile" --tag swir-konofix-debian13-runtime "$RUNNER_TEMP"
+          docker run --rm --network none \
+            --mount type=bind,source="$RUNNER_TEMP/swir-konofix-system-root",target=/swir-stage,readonly \
+            --mount type=bind,source="$GITHUB_WORKSPACE/swir-os",target=/swir-os,readonly \
+            swir-konofix-debian13-runtime \
+            bash /swir-os/integrations/konofix/debian13_runtime_smoke.sh /swir-stage
+
       - name: Verify Live USB builder enforces Konofix provenance when present or required
         shell: bash
         working-directory: swir-os
@@ -105,7 +127,7 @@ jobs:
         working-directory: konofix-upstream
         run: |
           set -euo pipefail
-          binary="$PWD/src-tauri/target/release/konofix-chat"
+          binary="$RUNNER_TEMP/swir-konofix-system-root/opt/swir/apps/konofix/konofix-chat"
           evidence="$RUNNER_TEMP/konofix-native-linux-window.txt"
           dbus-run-session -- xvfb-run -a -s "-screen 0 1366x768x24" bash -eu -o pipefail -c '
             binary="$1"
