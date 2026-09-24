@@ -61,6 +61,57 @@ jobs:
           dotnet run --project desktop/windows/SWIR.Desktop.ShellIntegration.SelfTests.csproj -c Release
           node --check swir-apps.js
           node --check swir-os.js
+  upstream-source-contracts:
+    name: pinned-upstream-source-contracts
+    needs: offline
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - id: pin
+        name: Read the reviewed Konofix source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          from pathlib import Path
+          pin = json.loads(Path("integrations/konofix/upstream.json").read_text(encoding="utf-8"))
+          assert pin["repository"] == "Swir/Konofix"
+          assert pin["version"] == "0.5.1"
+          assert len(pin["sourceCommit"]) == 40
+          print(f"source_commit={pin['sourceCommit']}")
+          PY
+      - uses: actions/checkout@v4
+        with:
+          repository: Swir/Konofix
+          ref: ${{ steps.pin.outputs.source_commit }}
+          path: upstream-konofix
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify exact source commit and install locked test tooling
+        working-directory: upstream-konofix
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ steps.pin.outputs.source_commit }}"
+          npm ci --ignore-scripts
+      - name: Exercise pinned Konofix messaging and file-transfer contracts
+        working-directory: upstream-konofix
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/test-private-chat-state.mjs
+          node scripts/test-room-file-context.mjs
+          node scripts/test-file-response-phase.mjs
+          node scripts/test-file-cancel-convergence.mjs
+          node scripts/test-file-transfer-liveness.mjs
+          node scripts/test-nickname-lease-trust.mjs
+          node scripts/test-room-transitions.mjs
+          node scripts/test-public-sharing.mjs
+
   upstream-download:
     name: pinned-upstream-download-only
     needs: offline

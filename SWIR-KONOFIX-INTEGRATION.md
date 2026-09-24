@@ -93,6 +93,10 @@ The offline tests use inert synthetic bytes and test pin validation, exact-size
 and digest rejection, disallowed redirects, interrupted/oversized downloads,
 publication races, symlinks, preservation of existing files and idempotence.
 The dedicated CI additionally downloads and re-reads the real pinned release
-asset without executing it, then runs the unchanged canonical roadmap/SVG checks.
-Neither test path is a Konofix GUI launch, a peer interoperability test, an OS
-installation test or a claim that the old chat has already been replaced.
+asset without executing it. A separate source-qualification job checks out the
+exact pinned Konofix source commit and runs its private-chat, protected-room,
+room-file, file-response/cancel/liveness, nickname-lease, room-transition and
+public-sharing regression contracts. The canonical roadmap/SVG checks also run
+unchanged. These source tests verify the reviewed implementation contract but
+are still **not** a Konofix GUI launch or a real multi-peer interoperability test;
+they do not claim that the old chat has already been fully replaced.
