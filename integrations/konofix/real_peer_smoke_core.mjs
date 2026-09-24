@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
+import { discoverWebKitInspectorTargets } from './webkit_inspector_targets.mjs';
 
 const [portARaw, portBRaw] = process.argv.slice(2);
 const portA = Number(portARaw);
@@ -8,6 +9,9 @@ for (const port of [portA, portB]) {
   assert(Number.isInteger(port) && port > 0 && port <= 65535, 'Expected two loopback WebView2 debug ports');
 }
 assert.notEqual(portA, portB, 'Client debug ports must be distinct');
+
+const inspectorMode = process.env.KONOFIX_INSPECTOR ?? 'webview2';
+assert(['webview2', 'webkitgtk'].includes(inspectorMode), `Unsupported inspector mode: ${inspectorMode}`);
 
 const DEADLINE_MS = 55_000;
 const nickA = `SwirCI_A_${process.pid}`;
@@ -30,6 +34,9 @@ function assertLoopbackUrl(raw, expectedPort) {
 }
 
 async function pages(port) {
+  if (inspectorMode === 'webkitgtk') {
+    return discoverWebKitInspectorTargets(port);
+  }
   const response = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(2000) });
   assert(response.ok, `DevTools discovery HTTP ${response.status}`);
   const list = await response.json();
@@ -63,14 +70,16 @@ async function evaluate(port, expression) {
     socket.addEventListener('open', () => socket.send(JSON.stringify({
       id: requestId,
       method: 'Runtime.evaluate',
-      params: { expression, awaitPromise: true, returnByValue: true },
+      params: inspectorMode === 'webkitgtk'
+          ? { expression, returnByValue: true }
+          : { expression, awaitPromise: true, returnByValue: true },
     })), { once: true });
     socket.addEventListener('message', event => {
       let message;
       try { message = JSON.parse(event.data); } catch (error) { finish(error); return; }
       if (message.id !== requestId) return;
-      if (message.error || message.result?.exceptionDetails) {
-        finish(new Error(`Runtime.evaluate failed: ${JSON.stringify(message.error ?? message.result?.exceptionDetails)}`));
+      if (message.error || message.result?.exceptionDetails || message.result?.wasThrown) {
+        finish(new Error(`Runtime.evaluate failed: ${JSON.stringify(message.error ?? message.result?.exceptionDetails ?? message.result)}`));
         return;
       }
       finish(null, message.result?.result?.value);
@@ -274,6 +283,8 @@ console.log(JSON.stringify({
   schema: 'swir.konofix-real-peer-smoke/0.1',
   clients: 2,
   transport: address.includes('/tcp/') ? 'tcp-loopback-direct' : 'quic-loopback-direct',
+  inspector: inspectorMode,
+  platform: process.platform,
   publicMessages: 3,
   protectedRoom: true,
   protectedRoomMessage: true,
