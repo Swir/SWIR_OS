@@ -85,6 +85,11 @@ try {
   // Keep the same two published clients alive and qualify real file-transfer
   // outcomes after the messaging/reconnect smoke has established a healthy P2P session.
   await import('./real_peer_file_transfer.mjs');
+  // Finish the acceptance surface on the same published clients: real private
+  // notification/ignore policy, user-controlled private-message mute, keyboard
+  // and dialog accessibility, Konofix branding, Polish locale, and English
+  // fallback for an unsupported locale.
+  await import('./real_peer_experience.mjs');
 } finally {
   stopped = true;
   await refresher;
