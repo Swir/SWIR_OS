@@ -26,9 +26,14 @@ tags must never silently refresh the pin: changed bytes fail verification.
 
 The Windows GUI build currently places Tauri and its file-dialog dependencies
 under `cfg(windows)` in upstream Cargo.toml. A working Linux **headless Node** is
-not evidence of a Linux desktop GUI. System Edition qualification and any
-managed Windows compatibility qualification remain outstanding. Do not rewrite
-Konofix's peer protocol or rename the old PHP chat and call it Konofix.
+not evidence of a Linux desktop GUI. SWIR OS now has a Konofix-specific structural
+contract for the existing managed Wine path: `info.swir.konofixchat`, per-app
+prefix, signed-package trust required, brokered execution, `shell=false`, Win64
+and hostile host-environment filtering. That contract proves the intended
+security boundary only; it does **not** qualify the real Konofix GUI under Wine.
+A real packaged payload plus graphical/runtime and peer tests are still required.
+Do not rewrite Konofix's peer protocol or rename the old PHP chat and call it
+Konofix.
 
 ## Preparation
 

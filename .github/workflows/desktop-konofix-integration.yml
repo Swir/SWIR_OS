@@ -58,6 +58,9 @@ jobs:
         run: |
           python -m py_compile integrations/konofix/prepare.py
           python integrations/konofix/prepare.py --help
+      - name: Validate System Edition managed-Wine Konofix contract
+        if: runner.os == 'Linux'
+        run: node integrations/konofix/verify_system_compat.mjs
       - name: Validate Desktop trusted-shell Konofix launcher
         if: runner.os == 'Windows'
         shell: pwsh
