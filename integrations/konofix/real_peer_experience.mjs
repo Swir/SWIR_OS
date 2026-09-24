@@ -154,11 +154,13 @@ for (const port of [portA, portB]) {
 }
 
 // Session ignore: a genuine incoming private notification is an accessible modal.
-// The preceding reconnect removes B's rendered private dialog without invoking
-// its module-local close callback. Reopen the real A conversation, then close it
-// through the published UI so the next peer message must take the notice path.
+// Reconnect recreates the native network runtime while retaining UI preferences;
+// explicitly reapply the real allow-new-private setting, then clear any stale
+// active conversation through the published UI before exercising the notice path.
 // Ignoring suppresses later notices from that peer but does not delete messages;
 // manually reopening the conversation restores access to its session history.
+await setPrivateMessages(portB, true);
+await delay(750);
 await openPrivate(portB, nickA);
 await closePrivate(portB);
 await openPrivate(portA, nickB);
@@ -191,6 +193,7 @@ assert.equal(await evaluate(portB, `(() => {
 // while disabled, gives localized sender feedback and stores no rejected payload.
 await closePrivate(portB);
 await setPrivateMessages(portB, false);
+await delay(750);
 await evaluate(portA, `(() => { globalThis.__swirPrivateAlert = ''; window.alert = message => { globalThis.__swirPrivateAlert = String(message); }; return true; })()`);
 await sendPrivate(portA, blockedToken);
 await eventually(portA, `typeof globalThis.__swirPrivateAlert === 'string' && globalThis.__swirPrivateAlert.length > 0`, 'blocked private-message sender feedback');
@@ -201,6 +204,7 @@ assert.equal(await evaluate(portB, `!document.querySelector('#privateChatModal')
   'Disabled private-message policy still stored a rejected incoming message');
 await closePrivate(portB);
 await setPrivateMessages(portB, true);
+await delay(750);
 
 // Locale selection/fallback is verified last because reload intentionally resets
 // B's rendered UI. Branding remains Konofix and login regains keyboard focus.
