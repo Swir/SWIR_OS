@@ -32,6 +32,14 @@ prefix, signed-package trust required, brokered execution, `shell=false`, Win64
 and hostile host-environment filtering. That contract proves the intended
 security boundary only; it does **not** qualify the real Konofix GUI under Wine.
 A real packaged payload plus graphical/runtime and peer tests are still required.
+Because Tauri itself supports a native Linux WebKitGTK path while reviewed
+Konofix 0.5.1 gates its desktop dependencies and build hook to Windows, SWIR OS
+tests a minimal integration overlay against the exact pinned source. The overlay
+may only enable the same Tauri/rfd dependencies and build hook on Linux and
+restrict the Windows subsystem attribute to Windows; it must not alter protocol,
+UI, identity, storage or chat semantics. Native Linux remains unqualified until
+the exact source compiles and a real Konofix window is mapped under CI, followed
+by runtime/peer acceptance.
 Do not rewrite Konofix's peer protocol or rename the old PHP chat and call it
 Konofix.
 
