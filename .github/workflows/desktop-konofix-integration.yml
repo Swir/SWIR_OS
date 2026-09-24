@@ -191,8 +191,9 @@ jobs:
             $listener.Start()
             $port = ([Net.IPEndPoint]$listener.LocalEndpoint).Port
             $listener.Stop()
+            $webviewRoot = Join-Path $env:RUNNER_TEMP ('swir-konofix-webview-' + [guid]::NewGuid().ToString('N'))
             $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$port"
-            $env:WEBVIEW2_USER_DATA_FOLDER = Join-Path $env:RUNNER_TEMP ('swir-konofix-webview-' + [guid]::NewGuid().ToString('N'))
+            $env:WEBVIEW2_USER_DATA_FOLDER = $webviewRoot
 
             $policyRoot = 'HKLM:\Software\Policies\Microsoft\Edge\WebView2'
             $policyValues = @{
@@ -246,7 +247,7 @@ jobs:
               $uninstall = Start-Process -FilePath $uninstaller -ArgumentList "/S _?=$installRoot" -WindowStyle Hidden -PassThru
               Wait-SwirProcess $uninstall 60 'Published Konofix cleanup'
             }
-            foreach ($path in @($installRoot, $stage, $env:WEBVIEW2_USER_DATA_FOLDER)) {
+            foreach ($path in @($installRoot, $stage, $webviewRoot)) {
               if ([string]::IsNullOrWhiteSpace($path)) { continue }
               $full = [IO.Path]::GetFullPath($path)
               $tempRoot = [IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\') + '\'
