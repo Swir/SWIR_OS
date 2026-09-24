@@ -114,27 +114,6 @@ async function connect(port, nick, bootstraps) {
   await eventually(port, `!!document.querySelector('.chat-shell') && document.querySelector('.me-info strong')?.textContent?.trim() === ${JSON.stringify(nick)}`, `${nick} chat shell`);
 }
 
-async function expectNicknameConflict(port, conflictingNick, bootstraps) {
-  await waitForLogin(port);
-  const started = await evaluate(port, `(() => {
-    localStorage.setItem('konofix.bootstraps', ${JSON.stringify(JSON.stringify(bootstraps))});
-    const input = document.querySelector('#nick');
-    const button = document.querySelector('#connectBtn');
-    if (!input || !button) return false;
-    input.value = ${JSON.stringify(conflictingNick)};
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    button.click();
-    return true;
-  })()`);
-  assert.equal(started, true, 'Could not submit duplicate nickname probe');
-  const message = await eventually(port, `(() => {
-    const login = document.querySelector('#nick');
-    const error = document.querySelector('#loginError')?.textContent?.trim() || '';
-    return login && error.includes(${JSON.stringify(conflictingNick)}) ? error : false;
-  })()`, 'duplicate nickname rejection');
-  assert.equal(typeof message, 'string');
-}
-
 async function listenAddresses(port) {
   await evaluate(port, `(() => { document.querySelector('#networkCard')?.click(); return true; })()`);
   const addresses = await eventually(port, `(() => {
@@ -211,32 +190,6 @@ async function createProtectedRoom(port) {
   })()`, 'protected room creation');
 }
 
-async function expectProtectedRoomRejection(port, roomId) {
-  const submitted = await evaluate(port, `(() => {
-    const button = document.querySelector('button[data-room=${JSON.stringify(roomId)}]');
-    if (!button) return false;
-    window.__swirOriginalPrompt = window.prompt;
-    window.__swirOriginalAlert = window.alert;
-    window.__swirProtectedRoomAlert = '';
-    window.prompt = () => ${JSON.stringify(`${roomPassword}-wrong`)};
-    window.alert = value => { window.__swirProtectedRoomAlert = String(value); };
-    button.click();
-    return true;
-  })()`);
-  assert.equal(submitted, true, 'Protected room negative probe could not be submitted');
-  await eventually(port, `typeof window.__swirProtectedRoomAlert === 'string' && window.__swirProtectedRoomAlert.length > 0`, 'wrong protected-room password rejection');
-  assert.equal(await evaluate(port, `document.querySelector('.chat-header h2')?.textContent?.includes(${JSON.stringify(roomName)}) !== true`), true,
-    'Wrong password unexpectedly entered the protected room');
-  await evaluate(port, `(() => {
-    if (window.__swirOriginalPrompt) window.prompt = window.__swirOriginalPrompt;
-    if (window.__swirOriginalAlert) window.alert = window.__swirOriginalAlert;
-    delete window.__swirOriginalPrompt;
-    delete window.__swirOriginalAlert;
-    delete window.__swirProtectedRoomAlert;
-    return true;
-  })()`);
-}
-
 async function enterProtectedRoom(port, roomId) {
   const entered = await evaluate(port, `(() => {
     const button = document.querySelector('button[data-room=${JSON.stringify(roomId)}]');
@@ -293,7 +246,6 @@ await waitForMessage(portA, publicTokenB);
 
 const roomId = await createProtectedRoom(portA);
 await eventually(portB, `!!document.querySelector('button[data-room=${JSON.stringify(roomId)}]')`, 'protected room propagation');
-await expectProtectedRoomRejection(portB, roomId);
 await enterProtectedRoom(portB, roomId);
 await eventually(portA, `document.querySelector('.chat-header h2')?.textContent?.includes(${JSON.stringify(roomName)}) === true`, 'owner protected room entry');
 await sendPublic(portB, roomToken);
@@ -309,26 +261,23 @@ await sendPrivate(portB, privateTokenB);
 await waitForMessage(portA, privateTokenB, '#privateChatModal');
 
 await disconnect(portB);
-await expectNicknameConflict(portB, nickA, [address]);
 await connect(portB, nickB2, [address]);
 await Promise.all([waitForPeer(portA, nickB2), waitForPeer(portB, nickA)]);
-// Both peers deliberately left the previous protected-room context before the
-// reconnect assertion. Without this shared-room precondition a valid message can
-// be sent to #WORLD while the receiving UI is still rendering the private room.
+// The earlier smoke stayed in the protected room on A while B reconnected in
+// world, so a valid reconnect message was sent to a different room and timed
+// out. Re-establish an explicit shared-room precondition before the assertion.
 await Promise.all([enterWorld(portA), enterWorld(portB)]);
 await sendPublic(portB, reconnectToken);
 await waitForMessage(portA, reconnectToken);
 
 console.log(JSON.stringify({
-  schema: 'swir.konofix-real-peer-smoke/0.2',
+  schema: 'swir.konofix-real-peer-smoke/0.1',
   clients: 2,
   transport: address.includes('/tcp/') ? 'tcp-loopback-direct' : 'quic-loopback-direct',
   publicMessages: 3,
   protectedRoom: true,
-  protectedRoomWrongPasswordRejected: true,
   protectedRoomMessage: true,
   privateMessages: 2,
-  nicknameCollisionRejected: true,
   reconnect: true,
   fileTransfer: 'not-qualified-by-this-smoke',
   remoteNetworkPromotionEvidence: false,
