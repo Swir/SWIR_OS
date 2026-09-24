@@ -61,6 +61,7 @@ jobs:
           dotnet run --project desktop/windows/SWIR.Desktop.ShellIntegration.SelfTests.csproj -c Release
           node --check swir-apps.js
           node --check swir-os.js
+          node integrations/konofix/verify_desktop_route.mjs
   upstream-source-contracts:
     name: pinned-upstream-source-contracts
     needs: offline
