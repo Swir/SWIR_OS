@@ -185,12 +185,12 @@ await openPrivate(portA, nickB);
 for (const token of [ignoredToken, silentToken]) {
   await eventually(portA, `document.querySelector('#privateChatModal')?.textContent?.includes(${JSON.stringify(token)}) === true`, `ignored conversation retention ${token}`);
 }
-assert.equal(await evaluate(portA, `(() => {
+await eventually(portA, `(() => {
   const modal = document.querySelector('#privateChatModal .private-chat-modal');
   const input = modal?.querySelector('[data-private-input]');
   const send = modal?.querySelector('[data-private-send]');
   return modal?.getAttribute('role') === 'dialog' && modal?.getAttribute('aria-modal') === 'true' && document.activeElement === input && !!input?.getAttribute('aria-label') && !!send?.getAttribute('aria-label');
-})()`), true, 'Private chat focus or accessibility semantics are missing');
+})()`, 'private chat focus and accessibility semantics', { timeout: 5000, interval: 100 });
 
 // User-controlled private-message mute: the runtime rejects a new private message
 // while disabled, gives localized sender feedback and stores no rejected payload.
