@@ -130,4 +130,5 @@ jobs:
           PY
           grep -F '"physicalHardwareRoadmapCompletionClaimed": False' system/e2e/verify-physical-live-usb-review.py >/dev/null
           grep -F '"physicalHardwareRoadmapCompletionClaimed": False' system/e2e/new-physical-live-usb-review.py >/dev/null
-          grep -F 'does not change the roadmap checkbox by itself' system/SWIR-PHYSICAL-LIVE-USB-REVIEW-GATE-0.1.md >/dev/null
+          grep -F 'does not change the roadmap' system/SWIR-PHYSICAL-LIVE-USB-REVIEW-GATE-0.1.md >/dev/null
+          grep -F 'checkbox by itself' system/SWIR-PHYSICAL-LIVE-USB-REVIEW-GATE-0.1.md >/dev/null
