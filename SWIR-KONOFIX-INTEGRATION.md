@@ -80,10 +80,11 @@ legacy server credentials, conversation history or files. Retiring the old defau
 entry must not delete legacy data or historical evidence.
 
 This preparatory draft does not change any completed roadmap checkbox. The
-explicitly requested replacement scope must be added to the **canonical Version
-roadmap in `SWIR-OS-ARCHITECTURE.md`** and its SVG/math regenerated before the
-integration is presented as part of the delivered product. This document and
-issue #96 define acceptance details, not a second source of progress percentages.
+explicitly requested replacement is now recorded as an **unchecked** deliverable
+in the canonical Version roadmap in `SWIR-OS-ARCHITECTURE.md`; the authoritative
+SVG/math therefore includes unfinished Konofix work in its denominator. This
+document and issue #96 define acceptance details, not a second source of progress
+percentages.
 No website synchronization or OS release is justified by a download-only helper.
 
 ## Verification scope

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Windows.Forms;
 
@@ -13,6 +14,7 @@ internal static class DesktopShellIntegrationBrokerSelfTests
             TestShellIntegrationPolicy();
             TestOpenFileActivationBroker();
             TestShellIntegrationCoordinator();
+            TestKonofixLauncher();
             Console.WriteLine("Desktop shell integration self-tests passed.");
             return 0;
         }
@@ -120,6 +122,66 @@ internal static class DesktopShellIntegrationBrokerSelfTests
         {
             try { Directory.Delete(root, recursive: true); } catch { }
         }
+    }
+
+    private static void TestKonofixLauncher()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "swir-konofix-launch-tests-" + Guid.NewGuid().ToString("N"));
+        var install = Path.Combine(root, "Konofix Chat");
+        Directory.CreateDirectory(install);
+        var executable = Path.Combine(install, "konofix-chat.exe");
+        File.WriteAllBytes(executable, new byte[] { 0x4d, 0x5a });
+        try
+        {
+            ProcessStartInfo? captured = null;
+            var launcher = new DesktopKonofixLauncher(
+                resolver: () => executable,
+                versionVerifier: _ => true,
+                starter: info => { captured = info; return 4242; },
+                approvedRoots: new[] { root });
+
+            var infoJson = JsonSerializer.Serialize(launcher.Describe(), new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            using var infoDoc = JsonDocument.Parse(infoJson);
+            var info = infoDoc.RootElement;
+            Require(info.GetProperty("schema").GetString() == "swir.desktop-konofix-launch/0.1", "unexpected Konofix launcher schema");
+            Require(info.GetProperty("installed").GetBoolean(), "qualified test client should be detected");
+            Require(!info.GetProperty("automaticInstall").GetBoolean(), "Konofix launcher must not auto-install");
+            Require(!info.GetProperty("automaticExecution").GetBoolean(), "Konofix launcher must require an explicit shell action");
+            Require(!info.GetProperty("legacyDataImport").GetBoolean(), "Konofix launcher must not import legacy chat data");
+            Require(!info.GetProperty("systemEditionQualified").GetBoolean(), "Desktop launch must not claim System Edition qualification");
+
+            var result = launcher.Launch();
+            Require(result.Started && result.ProcessId == 4242, "qualified Konofix client was not launched");
+            Require(captured is not null && captured.FileName == executable, "launcher must execute the exact qualified path");
+            Require(captured!.UseShellExecute == false, "Konofix launch must not use shell execution");
+            Require(string.IsNullOrEmpty(captured.Arguments), "Konofix launch must not inject arguments");
+            Require(captured.WorkingDirectory == install, "Konofix working directory mismatch");
+
+            var missing = new DesktopKonofixLauncher(() => null, _ => true, _ => 1, new[] { root });
+            ExpectKonofixFailure("KONOFIX_NOT_INSTALLED", () => missing.Launch());
+
+            var outside = Path.Combine(Path.GetTempPath(), "konofix-chat.exe");
+            var escaped = new DesktopKonofixLauncher(() => outside, _ => true, _ => 1, new[] { root });
+            ExpectKonofixFailure("KONOFIX_INSTALL_INVALID", () => escaped.Launch());
+
+            var wrongVersion = new DesktopKonofixLauncher(() => executable, _ => false, _ => 1, new[] { root });
+            ExpectKonofixFailure("KONOFIX_VERSION_MISMATCH", () => wrongVersion.Launch());
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { }
+        }
+    }
+
+    private static void ExpectKonofixFailure(string code, Action action)
+    {
+        try { action(); }
+        catch (DesktopKonofixException ex)
+        {
+            Require(ex.Code == code, $"expected Konofix error {code}, got {ex.Code}");
+            return;
+        }
+        throw new InvalidOperationException($"Expected DesktopKonofixException {code}.");
     }
 
     private static void TestShellIntegrationCoordinator()

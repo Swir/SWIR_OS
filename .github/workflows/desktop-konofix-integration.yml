@@ -5,11 +5,29 @@ on:
     paths:
       - 'integrations/konofix/**'
       - 'SWIR-KONOFIX-INTEGRATION.md'
+      - 'SWIR-OS-ARCHITECTURE.md'
+      - 'assets/readme/progress-card.svg'
+      - 'assets/readme/progress-mini.svg'
+      - 'swir-apps.js'
+      - 'swir-os.js'
+      - 'desktop/windows/DesktopKonofixLauncher.cs'
+      - 'desktop/windows/Program.cs'
+      - 'desktop/windows/DesktopShellIntegrationBrokerSelfTests.cs'
+      - 'desktop/windows/SWIR.Desktop.ShellIntegration.SelfTests.csproj'
       - '.github/workflows/desktop-konofix-integration.yml'
   pull_request:
     paths:
       - 'integrations/konofix/**'
       - 'SWIR-KONOFIX-INTEGRATION.md'
+      - 'SWIR-OS-ARCHITECTURE.md'
+      - 'assets/readme/progress-card.svg'
+      - 'assets/readme/progress-mini.svg'
+      - 'swir-apps.js'
+      - 'swir-os.js'
+      - 'desktop/windows/DesktopKonofixLauncher.cs'
+      - 'desktop/windows/Program.cs'
+      - 'desktop/windows/DesktopShellIntegrationBrokerSelfTests.cs'
+      - 'desktop/windows/SWIR.Desktop.ShellIntegration.SelfTests.csproj'
       - '.github/workflows/desktop-konofix-integration.yml'
   workflow_dispatch:
 
@@ -36,6 +54,13 @@ jobs:
         run: |
           python -m py_compile integrations/konofix/prepare.py
           python integrations/konofix/prepare.py --help
+      - name: Validate Desktop trusted-shell Konofix launcher
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          dotnet run --project desktop/windows/SWIR.Desktop.ShellIntegration.SelfTests.csproj -c Release
+          node --check swir-apps.js
+          node --check swir-os.js
   upstream-download:
     name: pinned-upstream-download-only
     needs: offline
