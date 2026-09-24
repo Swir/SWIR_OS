@@ -79,14 +79,8 @@ def same_hardware_identity(live: dict[str, Any], installed: dict[str, Any]) -> b
     )
 
 
-def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--live", required=True)
-    parser.add_argument("--installed", required=True)
-    args = parser.parse_args(argv)
-
-    live = load_regular_json(args.live)
-    installed = load_regular_json(args.installed)
+def verify_pair(live: dict[str, Any], installed: dict[str, Any]) -> dict[str, Any]:
+    """Validate an already-loaded Live/installed pair and return the safe summary."""
     for label, data, phase in (("live", live, "live"), ("installed", installed, "installed")):
         if data.get("schema") != SCHEMA:
             fail(f"{label}: unexpected schema")
@@ -124,7 +118,7 @@ def main(argv: list[str]) -> int:
     if installed_time < live_time:
         fail("installed evidence predates Live evidence")
 
-    summary = {
+    return {
         "schema": "swir.physical-live-usb-sequence-verification/1.0",
         "passed": True,
         "sameHardwareIdentity": True,
@@ -142,6 +136,15 @@ def main(argv: list[str]) -> int:
             "device-specific graphics, network, audio, suspend/resume and firmware qualification",
         ],
     }
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--live", required=True)
+    parser.add_argument("--installed", required=True)
+    args = parser.parse_args(argv)
+
+    summary = verify_pair(load_regular_json(args.live), load_regular_json(args.installed))
     print(json.dumps(summary, sort_keys=True))
     return 0
 
