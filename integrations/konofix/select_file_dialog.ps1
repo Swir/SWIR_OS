@@ -26,110 +26,102 @@ $clientProcesses = @(Get-Process -Name $ClientProcessName -ErrorAction SilentlyC
 if ($clientProcesses.Count -ne 1) {
     throw "Expected exactly one running $ClientProcessName process; found $($clientProcesses.Count)."
 }
-$clientPid = [int]$clientProcesses[0].Id
+$clientPid = [uint32]$clientProcesses[0].Id
 
-Add-Type -AssemblyName UIAutomationClient
-Add-Type -AssemblyName UIAutomationTypes
+Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
 
-$root = [System.Windows.Automation.AutomationElement]::RootElement
-$trueCondition = [System.Windows.Automation.Condition]::TrueCondition
-$editIdCondition = New-Object System.Windows.Automation.PropertyCondition(
-    [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
-    '1148'
-)
-$buttonCondition = New-Object System.Windows.Automation.PropertyCondition(
-    [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-    [System.Windows.Automation.ControlType]::Button
-)
-$editCondition = New-Object System.Windows.Automation.PropertyCondition(
-    [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-    [System.Windows.Automation.ControlType]::Edit
-)
+public static class SwirKonofixDialogNative {
+    public delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
 
-function Find-KonofixFileDialog {
-    $windows = $root.FindAll([System.Windows.Automation.TreeScope]::Children, $trueCondition)
-    $fallback = $null
-    foreach ($window in $windows) {
-        try {
-            if ([int]$window.Current.ProcessId -ne $clientPid) { continue }
-            $className = [string]$window.Current.ClassName
-            $name = [string]$window.Current.Name
-            if ($className -eq '#32770') { return $window }
-            if ($name -eq 'Wyślij plik przez Konofix Chat' -or $name -match '^(Open|Otwórz|Choose|Wybierz|Select)') {
-                $fallback = $window
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetClassName(IntPtr hwnd, StringBuilder className, int maxCount);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int maxCount);
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetDlgItem(IntPtr hwnd, int id);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint message, IntPtr wParam,
+        string lParam, uint flags, uint timeout, out IntPtr result);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint message, IntPtr wParam,
+        IntPtr lParam, uint flags, uint timeout, out IntPtr result);
+
+    private const uint WM_SETTEXT = 0x000C;
+    private const uint BM_CLICK = 0x00F5;
+    private const uint SMTO_ABORTIFHUNG = 0x0002;
+
+    public static IntPtr FindDialog(uint processId, out string description) {
+        IntPtr found = IntPtr.Zero;
+        string snapshot = "";
+        EnumWindows((hwnd, _) => {
+            uint pid;
+            GetWindowThreadProcessId(hwnd, out pid);
+            if (pid != processId) return true;
+            var cls = new StringBuilder(128);
+            var title = new StringBuilder(512);
+            GetClassName(hwnd, cls, cls.Capacity);
+            GetWindowText(hwnd, title, title.Capacity);
+            if (snapshot.Length > 0) snapshot += "; ";
+            snapshot += "class='" + cls + "' title='" + title + "'";
+            if (cls.ToString() == "#32770") {
+                found = hwnd;
+                return false;
             }
-        } catch {}
+            return true;
+        }, IntPtr.Zero);
+        description = snapshot;
+        return found;
     }
-    return $fallback
+
+    public static string SubmitFile(IntPtr dialog, string path) {
+        if (dialog == IntPtr.Zero) throw new InvalidOperationException("Dialog handle is zero.");
+        // Windows Common Item Dialog exposes File name as cmb13 (1148). WM_SETTEXT
+        // is handled by the editable combo and avoids UI Automation COM stalls on
+        // hosted runners. The real Konofix `file-offer` on peer B remains the
+        // authoritative proof that the published client accepted this selection.
+        IntPtr fileName = GetDlgItem(dialog, 1148);
+        if (fileName == IntPtr.Zero) {
+            // Older common-dialog layouts expose the edit directly as edt1 (1152).
+            fileName = GetDlgItem(dialog, 1152);
+        }
+        if (fileName == IntPtr.Zero) throw new InvalidOperationException("No standard filename control (1148/1152) found.");
+        IntPtr ignored;
+        if (SendMessageTimeout(fileName, WM_SETTEXT, IntPtr.Zero, path, SMTO_ABORTIFHUNG, 2000, out ignored) == IntPtr.Zero)
+            throw new InvalidOperationException("Filename control rejected or timed out on WM_SETTEXT.");
+
+        IntPtr open = GetDlgItem(dialog, 1); // IDOK
+        if (open == IntPtr.Zero) throw new InvalidOperationException("No standard Open/OK control (IDOK=1) found.");
+        if (SendMessageTimeout(open, BM_CLICK, IntPtr.Zero, IntPtr.Zero, SMTO_ABORTIFHUNG, 2000, out ignored) == IntPtr.Zero)
+            throw new InvalidOperationException("Open/OK control rejected or timed out on BM_CLICK.");
+        return "submitted";
+    }
 }
+'@
 
 $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+$lastSnapshot = ''
 while ([DateTime]::UtcNow -lt $deadline) {
-    $dialog = Find-KonofixFileDialog
-    if ($null -eq $dialog) {
+    $snapshot = ''
+    $dialog = [SwirKonofixDialogNative]::FindDialog($clientPid, [ref]$snapshot)
+    $lastSnapshot = $snapshot
+    if ($dialog -eq [IntPtr]::Zero) {
         Start-Sleep -Milliseconds 150
         continue
     }
 
-    Write-Host "Konofix file dialog found for PID ${clientPid}: class='$($dialog.Current.ClassName)' name='$($dialog.Current.Name)'"
-
-    $candidates = @()
-    $preferred = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $editIdCondition)
-    if ($null -ne $preferred) { $candidates += $preferred }
-    $edits = $dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, $editCondition)
-    foreach ($candidate in $edits) { $candidates += $candidate }
-
-    $edit = $null
-    $valuePattern = $null
-    foreach ($candidate in $candidates) {
-        try {
-            if (-not $candidate.Current.IsEnabled) { continue }
-            $candidatePattern = $null
-            if ($candidate.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$candidatePattern)) {
-                $edit = $candidate
-                $valuePattern = $candidatePattern
-                break
-            }
-        } catch {}
-    }
-    if ($null -eq $edit -or $null -eq $valuePattern) {
-        throw 'Konofix file dialog exposed no editable filename control with ValuePattern.'
-    }
-
-    $valuePattern.SetValue($fullPath)
-
-    $buttons = $dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonCondition)
-    $open = $null
-    foreach ($button in $buttons) {
-        $name = ($button.Current.Name -replace '&', '').Trim()
-        if ($name -match '^(Open|Otwórz|Choose|Wybierz|Select|OK)$') {
-            $open = $button
-            break
-        }
-    }
-    if ($null -eq $open) {
-        throw 'Konofix file dialog exposed no recognized Open/Select button.'
-    }
-
-    Write-Host "Submitting disposable Konofix transfer fixture: $([IO.Path]::GetFileName($fullPath))"
-    $invoke = $open.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
-    $invoke.Invoke()
-    # Do not wait for the native dialog to disappear through UI Automation: on
-    # hosted runners that COM query can block while the rfd dialog is tearing
-    # down. The Node E2E is authoritative and immediately requires a genuine
-    # incoming `file-offer` from the second published client, so returning here
-    # cannot turn an unsuccessful selection into a pass.
-    Write-Host 'Native picker submit invoked; downstream peer assertion owns success.'
+    Write-Host "Konofix file dialog found for PID ${clientPid}: $snapshot"
+    $result = [SwirKonofixDialogNative]::SubmitFile($dialog, $fullPath)
+    if ($result -ne 'submitted') { throw 'Native picker submit returned an unexpected result.' }
+    Write-Host "Submitted disposable Konofix transfer fixture: $([IO.Path]::GetFileName($fullPath))"
     exit 0
 }
 
-$snapshot = @()
-$top = $root.FindAll([System.Windows.Automation.TreeScope]::Children, $trueCondition)
-foreach ($window in $top) {
-    try {
-        if ([int]$window.Current.ProcessId -eq $clientPid) {
-            $snapshot += "name='$($window.Current.Name)' class='$($window.Current.ClassName)'"
-        }
-    } catch {}
-}
-throw "Timed out waiting for the Konofix file dialog for PID $clientPid. Client windows: $($snapshot -join '; ')"
+throw "Timed out waiting for the Konofix file dialog for PID $clientPid. Client windows: $lastSnapshot"
