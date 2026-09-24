@@ -97,6 +97,13 @@ asset without executing it. A separate source-qualification job checks out the
 exact pinned Konofix source commit and runs its private-chat, protected-room,
 room-file, file-response/cancel/liveness, nickname-lease, room-transition and
 public-sharing regression contracts. The canonical roadmap/SVG checks also run
-unchanged. These source tests verify the reviewed implementation contract but
-are still **not** a Konofix GUI launch or a real multi-peer interoperability test;
-they do not claim that the old chat has already been fully replaced.
+unchanged. These source tests verify the reviewed implementation contract but are not a
+real multi-peer interoperability test. A separate disposable Windows CI smoke
+downloads the exact published installer through the pinned preparer, installs it
+only under `RUNNER_TEMP`, verifies that the production SWIR Desktop launcher
+accepts the real installed executable/version without shell execution, then
+starts the real Konofix GUI and checks its bundled login form, Tauri bridge and
+event subscription over a temporary loopback-only WebView2 debug policy. It
+kills/uninstalls the app and removes only policy values it created. This is real
+published-client startup evidence, but it still does not prove cross-network
+peer/message/file interoperability or System Edition compatibility.
