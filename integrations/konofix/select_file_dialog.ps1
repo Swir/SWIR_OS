@@ -71,6 +71,8 @@ while ([DateTime]::UtcNow -lt $deadline) {
         continue
     }
 
+    Write-Host "Konofix file dialog found for PID $clientPid: class='$($dialog.Current.ClassName)' name='$($dialog.Current.Name)'"
+
     $candidates = @()
     $preferred = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $editIdCondition)
     if ($null -ne $preferred) { $candidates += $preferred }
@@ -108,18 +110,17 @@ while ([DateTime]::UtcNow -lt $deadline) {
     if ($null -eq $open) {
         throw 'Konofix file dialog exposed no recognized Open/Select button.'
     }
+
+    Write-Host "Submitting disposable Konofix transfer fixture: $([IO.Path]::GetFileName($fullPath))"
     $invoke = $open.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
     $invoke.Invoke()
-
-    $closeDeadline = [DateTime]::UtcNow.AddSeconds(5)
-    while ([DateTime]::UtcNow -lt $closeDeadline) {
-        Start-Sleep -Milliseconds 100
-        if ($null -eq (Find-KonofixFileDialog)) {
-            Write-Host "Selected disposable Konofix transfer fixture: $([IO.Path]::GetFileName($fullPath))"
-            exit 0
-        }
-    }
-    throw 'Konofix file dialog did not close after selection.'
+    # Do not wait for the native dialog to disappear through UI Automation: on
+    # hosted runners that COM query can block while the rfd dialog is tearing
+    # down. The Node E2E is authoritative and immediately requires a genuine
+    # incoming `file-offer` from the second published client, so returning here
+    # cannot turn an unsuccessful selection into a pass.
+    Write-Host 'Native picker submit invoked; downstream peer assertion owns success.'
+    exit 0
 }
 
 $snapshot = @()
