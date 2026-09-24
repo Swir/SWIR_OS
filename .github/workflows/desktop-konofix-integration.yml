@@ -1,0 +1,58 @@
+name: SWIR Konofix Integration Preparation
+
+on:
+  push:
+    paths:
+      - 'integrations/konofix/**'
+      - 'SWIR-KONOFIX-INTEGRATION.md'
+      - '.github/workflows/desktop-konofix-integration.yml'
+  pull_request:
+    paths:
+      - 'integrations/konofix/**'
+      - 'SWIR-KONOFIX-INTEGRATION.md'
+      - '.github/workflows/desktop-konofix-integration.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    name: preparation-tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate preparation behavior without executing an installer
+        run: python -m unittest discover -s integrations/konofix -p "test_*.py" -v
+      - name: Check CLI syntax and explicit opt-in interface
+        run: |
+          python -m py_compile integrations/konofix/prepare.py
+          python integrations/konofix/prepare.py --help
+  upstream-download:
+    name: pinned-upstream-download-only
+    needs: offline
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and independently re-read the pinned upstream installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 integrations/konofix/prepare.py --output "$RUNNER_TEMP/konofix-stage"
+          python3 integrations/konofix/prepare.py --verify "$RUNNER_TEMP/konofix-stage/Konofix-Chat-0.5.1-x64-Setup.exe"
+      - name: Preserve canonical progress math and SVG regeneration checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/validate-roadmap-progress.mjs SWIR-OS-ARCHITECTURE.md
+          node scripts/generate-readme-progress.mjs --self-test
+          node scripts/generate-readme-progress.mjs --check
