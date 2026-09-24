@@ -48,6 +48,8 @@ jobs:
           $webviewB = Join-Path $stateB 'WebView2'
           $processA = $null
           $processB = $null
+          $addedPolicies = @()
+          $createdPolicyKeys = @()
           $oldLocal = $env:LOCALAPPDATA
           $oldRoaming = $env:APPDATA
           $oldBrowserArguments = $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
@@ -66,6 +68,27 @@ jobs:
             $listener.Start()
             try { return ([Net.IPEndPoint]$listener.LocalEndpoint).Port }
             finally { $listener.Stop() }
+          }
+
+          function Add-WebViewPolicy([string]$ExecutableName, [int]$Port, [string]$UserDataRoot) {
+            $policyRoot = 'HKLM:\Software\Policies\Microsoft\Edge\WebView2'
+            $settings = @{
+              AdditionalBrowserArguments = "--remote-debugging-address=127.0.0.1 --remote-debugging-port=$Port"
+              UserDataFolder = $UserDataRoot
+            }
+            foreach ($setting in $settings.Keys) {
+              $key = Join-Path $policyRoot $setting
+              if (Test-Path -LiteralPath $key) {
+                if ((Get-Item -LiteralPath $key).GetValueNames() -contains $ExecutableName) {
+                  throw "Refusing to replace existing WebView2 policy for $ExecutableName."
+                }
+              } else {
+                New-Item -Path $key -Force | Out-Null
+                $script:createdPolicyKeys += $key
+              }
+              New-ItemProperty -LiteralPath $key -Name $ExecutableName -Value $settings[$setting] -PropertyType String | Out-Null
+              $script:addedPolicies += [pscustomobject]@{ Key = $key; Name = $ExecutableName }
+            }
           }
 
           function Start-IsolatedKonofix([string]$Executable, [string]$Root, [string]$WebViewRoot, [int]$Port, [string]$Label) {
@@ -89,10 +112,24 @@ jobs:
             $chat = Join-Path $installRoot 'konofix-chat.exe'
             if (-not (Test-Path -LiteralPath $chat -PathType Leaf)) { throw 'Published installer created no Konofix Chat executable.' }
 
+            # WebView2 application policies are keyed by executable identity. Two byte-identical,
+            # CI-only copies let each published client use a distinct debug port and profile.
+            $clientAExe = Join-Path $installRoot 'konofix-chat-swir-ci-a.exe'
+            $clientBExe = Join-Path $installRoot 'konofix-chat-swir-ci-b.exe'
+            Copy-Item -LiteralPath $chat -Destination $clientAExe
+            Copy-Item -LiteralPath $chat -Destination $clientBExe
+            $publishedHash = (Get-FileHash -LiteralPath $chat -Algorithm SHA256).Hash
+            if ((Get-FileHash -LiteralPath $clientAExe -Algorithm SHA256).Hash -ne $publishedHash -or
+                (Get-FileHash -LiteralPath $clientBExe -Algorithm SHA256).Hash -ne $publishedHash) {
+              throw 'CI client copies do not match the installed published executable.'
+            }
+
             $portA = Get-FreePort
             do { $portB = Get-FreePort } while ($portB -eq $portA)
-            $processA = Start-IsolatedKonofix $chat $stateA $webviewA $portA 'client-a'
-            $processB = Start-IsolatedKonofix $chat $stateB $webviewB $portB 'client-b'
+            Add-WebViewPolicy ([IO.Path]::GetFileName($clientAExe)) $portA $webviewA
+            Add-WebViewPolicy ([IO.Path]::GetFileName($clientBExe)) $portB $webviewB
+            $processA = Start-IsolatedKonofix $clientAExe $stateA $webviewA $portA 'client-a'
+            $processB = Start-IsolatedKonofix $clientBExe $stateB $webviewB $portB 'client-b'
 
             node integrations/konofix/real_peer_smoke.mjs $portA $portB
             if ($LASTEXITCODE -ne 0) { throw 'Published Konofix two-client P2P smoke failed.' }
@@ -109,6 +146,12 @@ jobs:
                 $process.Kill($true)
                 $process.WaitForExit()
               }
+            }
+            foreach ($policy in $addedPolicies) {
+              Remove-ItemProperty -LiteralPath $policy.Key -Name $policy.Name -ErrorAction SilentlyContinue
+            }
+            foreach ($key in ($createdPolicyKeys | Select-Object -Unique)) {
+              Remove-Item -LiteralPath $key -Force -ErrorAction SilentlyContinue
             }
             $uninstaller = Join-Path $installRoot 'uninstall.exe'
             if (Test-Path -LiteralPath $uninstaller -PathType Leaf) {
