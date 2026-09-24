@@ -103,13 +103,13 @@ def ico_entry_to_png(payload: bytes, width_hint: int, height_hint: int) -> bytes
             rgba.extend((red, green, blue, alpha))
         rows.append(bytes(rgba))
     if bit_count == 32 and not any_alpha:
-        rows = [bytes(bytearray(row[:i] + bytes((255,)) + row[i + 1:]) if False else row) for i, row in []]  # unreachable shape guard
         fixed: list[bytes] = []
-        for row in rows if rows else []:
-            fixed.append(row)
-        if not rows:
-            raise IntegrationError("internal icon conversion error")
-        rows = [bytes(bytearray(b"".join(row[i:i+3] + b"\xff" for i in range(0, len(row), 4)))) for row in rows]
+        for row in rows:
+            mutable = bytearray(row)
+            for x in range(width):
+                mutable[x * 4 + 3] = 255
+            fixed.append(bytes(mutable))
+        rows = fixed
     if has_mask:
         adjusted: list[bytes] = []
         for output_y, row in enumerate(rows):
