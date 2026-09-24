@@ -82,6 +82,9 @@ async function refreshStaleNetworkModal() {
 const refresher = refreshStaleNetworkModal();
 try {
   await import('./real_peer_smoke_core.mjs');
+  // Keep the same two published clients alive and qualify real file-transfer
+  // outcomes after the messaging/reconnect smoke has established a healthy P2P session.
+  await import('./real_peer_file_transfer.mjs');
 } finally {
   stopped = true;
   await refresher;
