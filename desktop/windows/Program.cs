@@ -38,6 +38,7 @@ internal sealed class MainWindow : Form
     private readonly DesktopTrayIcon _tray;
     private readonly DesktopNotificationBridgeService _notifications;
     private readonly DesktopShellIntegrationCoordinator _shellIntegration;
+    private readonly DesktopKonofixLauncher _konofix;
     private readonly string[] _startupArguments;
     private readonly string _repoRoot;
     private readonly string _dataRoot;
@@ -81,6 +82,7 @@ internal sealed class MainWindow : Form
         _nativeFileSystem = new NativeFileSystemBroker(_dataRoot);
         _packages = new DesktopPackageBridge(_capabilities, new DesktopAppPackageInstaller(_dataRoot));
         _shellIntegration = new DesktopShellIntegrationCoordinator(Application.ExecutablePath, _capabilities.RegisterFile);
+        _konofix = new DesktopKonofixLauncher();
         Controls.Add(_web);
         _tray = new DesktopTrayIcon(this, _trayLifecycle);
         _notifications = DesktopNotificationHostBinding.Create(_permissions, _tray);
@@ -445,7 +447,9 @@ internal sealed class MainWindow : Form
     {
         object? result = method switch
         {
-            "info" => new { host = _shellIntegration.Describe(), associationRegistrationWarning = _shellAssociationWarning },
+            "info" => new { host = _shellIntegration.Describe(), associationRegistrationWarning = _shellAssociationWarning, konofix = _konofix.Describe() },
+            "konofixStatus" => _konofix.Describe(),
+            "launchKonofix" => _konofix.Launch(),
             "pendingOpenFiles" => _shellIntegration.PendingOpenFiles(),
             "claimOpenFile" => _shellIntegration.ClaimOpenFile(ArgString(args, 0), Owner(args, 1)),
             "cancelOpenFile" => _shellIntegration.CancelOpenFile(ArgString(args, 0)),
@@ -739,6 +743,7 @@ internal sealed class MainWindow : Form
         DeviceNetworkBrokerException deviceNetwork => deviceNetwork.Code,
         DesktopUpdateBridgeCommandException updateBridge => updateBridge.Code,
         UpdateSecurityException updateSecurity => updateSecurity.Code,
+        DesktopKonofixException konofix => konofix.Code,
         _ => "NATIVE_HOST_ERROR"
     };
 
@@ -807,7 +812,7 @@ internal sealed class MainWindow : Form
   const surface = (name, methods) => Object.freeze(Object.fromEntries(methods.map(method => [method, (...args) => call(name, method, ...args)])));
   window.SWIR_NATIVE_HOST = Object.freeze({
     edition: 'DESKTOP', version: '0.5.7-preview', contract: 'swir.runtime/1.0', sessionId: '__SESSION_ID__',
-    features: Object.freeze({ packageContextBroker: true, nativePackageBridge: true, appIsolationRouting: true, appIsolationState: 'APP_BRIDGE_VERIFIED', nativeAppData: true, nativeFilesystem: true, nativeDeviceNetwork: true, nativeAccountSession: true, nativeProcessService: true, nativeClipboardTray: true, nativeNotifications: true, nativeShellIntegration: true, guardedUpdateRestartLifecycle: true, nativeUpdateBridge: true, nativeUpdatePreparation: true }),
+    features: Object.freeze({ packageContextBroker: true, nativePackageBridge: true, appIsolationRouting: true, appIsolationState: 'APP_BRIDGE_VERIFIED', nativeAppData: true, nativeFilesystem: true, nativeDeviceNetwork: true, nativeAccountSession: true, nativeProcessService: true, nativeClipboardTray: true, nativeNotifications: true, nativeShellIntegration: true, nativeKonofixLaunch: true, guardedUpdateRestartLifecycle: true, nativeUpdateBridge: true, nativeUpdatePreparation: true }),
     filesystem: surface('filesystem', ['info','list','get','save','remove','pickFile','pickDirectory','capabilityInfo','readCapabilityText','revokeCapability','revokeOwnerCapabilities','pruneCapabilities','capabilityStatus']),
     appData: surface('appdata', ['info','list','get','set','remove']),
     packages: surface('packages', ['info','installFromCapability','status','rollback']),
@@ -819,7 +824,7 @@ internal sealed class MainWindow : Form
     devices: surface('devices', ['info','list']),
     identity: surface('identity', ['info','account','session']),
     security: surface('security', ['contextInfo','can','policyCatalog','appUrl','isolationInfo','syncPackageContexts','packageContexts']),
-    shellIntegration: surface('shellIntegration', ['info','pendingOpenFiles','claimOpenFile','cancelOpenFile']),
+    shellIntegration: surface('shellIntegration', ['info','konofixStatus','launchKonofix','pendingOpenFiles','claimOpenFile','cancelOpenFile']),
     updates: surface('updates', ['readiness'])
   });
   window.dispatchEvent(new CustomEvent('swir:native-host-ready', { detail: { edition: 'DESKTOP', version: '0.5.7-preview', sessionId: '__SESSION_ID__' } }));

@@ -2,16 +2,12 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
-    <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="DesktopShellIntegrationBroker.cs" />
-    <Compile Include="DesktopOpenFileActivationBroker.cs" />
-    <Compile Include="DesktopShellIntegrationCoordinator.cs" />
     <Compile Include="DesktopKonofixLauncher.cs" />
-    <Compile Include="DesktopShellIntegrationBrokerSelfTests.cs" />
+    <Compile Include="DesktopKonofixReleaseSmoke.cs" />
   </ItemGroup>
 </Project>
