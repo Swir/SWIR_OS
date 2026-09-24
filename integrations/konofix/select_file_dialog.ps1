@@ -71,7 +71,7 @@ while ([DateTime]::UtcNow -lt $deadline) {
         continue
     }
 
-    Write-Host "Konofix file dialog found for PID $clientPid: class='$($dialog.Current.ClassName)' name='$($dialog.Current.Name)'"
+    Write-Host "Konofix file dialog found for PID ${clientPid}: class='$($dialog.Current.ClassName)' name='$($dialog.Current.Name)'"
 
     $candidates = @()
     $preferred = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $editIdCondition)
