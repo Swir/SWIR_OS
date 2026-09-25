@@ -7,6 +7,10 @@ on:
       - 'integrations/konofix/stage_linux_system.py'
       - 'integrations/konofix/debian13_runtime_smoke.sh'
       - 'integrations/konofix/real_peer_smoke_core.mjs'
+      - 'integrations/konofix/real_peer_smoke_webkitgtk.mjs'
+      - 'integrations/konofix/webkit_inspector_websocket_compat.mjs'
+      - 'integrations/konofix/webkit_inspector_protocol.mjs'
+      - 'integrations/konofix/test_webkit_inspector_protocol.mjs'
       - 'integrations/konofix/webkit_inspector_targets.mjs'
       - 'integrations/konofix/test_webkit_inspector_targets.mjs'
       - 'integrations/konofix/test_stage_linux_system.py'
@@ -21,6 +25,10 @@ on:
       - 'integrations/konofix/stage_linux_system.py'
       - 'integrations/konofix/debian13_runtime_smoke.sh'
       - 'integrations/konofix/real_peer_smoke_core.mjs'
+      - 'integrations/konofix/real_peer_smoke_webkitgtk.mjs'
+      - 'integrations/konofix/webkit_inspector_websocket_compat.mjs'
+      - 'integrations/konofix/webkit_inspector_protocol.mjs'
+      - 'integrations/konofix/test_webkit_inspector_protocol.mjs'
       - 'integrations/konofix/webkit_inspector_targets.mjs'
       - 'integrations/konofix/test_webkit_inspector_targets.mjs'
       - 'integrations/konofix/test_stage_linux_system.py'
@@ -63,7 +71,7 @@ jobs:
       - name: Validate WebKitGTK inspector target discovery
         shell: bash
         working-directory: swir-os
-        run: node --test integrations/konofix/test_webkit_inspector_targets.mjs
+        run: node --test integrations/konofix/test_webkit_inspector_targets.mjs integrations/konofix/test_webkit_inspector_protocol.mjs
       - name: Verify and apply minimal Linux desktop overlay
         shell: bash
         run: |
@@ -181,7 +189,7 @@ jobs:
         run: |
           set -euo pipefail
           binary="$GITHUB_WORKSPACE/konofix-upstream/src-tauri/target/debug/konofix-chat"
-          smoke="$GITHUB_WORKSPACE/swir-os/integrations/konofix/real_peer_smoke_core.mjs"
+          smoke="$GITHUB_WORKSPACE/swir-os/integrations/konofix/real_peer_smoke_webkitgtk.mjs"
           root="$RUNNER_TEMP/swir-konofix-linux-peer"
           rm -rf "$root"
           for client in a b; do
