@@ -56,9 +56,26 @@ async function evaluate(port, expression) {
   const target = await page(port);
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(target.webSocketDebuggerUrl);
-    const requestId = Math.floor(Math.random() * 1_000_000_000) + 1;
-    const timer = setTimeout(() => finish(new Error(`Runtime.evaluate timed out on ${port}`)), 3500);
+    const baseRequestId = Math.floor(Math.random() * 1_000_000_000) + 1;
+    const timer = setTimeout(() => finish(new Error(`Runtime.evaluate timed out on ${port}`)), 5000);
     let finished = false;
+    let requestIndex = 0;
+    const requests = inspectorMode === 'webkitgtk'
+      ? [
+          { method: 'Inspector.enable', params: {} },
+          { method: 'Runtime.enable', params: {} },
+          { method: 'Inspector.initialized', params: {} },
+          { method: 'Runtime.evaluate', params: { expression, returnByValue: true } },
+        ]
+      : [
+          { method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true } },
+        ];
+
+    function currentRequestId() { return baseRequestId + requestIndex; }
+    function sendCurrentRequest() {
+      const request = requests[requestIndex];
+      socket.send(JSON.stringify({ id: currentRequestId(), method: request.method, params: request.params }));
+    }
     function finish(error, value) {
       if (finished) return;
       finished = true;
@@ -67,26 +84,25 @@ async function evaluate(port, expression) {
       if (error) reject(error); else resolve(value);
     }
     socket.addEventListener('error', () => finish(new Error(`DevTools WebSocket failed on ${port}`)), { once: true });
-    socket.addEventListener('open', () => socket.send(JSON.stringify({
-      id: requestId,
-      method: 'Runtime.evaluate',
-      params: inspectorMode === 'webkitgtk'
-          ? { expression, returnByValue: true }
-          : { expression, awaitPromise: true, returnByValue: true },
-    })), { once: true });
+    socket.addEventListener('open', sendCurrentRequest, { once: true });
     socket.addEventListener('message', event => {
       let message;
       try { message = JSON.parse(event.data); } catch (error) { finish(error); return; }
-      if (message.id !== requestId) return;
+      if (message.id !== currentRequestId()) return;
+      const request = requests[requestIndex];
       if (message.error || message.result?.exceptionDetails || message.result?.wasThrown) {
-        finish(new Error(`Runtime.evaluate failed: ${JSON.stringify(message.error ?? message.result?.exceptionDetails ?? message.result)}`));
+        finish(new Error(`${request.method} failed: ${JSON.stringify(message.error ?? message.result?.exceptionDetails ?? message.result)}`));
+        return;
+      }
+      if (requestIndex + 1 < requests.length) {
+        requestIndex += 1;
+        sendCurrentRequest();
         return;
       }
       finish(null, message.result?.result?.value);
     });
   });
 }
-
 async function eventually(port, expression, description, { timeout = DEADLINE_MS, interval = 350 } = {}) {
   const deadline = Date.now() + timeout;
   let last;
