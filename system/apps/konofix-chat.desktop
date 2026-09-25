@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Konofix Chat
+Comment=Private peer-to-peer communication for SWIR OS
+Exec=/opt/swir/apps/konofix/konofix-chat
+TryExec=/opt/swir/apps/konofix/konofix-chat
+Icon=konofix-chat
+Terminal=false
+Categories=Network;Chat;InstantMessaging;
+StartupNotify=true

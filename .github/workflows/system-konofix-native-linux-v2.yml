@@ -1,0 +1,270 @@
+name: System Konofix Native Linux Candidate
+
+on:
+  push:
+    paths:
+      - 'integrations/konofix/prepare_linux_source.py'
+      - 'integrations/konofix/stage_linux_system.py'
+      - 'integrations/konofix/debian13_runtime_smoke.sh'
+      - 'integrations/konofix/real_peer_smoke_core.mjs'
+      - 'integrations/konofix/real_peer_smoke_webkitgtk.mjs'
+      - 'integrations/konofix/webkit_inspector_websocket_compat.mjs'
+      - 'integrations/konofix/webkit_inspector_protocol.mjs'
+      - 'integrations/konofix/test_webkit_inspector_protocol.mjs'
+      - 'integrations/konofix/webkit_inspector_targets.mjs'
+      - 'integrations/konofix/test_webkit_inspector_targets.mjs'
+      - 'integrations/konofix/test_stage_linux_system.py'
+      - 'integrations/konofix/verify_linux_system_stage.py'
+      - 'integrations/konofix/upstream.json'
+      - 'system/apps/konofix-chat.desktop'
+      - 'system/image/build-live-usb-img.sh'
+      - '.github/workflows/system-konofix-native-linux-v2.yml'
+  pull_request:
+    paths:
+      - 'integrations/konofix/prepare_linux_source.py'
+      - 'integrations/konofix/stage_linux_system.py'
+      - 'integrations/konofix/debian13_runtime_smoke.sh'
+      - 'integrations/konofix/real_peer_smoke_core.mjs'
+      - 'integrations/konofix/real_peer_smoke_webkitgtk.mjs'
+      - 'integrations/konofix/webkit_inspector_websocket_compat.mjs'
+      - 'integrations/konofix/webkit_inspector_protocol.mjs'
+      - 'integrations/konofix/test_webkit_inspector_protocol.mjs'
+      - 'integrations/konofix/webkit_inspector_targets.mjs'
+      - 'integrations/konofix/test_webkit_inspector_targets.mjs'
+      - 'integrations/konofix/test_stage_linux_system.py'
+      - 'integrations/konofix/verify_linux_system_stage.py'
+      - 'integrations/konofix/upstream.json'
+      - 'system/apps/konofix-chat.desktop'
+      - 'system/image/build-live-usb-img.sh'
+      - '.github/workflows/system-konofix-native-linux-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-linux-candidate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swir-os
+      - uses: actions/checkout@v4
+        with:
+          repository: Swir/Konofix
+          ref: 31298cc732c97ff90230c3743cd1c3be17f40b6c
+          path: konofix-upstream
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install distro-managed Tauri Linux build/runtime dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev \
+            libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+            libxdo-dev patchelf xvfb x11-utils dbus-x11
+      - name: Validate WebKitGTK inspector target discovery
+        shell: bash
+        working-directory: swir-os
+        run: node --test integrations/konofix/test_webkit_inspector_targets.mjs integrations/konofix/test_webkit_inspector_protocol.mjs
+      - name: Verify and apply minimal Linux desktop overlay
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 swir-os/integrations/konofix/prepare_linux_source.py konofix-upstream
+          test "$(git -C konofix-upstream rev-parse HEAD)" = "31298cc732c97ff90230c3743cd1c3be17f40b6c"
+          mapfile -t changed < <(git -C konofix-upstream diff --name-only)
+          test "${#changed[@]}" -eq 3
+          printf '%s\n' "${changed[@]}"
+          git -C konofix-upstream diff --quiet -- src src-tauri/src/lib.rs
+      - name: Build exact Konofix frontend and native Linux Tauri client
+        shell: bash
+        working-directory: konofix-upstream
+        run: |
+          set -euo pipefail
+          node --version
+          rustc --version
+          cargo --version
+          npm ci
+          npm run build
+          cargo build --locked --release --manifest-path src-tauri/Cargo.toml --bin konofix-chat
+          test -x src-tauri/target/release/konofix-chat
+      - name: Stage the exact native build into a disposable System root
+        shell: bash
+        working-directory: swir-os
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/swir-konofix-system-root"
+          rm -rf "$root"
+          python3 integrations/konofix/stage_linux_system.py \
+            --source "$GITHUB_WORKSPACE/konofix-upstream" \
+            --root "$root" \
+            --desktop system/apps/konofix-chat.desktop
+          python3 integrations/konofix/verify_linux_system_stage.py --root "$root"
+          test -x "$root/opt/swir/apps/konofix/konofix-chat"
+          test -f "$root/usr/share/applications/konofix-chat.desktop"
+          test -f "$root/usr/share/swir/provenance/konofix-chat.json"
+
+      - name: Qualify the staged System binary in Debian 13 userspace
+        shell: bash
+        working-directory: swir-os
+        run: |
+          set -euo pipefail
+          runtime_dockerfile="$RUNNER_TEMP/konofix-debian13-runtime.Dockerfile"
+          cat > "$runtime_dockerfile" <<'DOCKERFILE'
+          FROM debian:trixie-slim
+          RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+              ca-certificates dbus-x11 xvfb x11-utils util-linux \
+              libgtk-3-0t64 libwebkit2gtk-4.1-0 libayatana-appindicator3-1 librsvg2-2 libxdo3 \
+              && rm -rf /var/lib/apt/lists/*
+          DOCKERFILE
+          docker build --pull --file "$runtime_dockerfile" --tag swir-konofix-debian13-runtime "$RUNNER_TEMP"
+          docker run --rm --network none \
+            --mount type=bind,source="$RUNNER_TEMP/swir-konofix-system-root",target=/swir-stage,readonly \
+            --mount type=bind,source="$GITHUB_WORKSPACE/swir-os",target=/swir-os,readonly \
+            swir-konofix-debian13-runtime \
+            bash /swir-os/integrations/konofix/debian13_runtime_smoke.sh /swir-stage
+
+      - name: Verify Live USB builder enforces Konofix provenance when present or required
+        shell: bash
+        working-directory: swir-os
+        run: |
+          set -euo pipefail
+          bash -n system/image/build-live-usb-img.sh
+          grep -F -- '--require-konofix-native' system/image/build-live-usb-img.sh >/dev/null
+          grep -F 'Konofix native rootfs verification failed' system/image/build-live-usb-img.sh >/dev/null
+          grep -F 'Konofix native payload changed while assembling Live USB media' system/image/build-live-usb-img.sh >/dev/null
+
+      - name: Map the real native Linux Konofix window under Xvfb
+        shell: bash
+        working-directory: konofix-upstream
+        run: |
+          set -euo pipefail
+          binary="$RUNNER_TEMP/swir-konofix-system-root/opt/swir/apps/konofix/konofix-chat"
+          evidence="$RUNNER_TEMP/konofix-native-linux-window.txt"
+          dbus-run-session -- xvfb-run -a -s "-screen 0 1366x768x24" bash -eu -o pipefail -c '
+            binary="$1"
+            evidence="$2"
+            "$binary" >"$RUNNER_TEMP/konofix-native-linux.stdout" 2>"$RUNNER_TEMP/konofix-native-linux.stderr" &
+            pid=$!
+            cleanup() {
+              kill "$pid" 2>/dev/null || true
+              wait "$pid" 2>/dev/null || true
+            }
+            trap cleanup EXIT
+            found=0
+            for _ in $(seq 1 80); do
+              if ! kill -0 "$pid" 2>/dev/null; then
+                cat "$RUNNER_TEMP/konofix-native-linux.stderr" >&2 || true
+                exit 21
+              fi
+              if xwininfo -root -tree >"$evidence" 2>&1 && grep -F "Konofix Chat" "$evidence" >/dev/null; then
+                found=1
+                break
+              fi
+              sleep 0.25
+            done
+            test "$found" -eq 1
+            sleep 3
+            kill -0 "$pid"
+            grep -F "Konofix Chat" "$evidence"
+          ' bash "$binary" "$evidence"
+      - name: Build debug-instrumented native Linux peer qualification client
+        shell: bash
+        working-directory: konofix-upstream
+        run: |
+          set -euo pipefail
+          cargo build --locked --manifest-path src-tauri/Cargo.toml --bin konofix-chat
+          test -x src-tauri/target/debug/konofix-chat
+          test -x src-tauri/target/release/konofix-chat
+
+      - name: Exercise two native Linux Konofix peers through WebKitGTK
+        shell: bash
+        working-directory: swir-os
+        run: |
+          set -euo pipefail
+          binary="$GITHUB_WORKSPACE/konofix-upstream/src-tauri/target/debug/konofix-chat"
+          smoke="$GITHUB_WORKSPACE/swir-os/integrations/konofix/real_peer_smoke_webkitgtk.mjs"
+          root="$RUNNER_TEMP/swir-konofix-linux-peer"
+          rm -rf "$root"
+          for client in a b; do
+            install -d -m 0700               "$root/$client/home" "$root/$client/runtime" "$root/$client/data"               "$root/$client/config" "$root/$client/cache"
+          done
+
+          dbus-run-session -- bash -eu -o pipefail -c '
+            binary="$1"
+            smoke="$2"
+            root="$3"
+            display=:98
+            pids=()
+
+            Xvfb "$display" -screen 0 1366x768x24 -nolisten tcp >"$root/xvfb.log" 2>&1 &
+            xvfb_pid=$!
+            cleanup() {
+              for pid in "${pids[@]}"; do
+                kill "$pid" 2>/dev/null || true
+                wait "$pid" 2>/dev/null || true
+              done
+              kill "$xvfb_pid" 2>/dev/null || true
+              wait "$xvfb_pid" 2>/dev/null || true
+            }
+            trap cleanup EXIT
+
+            ready=0
+            for _ in $(seq 1 100); do
+              if ! kill -0 "$xvfb_pid" 2>/dev/null; then
+                cat "$root/xvfb.log" >&2 || true
+                exit 20
+              fi
+              if DISPLAY="$display" xwininfo -root >/dev/null 2>&1; then
+                ready=1
+                break
+              fi
+              sleep 0.1
+            done
+            test "$ready" -eq 1
+
+            launch_client() {
+              client="$1"
+              port="$2"
+              env                 HOME="$root/$client/home"                 XDG_RUNTIME_DIR="$root/$client/runtime"                 XDG_DATA_HOME="$root/$client/data"                 XDG_CONFIG_HOME="$root/$client/config"                 XDG_CACHE_HOME="$root/$client/cache"                 DISPLAY="$display"                 GDK_BACKEND=x11                 WEBKIT_DISABLE_DMABUF_RENDERER=1                 WEBKIT_INSPECTOR_HTTP_SERVER="127.0.0.1:$port"                 "$binary" >"$root/$client.stdout" 2>"$root/$client.stderr" &
+              pids+=("$!")
+            }
+
+            launch_client a 9331
+            launch_client b 9332
+
+            if ! KONOFIX_INSPECTOR=webkitgtk node "$smoke" 9331 9332; then
+              for client in a b; do
+                echo "===== Konofix Linux $client stderr =====" >&2
+                cat "$root/$client.stderr" >&2 || true
+              done
+              exit 31
+            fi
+
+            for pid in "${pids[@]}"; do
+              kill -0 "$pid"
+            done
+          ' bash "$binary" "$smoke" "$root"
+
+          # The inspector-enabled binary is only a test harness. Re-verify that
+          # the separately staged release payload/provenance stayed unchanged.
+          python3 integrations/konofix/verify_linux_system_stage.py             --root "$RUNNER_TEMP/swir-konofix-system-root"
+
+      - name: Keep completion claims closed
+        shell: bash
+        working-directory: swir-os
+        run: |
+          set -euo pipefail
+          node --input-type=module - <<'NODE'
+          import { KonofixSystemCompatibilityPolicy } from './system/runtime/konofix-system-compatibility.mjs';
+          if (KonofixSystemCompatibilityPolicy.nativeLinuxGuiQualified !== false ||
+              KonofixSystemCompatibilityPolicy.protonQualified !== false) {
+            throw new Error('Build/window evidence alone must not promote System qualification.');
+          }
+          NODE
