@@ -71,7 +71,11 @@ jobs:
       - name: Validate WebKitGTK inspector target discovery
         shell: bash
         working-directory: swir-os
-        run: node --test integrations/konofix/test_webkit_inspector_targets.mjs integrations/konofix/test_webkit_inspector_protocol.mjs
+        run: |
+          set -euo pipefail
+          node --check integrations/konofix/webkit_inspector_websocket_compat.mjs
+          node --check integrations/konofix/real_peer_smoke_webkitgtk.mjs
+          node --test integrations/konofix/test_webkit_inspector_targets.mjs integrations/konofix/test_webkit_inspector_protocol.mjs
       - name: Verify and apply minimal Linux desktop overlay
         shell: bash
         run: |
