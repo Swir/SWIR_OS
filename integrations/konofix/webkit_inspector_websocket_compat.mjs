@@ -18,16 +18,16 @@ export function installWebKitInspectorWebSocketCompat({ WebSocketImpl = globalTh
       this._targetInfo = null;
       this._queued = [];
       this._nextOuterId = 1_500_000_000;
+      this._nextInnerId = 1_400_000_000;
       this._outerToInner = new Map();
       this._internalOuterIds = new Set();
       this._internalInnerIds = new Set();
 
       this._socket.addEventListener('open', () => {
-        // WebKitGTK's HTTP inspector socket exposes only the outer Target
-        // control plane until Target.setPauseOnStart initializes the page
-        // target stream. Prime it immediately after the WebSocket opens so
-        // Target.targetCreated can arrive before queued Runtime commands.
-        this._sendOuter('Target.setPauseOnStart', { pauseOnStart: false });
+        // WebKitGTK emits Target.targetCreated for the selected WebPage after
+        // the inspector socket attaches. Do not send target-scoped commands
+        // before that event; queue the caller command until the page target is
+        // known and initialized.
         this._events.dispatchEvent(new Event('open'));
       });
       this._socket.addEventListener('error', () => this._events.dispatchEvent(new Event('error')));
@@ -74,9 +74,18 @@ export function installWebKitInspectorWebSocketCompat({ WebSocketImpl = globalTh
       this._socket.send(JSON.stringify({ id: outerId, ...envelope }));
     }
 
+    _sendInternal(method, params = {}) {
+      this._sendInner({ id: this._nextInnerId++, method, params }, { internal: true });
+    }
+
     _bootstrapTarget(info) {
+      // Match WebKit's frontend initialization contract before Runtime.evaluate:
+      // select non-paused target behavior, enable Inspector + Runtime, signal
+      // initialization complete, then flush caller commands in-order.
       this._sendOuter('Target.setPauseOnStart', { pauseOnStart: false });
-      this._sendInner({ id: 1_400_000_000, method: 'Inspector.enable', params: {} }, { internal: true });
+      this._sendInternal('Inspector.enable');
+      this._sendInternal('Runtime.enable');
+      this._sendInternal('Inspector.initialized');
       if (info?.isPaused === true) this._sendOuter('Target.resume', { targetId: this._targetId });
       const queued = this._queued.splice(0);
       for (const message of queued) this._sendInner(message);

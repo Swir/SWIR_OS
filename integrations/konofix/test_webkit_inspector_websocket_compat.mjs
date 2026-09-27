@@ -47,12 +47,25 @@ test('adapts Runtime.evaluate through WebKit Target control plane', () => {
       method: 'Runtime.evaluate',
       params: { expression: '1 + 1', returnByValue: true },
     }));
-    assert.equal(MockWebSocket.latest.sent[0].method, 'Target.setPauseOnStart');
+    assert.equal(MockWebSocket.latest.sent.length, 0, 'adapter must wait for Target.targetCreated');
 
     MockWebSocket.latest.receive({
       method: 'Target.targetCreated',
       params: { targetInfo: { targetId: 'page-7', isProvisional: false, isPaused: false } },
     });
+
+    const outerMethods = MockWebSocket.latest.sent.map(message => message.method);
+    assert.equal(outerMethods[0], 'Target.setPauseOnStart');
+
+    const innerMessages = MockWebSocket.latest.sent
+      .filter(message => message.method === 'Target.sendMessageToTarget')
+      .map(message => JSON.parse(message.params.message));
+    assert.deepEqual(
+      innerMessages.slice(0, 3).map(message => message.method),
+      ['Inspector.enable', 'Runtime.enable', 'Inspector.initialized'],
+      'WebKit target must be initialized before caller Runtime commands',
+    );
+    assert.equal(new Set(innerMessages.slice(0, 3).map(message => message.id)).size, 3, 'internal ids must be unique');
 
     const envelope = MockWebSocket.latest.sent.find(message => {
       if (message.method !== 'Target.sendMessageToTarget') return false;
