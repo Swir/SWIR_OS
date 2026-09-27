@@ -22,7 +22,7 @@ export function installWebKitInspectorWebSocketCompat({ WebSocketImpl = globalTh
       this._internalOuterIds = new Set();
       this._internalInnerIds = new Set();
 
-      this._socket.addEventListener('open', () => this._events.dispatchEvent(new Event('open')));
+      this._socket.addEventListener('open', () => {\n        // WebKitGTK's HTTP inspector socket exposes only the outer Target\n        // control plane until Target.setPauseOnStart initializes the page\n        // target stream. Prime it immediately after the WebSocket opens so\n        // Target.targetCreated can arrive before queued Runtime commands.\n        this._sendOuter('Target.setPauseOnStart', { pauseOnStart: false });\n        this._events.dispatchEvent(new Event('open'));\n      });
       this._socket.addEventListener('error', () => this._events.dispatchEvent(new Event('error')));
       this._socket.addEventListener('close', () => this._events.dispatchEvent(new Event('close')));
       this._socket.addEventListener('message', event => this._onMessage(event.data));
