@@ -52,119 +52,7 @@ async function page(port) {
   return preferred;
 }
 
-const webKitConnections = new Map();
-
-async function createWebKitConnection(port) {
-  const target = await page(port);
-  const socket = new WebSocket(target.webSocketDebuggerUrl);
-  const pending = new Map();
-  let nextRequestId = Math.floor(Math.random() * 1_000_000_000) + 1;
-  let closed = false;
-
-  function rejectPending(error) {
-    for (const { reject, timer } of pending.values()) {
-      clearTimeout(timer);
-      reject(error);
-    }
-    pending.clear();
-  }
-
-  function close() {
-    if (closed) return;
-    closed = true;
-    rejectPending(new Error(`WebKit inspector closed on ${port}`));
-    try { socket.close(); } catch {}
-    if (webKitConnections.get(port)?.socket === socket) webKitConnections.delete(port);
-  }
-
-  function request(method, params, timeoutMs = 5000) {
-    if (closed || socket.readyState !== WebSocket.OPEN) {
-      return Promise.reject(new Error(`WebKit inspector is not open on ${port}`));
-    }
-    const id = nextRequestId++;
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        pending.delete(id);
-        reject(new Error(`${method} timed out on ${port}`));
-      }, timeoutMs);
-      pending.set(id, { resolve, reject, timer, method });
-      socket.send(JSON.stringify({ id, method, params }));
-    });
-  }
-
-  socket.addEventListener('message', event => {
-    let message;
-    try { message = JSON.parse(event.data); } catch { return; }
-    if (!Number.isInteger(message.id)) return;
-    const waiter = pending.get(message.id);
-    if (!waiter) return;
-    pending.delete(message.id);
-    clearTimeout(waiter.timer);
-    if (message.error || message.result?.exceptionDetails || message.result?.wasThrown) {
-      waiter.reject(new Error(`${waiter.method} failed: ${JSON.stringify(message.error ?? message.result?.exceptionDetails ?? message.result)}`));
-      return;
-    }
-    waiter.resolve(message.result);
-  });
-  socket.addEventListener('close', () => {
-    if (!closed) {
-      closed = true;
-      rejectPending(new Error(`WebKit inspector disconnected on ${port}`));
-      if (webKitConnections.get(port)?.socket === socket) webKitConnections.delete(port);
-    }
-  });
-  socket.addEventListener('error', () => {
-    rejectPending(new Error(`WebKit inspector WebSocket failed on ${port}`));
-  });
-
-  await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`WebKit inspector open timed out on ${port}`)), 5000);
-    socket.addEventListener('open', () => {
-      clearTimeout(timer);
-      resolve();
-    }, { once: true });
-    socket.addEventListener('error', () => {
-      clearTimeout(timer);
-      reject(new Error(`WebKit inspector open failed on ${port}`));
-    }, { once: true });
-  });
-
-  // Opening the HTTP inspector socket triggers WebKit's asynchronous target
-  // Setup handshake. Keep this exact socket alive and retry the real Runtime
-  // domain on it until the target backend has finished attaching.
-  const deadline = Date.now() + 8000;
-  let lastError;
-  while (Date.now() < deadline) {
-    try {
-      const probe = await request('Runtime.evaluate', { expression: '1 + 1', returnByValue: true }, 2000);
-      if (probe?.result?.value === 2) {
-        return { socket, request, close };
-      }
-      lastError = new Error(`Unexpected Runtime probe response on ${port}`);
-    } catch (error) {
-      lastError = error;
-    }
-    await delay(200);
-  }
-  close();
-  throw new Error(`WebKit Runtime did not attach on ${port}: ${lastError?.message ?? 'unknown error'}`);
-}
-
-async function webKitConnection(port) {
-  const existing = webKitConnections.get(port);
-  if (existing && existing.socket.readyState === WebSocket.OPEN) return existing;
-  const connection = await createWebKitConnection(port);
-  webKitConnections.set(port, connection);
-  return connection;
-}
-
 async function evaluate(port, expression) {
-  if (inspectorMode === 'webkitgtk') {
-    const connection = await webKitConnection(port);
-    const response = await connection.request('Runtime.evaluate', { expression, returnByValue: true });
-    return response?.result?.value;
-  }
-
   const target = await page(port);
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(target.webSocketDebuggerUrl);
@@ -178,11 +66,13 @@ async function evaluate(port, expression) {
       try { socket.close(); } catch {}
       if (error) reject(error); else resolve(value);
     }
-    socket.addEventListener('error', () => finish(new Error(`DevTools WebSocket failed on ${port}`)), { once: true });
+    socket.addEventListener('error', () => finish(new Error(`Inspector WebSocket failed on ${port}`)), { once: true });
     socket.addEventListener('open', () => socket.send(JSON.stringify({
       id: requestId,
       method: 'Runtime.evaluate',
-      params: { expression, awaitPromise: true, returnByValue: true },
+      params: inspectorMode === 'webkitgtk'
+        ? { expression, returnByValue: true }
+        : { expression, awaitPromise: true, returnByValue: true },
     })), { once: true });
     socket.addEventListener('message', event => {
       let message;
@@ -197,10 +87,6 @@ async function evaluate(port, expression) {
   });
 }
 
-function closeWebKitConnections() {
-  for (const connection of webKitConnections.values()) connection.close();
-  webKitConnections.clear();
-}
 async function eventually(port, expression, description, { timeout = DEADLINE_MS, interval = 350 } = {}) {
   const deadline = Date.now() + timeout;
   let last;
@@ -408,4 +294,3 @@ console.log(JSON.stringify({
   remoteNetworkPromotionEvidence: false,
 }, null, 2));
 
-if (inspectorMode === 'webkitgtk') closeWebKitConnections();

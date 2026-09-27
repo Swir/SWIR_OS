@@ -9,6 +9,7 @@ on:
       - 'integrations/konofix/real_peer_smoke_core.mjs'
       - 'integrations/konofix/real_peer_smoke_webkitgtk.mjs'
       - 'integrations/konofix/webkit_inspector_websocket_compat.mjs'
+      - 'integrations/konofix/test_webkit_inspector_websocket_compat.mjs'
       - 'integrations/konofix/webkit_inspector_protocol.mjs'
       - 'integrations/konofix/test_webkit_inspector_protocol.mjs'
       - 'integrations/konofix/webkit_inspector_targets.mjs'
@@ -27,6 +28,7 @@ on:
       - 'integrations/konofix/real_peer_smoke_core.mjs'
       - 'integrations/konofix/real_peer_smoke_webkitgtk.mjs'
       - 'integrations/konofix/webkit_inspector_websocket_compat.mjs'
+      - 'integrations/konofix/test_webkit_inspector_websocket_compat.mjs'
       - 'integrations/konofix/webkit_inspector_protocol.mjs'
       - 'integrations/konofix/test_webkit_inspector_protocol.mjs'
       - 'integrations/konofix/webkit_inspector_targets.mjs'
@@ -74,8 +76,9 @@ jobs:
         run: |
           set -euo pipefail
           node --check integrations/konofix/webkit_inspector_websocket_compat.mjs
+          node --check integrations/konofix/real_peer_smoke_core.mjs
           node --check integrations/konofix/real_peer_smoke_webkitgtk.mjs
-          node --test integrations/konofix/test_webkit_inspector_targets.mjs integrations/konofix/test_webkit_inspector_protocol.mjs
+          node --test integrations/konofix/test_webkit_inspector_targets.mjs integrations/konofix/test_webkit_inspector_protocol.mjs integrations/konofix/test_webkit_inspector_websocket_compat.mjs
       - name: Verify and apply minimal Linux desktop overlay
         shell: bash
         run: |
