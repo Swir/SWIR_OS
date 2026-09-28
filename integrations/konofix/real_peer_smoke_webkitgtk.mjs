@@ -29,6 +29,7 @@ run('cargo', ['test', '--locked', '--manifest-path', 'src-tauri/Cargo.toml', '--
 run('cargo', ['test', '--locked', '--manifest-path', 'src-tauri/Cargo.toml', '--test', 'room_membership_network', '--', '--nocapture']);
 
 for (const script of [
+  'scripts/check-nickname-lease-trust.mjs',
   'scripts/test-private-chat-state.mjs',
   'scripts/test-room-transitions.mjs',
   'scripts/test-secure-ui.mjs',
