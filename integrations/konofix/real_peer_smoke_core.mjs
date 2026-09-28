@@ -261,6 +261,24 @@ await sendPrivate(portB, privateTokenB);
 await waitForMessage(portA, privateTokenB, '#privateChatModal');
 
 await disconnect(portB);
+await waitForLogin(portB);
+const collisionSetup = `(() => {
+  localStorage.setItem('konofix.bootstraps', ${JSON.stringify(JSON.stringify([address]))});
+  const input = document.querySelector('#nick');
+  const button = document.querySelector('#connectBtn');
+  if (!input || !button) return false;
+  input.value = ${JSON.stringify(nickA)};
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  button.click();
+  return true;
+})()`;
+assert.equal(await evaluate(portB, collisionSetup), true, 'Failed to start duplicate nickname attempt');
+await eventually(portB, `(() => {
+  const error = document.querySelector('#loginError')?.textContent?.trim() ?? '';
+  return !!document.querySelector('#nick') && !document.querySelector('.chat-shell') && error.includes(${JSON.stringify(nickA)});
+})()`, 'duplicate nickname rejection');
+assert.equal(await evaluate(portA, `!!document.querySelector('.chat-shell') && document.querySelector('.me-info strong')?.textContent?.trim() === ${JSON.stringify(nickA)}`), true,
+  'Incumbent Konofix client was displaced by duplicate nickname attempt');
 await connect(portB, nickB2, [address]);
 await Promise.all([waitForPeer(portA, nickB2), waitForPeer(portB, nickA)]);
 // The earlier smoke stayed in the protected room on A while B reconnected in
@@ -278,6 +296,7 @@ console.log(JSON.stringify({
   protectedRoom: true,
   protectedRoomMessage: true,
   privateMessages: 2,
+  nicknameCollision: true,
   reconnect: true,
   fileTransfer: 'not-qualified-by-this-smoke',
   remoteNetworkPromotionEvidence: false,
