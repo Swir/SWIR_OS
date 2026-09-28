@@ -2,6 +2,7 @@
 """Read-only verifier for a staged Konofix System root."""
 from __future__ import annotations
 import argparse
+import ast
 import hashlib
 import json
 import os
@@ -30,6 +31,20 @@ def read_regular(path: Path, limit: int) -> bytes:
 
 def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+def verify_shell_route(path: Path) -> None:
+    source = read_regular(path, 2 * 1024 * 1024).decode("utf-8")
+    tree = ast.parse(source, filename=str(path))
+    launchers = None
+    for node in tree.body:
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id == "LAUNCHERS":
+            launchers = ast.literal_eval(node.value)
+            break
+    if launchers is None:
+        raise VerifyError("native SWIR Shell launcher table is missing")
+    matches = [commands for label, commands in launchers if label == "Konofix Chat"]
+    if matches != [(("/opt/swir/apps/konofix/konofix-chat",),)]:
+        raise VerifyError("native SWIR Shell does not expose the exact Konofix launcher route")
 
 def verify(root: Path) -> dict:
     if root.is_symlink() or not root.is_dir():
@@ -77,8 +92,11 @@ def verify(root: Path) -> dict:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", required=True, type=Path)
+    parser.add_argument("--shell", type=Path)
     args = parser.parse_args(argv)
     try:
+        if args.shell is not None:
+            verify_shell_route(args.shell)
         print(json.dumps(verify(args.root), sort_keys=True))
         return 0
     except (OSError, UnicodeError, ValueError, VerifyError, json.JSONDecodeError) as exc:

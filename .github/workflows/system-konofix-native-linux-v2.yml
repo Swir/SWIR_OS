@@ -10,6 +10,7 @@ on:
       - 'integrations/konofix/verify_linux_system_stage.py'
       - 'integrations/konofix/upstream.json'
       - 'system/apps/konofix-chat.desktop'
+      - 'system/session/swir-shell.py'
       - 'system/image/build-live-usb-img.sh'
       - '.github/workflows/system-konofix-native-linux-v2.yml'
   pull_request:
@@ -21,6 +22,7 @@ on:
       - 'integrations/konofix/verify_linux_system_stage.py'
       - 'integrations/konofix/upstream.json'
       - 'system/apps/konofix-chat.desktop'
+      - 'system/session/swir-shell.py'
       - 'system/image/build-live-usb-img.sh'
       - '.github/workflows/system-konofix-native-linux-v2.yml'
   workflow_dispatch:
@@ -87,7 +89,10 @@ jobs:
             --source "$GITHUB_WORKSPACE/konofix-upstream" \
             --root "$root" \
             --desktop system/apps/konofix-chat.desktop
-          python3 integrations/konofix/verify_linux_system_stage.py --root "$root"
+          python3 -m py_compile system/session/swir-shell.py
+          python3 integrations/konofix/verify_linux_system_stage.py \
+            --root "$root" \
+            --shell system/session/swir-shell.py
           test -x "$root/opt/swir/apps/konofix/konofix-chat"
           test -f "$root/usr/share/applications/konofix-chat.desktop"
           test -f "$root/usr/share/swir/provenance/konofix-chat.json"
