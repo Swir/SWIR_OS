@@ -16,13 +16,13 @@ The mandatory end-user application and experience scope is defined in [`SWIR-PRO
 <!-- ROADMAP-PROGRESS:START -->
 <p align="center">
   <a href="https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml"><img alt="CI" src="https://github.com/Swir/SWIR_OS/actions/workflows/system-contracts.yml/badge.svg"></a>
-  <img alt="Roadmap progress" src="https://img.shields.io/badge/ROADMAP-92.4%25-2ea043?style=for-the-badge">
-  <img alt="Completed" src="https://img.shields.io/badge/DONE-61%2F66-1f6feb?style=for-the-badge">
+  <img alt="Roadmap progress" src="https://img.shields.io/badge/ROADMAP-93.8%25-2ea043?style=for-the-badge">
+  <img alt="Completed" src="https://img.shields.io/badge/DONE-61%2F65-1f6feb?style=for-the-badge">
   <img alt="Status" src="https://img.shields.io/badge/STATUS-IN%20PROGRESS-7c3aed?style=for-the-badge">
 </p>
 
 <p align="center">
-  <img width="900" src="assets/readme/progress-mini.svg" alt="SWIR OS roadmap progress — 92.4%, 61 of 66 verified deliverables" />
+  <img width="900" src="assets/readme/progress-mini.svg" alt="SWIR OS roadmap progress — 93.8%, 61 of 65 verified deliverables" />
 </p>
 
 ## 📊 Overall progress
@@ -30,7 +30,7 @@ The mandatory end-user application and experience scope is defined in [`SWIR-PRO
 
 | ✅ Completed | ⏳ Remaining | 📦 Total | 🎯 Progress |
 |---:|---:|---:|---:|
-| **61** | **5** | **66** | **92.4%** |
+| **61** | **4** | **65** | **93.8%** |
 
 > **Progress rule:** the explicit `[x]/[ ]` deliverables in **Version roadmap** are the source of truth for the full Web → Desktop → System plan. Update the checklist first, then badges, numbers, percentage and deterministic SVG outputs. A prototype does not count as complete until the described deliverable is actually implemented and verified.
 <!-- ROADMAP-PROGRESS:END -->
@@ -451,7 +451,6 @@ Active direction:
 - [x] native notification adapter
 - [x] guarded update activation, health proof, rollback and restart handoff
 - [ ] signed GitHub-backed stable/preview update feed with Automatic / Notify only / Manual user policy
-- [ ] Konofix replaces legacy SWIR Chat as the default communication client with verified Desktop launch, System Edition client qualification and real peer/file-transfer interoperability
 
 ### System Edition 3.x
 
