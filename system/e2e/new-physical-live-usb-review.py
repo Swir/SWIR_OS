@@ -15,6 +15,7 @@ import json
 import os
 import pathlib
 import re
+import stat
 import sys
 from typing import Any, Final
 
@@ -81,24 +82,47 @@ def write_exclusive(path_text: str, payload: bytes) -> None:
             pass
 
 
+def measure_image(path_text: str) -> tuple[str, int]:
+    path = pathlib.Path(path_text)
+    if path.is_symlink():
+        fail("refusing symlink image path")
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        fail(f"cannot open final image read-only: {exc}")
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            fail("final image must be a regular file")
+        if info.st_size <= 0 or info.st_size > MAX_IMAGE_BYTES:
+            fail(f"final image size must be within 1..{MAX_IMAGE_BYTES} bytes")
+        digest = hashlib.sha256()
+        while True:
+            chunk = os.read(fd, IMAGE_READ_BYTES)
+            if not chunk:
+                break
+            digest.update(chunk)
+    finally:
+        os.close(fd)
+    return digest.hexdigest(), info.st_size
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--live", required=True)
     parser.add_argument("--installed", required=True)
     parser.add_argument("--observations", required=True)
-    parser.add_argument("--image-sha256", required=True)
+    parser.add_argument("--image", required=True, help="exact final Live USB image; hashed read-only and never stored in review output")
     parser.add_argument("--source-commit", required=True)
-    parser.add_argument("--image-bytes", required=True, type=int)
     parser.add_argument("--hardware-scope", required=True, help="local hardware-scope label; only its SHA-256 is stored")
     parser.add_argument("--output", required=True)
     args = parser.parse_args(argv)
 
-    if not HEX64.fullmatch(args.image_sha256):
-        fail("--image-sha256 must be lowercase 64-character SHA-256 hex")
+    image_sha256, image_bytes = measure_image(args.image)
     if not HEX40.fullmatch(args.source_commit):
         fail("--source-commit must be a full lowercase 40-character Git SHA")
-    if args.image_bytes <= 0:
-        fail("--image-bytes must be positive")
     scope = args.hardware_scope.strip()
     if not scope or len(scope) > 512:
         fail("--hardware-scope must contain 1..512 characters")
@@ -114,9 +138,9 @@ def main(argv: list[str]) -> int:
         "schema": review_module.REVIEW_SCHEMA,
         "reviewedAtUtc": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
         "sourceImage": {
-            "sha256": args.image_sha256,
+            "sha256": image_sha256,
             "sourceCommit": args.source_commit,
-            "bytes": args.image_bytes,
+            "bytes": image_bytes,
         },
         "hardwareScope": {
             "privacySafeIdSha256": hashlib.sha256(scope.encode("utf-8")).hexdigest(),
@@ -143,6 +167,8 @@ def main(argv: list[str]) -> int:
         "created": True,
         "output": str(pathlib.Path(args.output)),
         "rawHardwareScopeStored": False,
+        "imageSha256MeasuredFromFile": True,
+        "imageBytesMeasuredFromFile": True,
         "physicalHardwareRoadmapCompletionClaimed": False,
     }, sort_keys=True))
     return 0
