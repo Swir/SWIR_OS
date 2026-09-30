@@ -93,6 +93,9 @@ jobs:
           assert data["passed"] is True
           assert data["exclusive0600OutputVerified"] is True
           assert data["rawHardwareScopeRedactionVerified"] is True
+          assert data["imageDigestMeasuredVerified"] is True
+          assert data["imageSizeMeasuredVerified"] is True
+          assert data["symlinkImageRejected"] is True
           assert data["incompleteObservationRefused"] is True
           assert data["generatedReviewVerified"] is True
           assert data["roadmapCompletionClaimed"] is False
