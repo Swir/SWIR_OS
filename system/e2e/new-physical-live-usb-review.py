@@ -21,6 +21,8 @@ from typing import Any, Final
 
 HEX64: Final = re.compile(r"^[0-9a-f]{64}$")
 HEX40: Final = re.compile(r"^[0-9a-f]{40}$")
+MAX_IMAGE_BYTES: Final = 128 * 1024 * 1024 * 1024
+IMAGE_READ_BYTES: Final = 4 * 1024 * 1024
 
 
 def fail(message: str) -> "NoReturn":
