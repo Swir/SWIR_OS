@@ -52,19 +52,25 @@ def main() -> int:
         root = pathlib.Path(temp)
         live_path, installed_path = root / "live.json", root / "installed.json"
         observations_path, output_path = root / "observations.json", root / "review.json"
+        image_path = root / "swir-live-usb.img"
+        image_bytes = (b"SWIR-LIVE-USB-IMAGE-FIXTURE\0" * 4096) + b"final"
+        image_path.write_bytes(image_bytes)
+        expected_image_sha256 = hashlib.sha256(image_bytes).hexdigest()
         live_path.write_text(json.dumps(evidence("live", True)), encoding="utf-8")
         installed_path.write_text(json.dumps(evidence("installed", False)), encoding="utf-8")
         observations_path.write_text(json.dumps({name: True for name in OBS}), encoding="utf-8")
         scope = "Dedicated lab laptop #fixture-only"
         result = subprocess.run([
             sys.executable, str(CREATE), "--live", str(live_path), "--installed", str(installed_path),
-            "--observations", str(observations_path), "--image-sha256", "a" * 64,
-            "--source-commit", "b" * 40, "--image-bytes", "4294967296",
+            "--observations", str(observations_path), "--image", str(image_path),
+            "--source-commit", "b" * 40,
             "--hardware-scope", scope, "--output", str(output_path)
         ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         assert result.returncode == 0, result.stderr
         assert stat.S_IMODE(output_path.stat().st_mode) == 0o600
         review = json.loads(output_path.read_text(encoding="utf-8"))
+        assert review["sourceImage"]["sha256"] == expected_image_sha256
+        assert review["sourceImage"]["bytes"] == len(image_bytes)
         assert review["hardwareScope"]["privacySafeIdSha256"] == hashlib.sha256(scope.encode()).hexdigest()
         assert scope not in output_path.read_text(encoding="utf-8")
         verify = subprocess.run([sys.executable, str(VERIFY), "--live", str(live_path), "--installed", str(installed_path), "--review", str(output_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -72,19 +78,30 @@ def main() -> int:
         assert json.loads(verify.stdout)["reviewReady"] is True
         repeat = subprocess.run([
             sys.executable, str(CREATE), "--live", str(live_path), "--installed", str(installed_path),
-            "--observations", str(observations_path), "--image-sha256", "a" * 64,
-            "--source-commit", "b" * 40, "--image-bytes", "4294967296",
+            "--observations", str(observations_path), "--image", str(image_path),
+            "--source-commit", "b" * 40,
             "--hardware-scope", scope, "--output", str(output_path)
         ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         assert repeat.returncode != 0 and "refusing to overwrite" in repeat.stderr
 
+        image_link = root / "swir-live-usb-link.img"
+        image_link.symlink_to(image_path)
+        symlink_output = root / "symlink-refused.json"
+        symlink_refused = subprocess.run([
+            sys.executable, str(CREATE), "--live", str(live_path), "--installed", str(installed_path),
+            "--observations", str(observations_path), "--image", str(image_link),
+            "--source-commit", "b" * 40,
+            "--hardware-scope", scope, "--output", str(symlink_output)
+        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        assert symlink_refused.returncode != 0 and "symlink image path" in symlink_refused.stderr
+        assert not symlink_output.exists()
         incomplete = root / "incomplete.json"
         incomplete.write_text(json.dumps({name: (name != "audioVerified") for name in OBS}), encoding="utf-8")
         refused_output = root / "refused.json"
         refused = subprocess.run([
             sys.executable, str(CREATE), "--live", str(live_path), "--installed", str(installed_path),
-            "--observations", str(incomplete), "--image-sha256", "a" * 64,
-            "--source-commit", "b" * 40, "--image-bytes", "4294967296",
+            "--observations", str(incomplete), "--image", str(image_path),
+            "--source-commit", "b" * 40,
             "--hardware-scope", scope, "--output", str(refused_output)
         ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         assert refused.returncode != 0 and "audioVerified" in refused.stderr
@@ -95,6 +112,9 @@ def main() -> int:
         "passed": True,
         "exclusive0600OutputVerified": True,
         "rawHardwareScopeRedactionVerified": True,
+        "imageDigestMeasuredVerified": True,
+        "imageSizeMeasuredVerified": True,
+        "symlinkImageRejected": True,
         "incompleteObservationRefused": True,
         "generatedReviewVerified": True,
         "roadmapCompletionClaimed": False,

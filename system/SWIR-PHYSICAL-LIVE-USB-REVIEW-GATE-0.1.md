@@ -9,7 +9,9 @@ The existing physical evidence collector proves a read-only two-phase candidate:
 This review gate closes the remaining **evidence-quality gap** before a physical
 qualification run can be considered for the roadmap. It binds the operator's
 manual safety/usability review to the exact Live evidence digest, installed
-evidence digest, final image SHA-256, image byte length and source commit.
+evidence digest, final image SHA-256, image byte length and source commit. The
+review creator now opens the exact final image read-only and computes its SHA-256
+and byte length itself; those values are no longer accepted as typed operator input.
 
 A passing review is **review-ready evidence**. It does not change the roadmap
 checkbox by itself, does not claim Secure Boot/legacy BIOS support and does not
@@ -74,17 +76,18 @@ partial checklist from being silently promoted to qualification evidence.
 
 ## Create the bound review bundle
 
-Use the exact SHA-256 and byte size of the final image that was written to the
-USB, plus the full 40-character source commit used to build it:
+Keep the exact final image file that was written to the USB. The review creator
+opens that file read-only, rejects symlinks/non-regular or empty images, and
+computes its SHA-256 and byte size directly. Supply only the full 40-character
+source commit as provenance metadata:
 
 ```bash
 python3 system/e2e/new-physical-live-usb-review.py \
   --live ~/swir-live-physical-evidence.json \
   --installed ~/swir-installed-physical-evidence.json \
   --observations ~/swir-physical-observations.json \
-  --image-sha256 <final-image-sha256> \
+  --image /path/to/final/swir-live-usb.img \
   --source-commit <40-character-git-sha> \
-  --image-bytes <exact-image-byte-length> \
   --hardware-scope "dedicated test machine local label" \
   --output ~/swir-physical-review.json
 ```
@@ -93,10 +96,12 @@ python3 system/e2e/new-physical-live-usb-review.py \
 for the tested hardware scope. The raw label is not written to the review JSON.
 Do not put serial numbers or personal identifiers in it.
 
-The creator first re-runs the two-phase sequence verifier. It refuses to create
-review output if the Live/installed evidence pair is not already valid. It then
-binds both evidence digests to the image provenance and the explicit operator
-observations and adds a deterministic review digest.
+The creator first hashes and measures the exact image through a read-only,
+no-follow file descriptor, then re-runs the two-phase sequence verifier. It refuses
+to create review output if the image path is unsafe or the Live/installed evidence
+pair is not already valid. It binds both evidence digests to the measured image
+provenance and the explicit operator observations and adds a deterministic review
+digest. The image path itself is not stored in the review bundle.
 
 ## Verify the final physical review
 
