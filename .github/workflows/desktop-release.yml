@@ -73,6 +73,9 @@ jobs:
       SWIR_RELEASE_CHANNEL: ${{ inputs.channel }}
       SWIR_RELEASE_KEY_ID: ${{ inputs.key_id }}
       SWIR_RELEASE_PRIVATE_KEY_PEM: ${{ secrets.SWIR_DESKTOP_RELEASE_PRIVATE_KEY_PEM }}
+      SWIR_PUBLISH_RELEASE: ${{ inputs.publish_release }}
+      SWIR_UPDATE_KEY_ID: ${{ vars.SWIR_DESKTOP_UPDATE_KEY_ID }}
+      SWIR_UPDATE_PUBLIC_KEY_PEM_B64: ${{ vars.SWIR_DESKTOP_UPDATE_PUBLIC_KEY_PEM_B64 }}
       SWIR_CATALOG_KEY_ID: ${{ inputs.catalog_key_id }}
       SWIR_PACKAGE_KEY_ID: ${{ inputs.package_key_id }}
       SWIR_PACKAGE_SIGNING_PRIVATE_KEY_BASE64: ${{ secrets.SWIR_PACKAGE_SIGNING_PRIVATE_KEY_BASE64 }}
@@ -129,6 +132,30 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:SWIR_RELEASE_PRIVATE_KEY_PEM)) { throw 'SWIR_DESKTOP_RELEASE_PRIVATE_KEY_PEM secret is not configured.' }
           if ([string]::IsNullOrWhiteSpace($env:SWIR_CATALOG_SIGNING_PRIVATE_KEY_PEM)) { throw 'SWIR_CATALOG_SIGNING_PRIVATE_KEY_PEM secret is not configured.' }
           if ([string]::IsNullOrWhiteSpace($env:SWIR_PACKAGE_SIGNING_PRIVATE_KEY_BASE64)) { throw 'SWIR_PACKAGE_SIGNING_PRIVATE_KEY_BASE64 secret is not configured.' }
+          if ($env:SWIR_PUBLISH_RELEASE -eq 'true') {
+            if ($env:SWIR_UPDATE_KEY_ID -notmatch '^[A-Za-z0-9._-]{1,128}$') { throw 'SWIR_DESKTOP_UPDATE_KEY_ID repository variable is required and invalid for release publication.' }
+            if ($env:SWIR_UPDATE_KEY_ID -cne $env:SWIR_RELEASE_KEY_ID) { throw 'SWIR_DESKTOP_UPDATE_KEY_ID must match key_id before publishing a Desktop release.' }
+            if ([string]::IsNullOrWhiteSpace($env:SWIR_UPDATE_PUBLIC_KEY_PEM_B64)) { throw 'SWIR_DESKTOP_UPDATE_PUBLIC_KEY_PEM_B64 repository variable is required for release publication.' }
+            try {
+              $updatePublicPem = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:SWIR_UPDATE_PUBLIC_KEY_PEM_B64.Trim()))
+            } catch {
+              throw 'SWIR_DESKTOP_UPDATE_PUBLIC_KEY_PEM_B64 must be valid base64 PEM.'
+            }
+            $privateRsa = [System.Security.Cryptography.RSA]::Create()
+            $publicRsa = [System.Security.Cryptography.RSA]::Create()
+            try {
+              $privateRsa.ImportFromPem($env:SWIR_RELEASE_PRIVATE_KEY_PEM)
+              $publicRsa.ImportFromPem($updatePublicPem)
+              $privateSpki = [Convert]::ToBase64String($privateRsa.ExportSubjectPublicKeyInfo())
+              $publicSpki = [Convert]::ToBase64String($publicRsa.ExportSubjectPublicKeyInfo())
+              if ($privateSpki -cne $publicSpki) { throw 'mismatch' }
+            } catch {
+              throw 'SWIR_DESKTOP_UPDATE_PUBLIC_KEY_PEM_B64 is invalid or does not match the configured release signing key.'
+            } finally {
+              $privateRsa.Dispose()
+              $publicRsa.Dispose()
+            }
+          }
           if ($env:SWIR_CATALOG_EXPECTED_ROOT_SHA256 -notmatch '^[A-Fa-f0-9]{64}$') { throw 'SWIR_CATALOG_SIGNING_PUBLIC_KEY_SHA256 secret must be a 64-hex SHA-256 fingerprint.' }
           if ($env:SWIR_CATALOG_ROTATION_ENABLED -eq 'true') {
             if ($env:SWIR_CATALOG_NEXT_KEY_ID -notmatch '^[A-Za-z0-9._-]{1,128}$') { throw 'catalog_next_key_id is required and invalid when rotation is enabled.' }
