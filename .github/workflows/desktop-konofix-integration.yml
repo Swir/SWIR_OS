@@ -1,0 +1,281 @@
+name: SWIR Konofix Integration Preparation
+
+on:
+  push:
+    paths:
+      - 'integrations/konofix/**'
+      - 'SWIR-KONOFIX-INTEGRATION.md'
+      - 'SWIR-OS-ARCHITECTURE.md'
+      - 'assets/readme/progress-card.svg'
+      - 'assets/readme/progress-mini.svg'
+      - 'swir-apps.js'
+      - 'swir-os.js'
+      - 'desktop/windows/DesktopKonofixLauncher.cs'
+      - 'desktop/windows/DesktopKonofixReleaseSmoke.cs'
+      - 'desktop/windows/SWIR.Desktop.Konofix.ReleaseSmoke.csproj'
+      - 'desktop/windows/Program.cs'
+      - 'desktop/windows/DesktopShellIntegrationBrokerSelfTests.cs'
+      - 'desktop/windows/SWIR.Desktop.ShellIntegration.SelfTests.csproj'
+      - '.github/workflows/desktop-konofix-integration.yml'
+  pull_request:
+    paths:
+      - 'integrations/konofix/**'
+      - 'SWIR-KONOFIX-INTEGRATION.md'
+      - 'SWIR-OS-ARCHITECTURE.md'
+      - 'assets/readme/progress-card.svg'
+      - 'assets/readme/progress-mini.svg'
+      - 'swir-apps.js'
+      - 'swir-os.js'
+      - 'desktop/windows/DesktopKonofixLauncher.cs'
+      - 'desktop/windows/DesktopKonofixReleaseSmoke.cs'
+      - 'desktop/windows/SWIR.Desktop.Konofix.ReleaseSmoke.csproj'
+      - 'desktop/windows/Program.cs'
+      - 'desktop/windows/DesktopShellIntegrationBrokerSelfTests.cs'
+      - 'desktop/windows/SWIR.Desktop.ShellIntegration.SelfTests.csproj'
+      - '.github/workflows/desktop-konofix-integration.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    name: preparation-tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate preparation behavior without executing an installer
+        run: python -m unittest discover -s integrations/konofix -p "test_*.py" -v
+      - name: Check CLI syntax and explicit opt-in interface
+        run: |
+          python -m py_compile integrations/konofix/prepare.py
+          python integrations/konofix/prepare.py --help
+      - name: Validate System Edition managed-Wine Konofix contract
+        if: runner.os == 'Linux'
+        run: node integrations/konofix/verify_system_compat.mjs
+      - name: Validate Desktop trusted-shell Konofix launcher
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          dotnet run --project desktop/windows/SWIR.Desktop.ShellIntegration.SelfTests.csproj -c Release
+          node --check swir-apps.js
+          node --check swir-os.js
+          node integrations/konofix/verify_desktop_route.mjs
+  upstream-source-contracts:
+    name: pinned-upstream-source-contracts
+    needs: offline
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - id: pin
+        name: Read the reviewed Konofix source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          from pathlib import Path
+          pin = json.loads(Path("integrations/konofix/upstream.json").read_text(encoding="utf-8"))
+          assert pin["repository"] == "Swir/Konofix"
+          assert pin["version"] == "0.5.1"
+          assert len(pin["sourceCommit"]) == 40
+          print(f"source_commit={pin['sourceCommit']}")
+          PY
+      - uses: actions/checkout@v4
+        with:
+          repository: Swir/Konofix
+          ref: ${{ steps.pin.outputs.source_commit }}
+          path: upstream-konofix
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify exact source commit and install locked test tooling
+        working-directory: upstream-konofix
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ steps.pin.outputs.source_commit }}"
+          npm ci --ignore-scripts
+      - name: Exercise pinned Konofix messaging and file-transfer contracts
+        working-directory: upstream-konofix
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/test-private-chat-state.mjs
+          node scripts/test-room-file-context.mjs
+          node scripts/test-file-response-phase.mjs
+          node scripts/test-file-cancel-convergence.mjs
+          node scripts/test-file-transfer-liveness.mjs
+          node scripts/test-nickname-lease-trust.mjs
+          node scripts/test-room-transitions.mjs
+          node scripts/test-public-sharing.mjs
+
+  published-windows-client-smoke:
+    name: published-windows-client-smoke
+    needs: offline
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - id: pin
+        name: Read reviewed Konofix identity
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pin = Get-Content 'integrations/konofix/upstream.json' -Raw | ConvertFrom-Json
+          if ($pin.repository -ne 'Swir/Konofix' -or $pin.version -ne '0.5.1') { throw 'Unexpected Konofix pin.' }
+          "source_commit=$($pin.sourceCommit)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      - uses: actions/checkout@v4
+        with:
+          repository: Swir/Konofix
+          ref: ${{ steps.pin.outputs.source_commit }}
+          path: upstream-konofix
+          persist-credentials: false
+      - name: Install and launch the exact published Konofix client on disposable CI
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows' -or -not $env:RUNNER_TEMP) {
+            throw 'Published-client smoke is restricted to a disposable Windows GitHub Actions runner.'
+          }
+          if ((git -C upstream-konofix rev-parse HEAD).Trim() -ne '${{ steps.pin.outputs.source_commit }}') {
+            throw 'Pinned Konofix source checkout does not match upstream.json.'
+          }
+
+          $stage = Join-Path $env:RUNNER_TEMP ('swir-konofix-stage-' + [guid]::NewGuid().ToString('N'))
+          $installRoot = Join-Path $env:RUNNER_TEMP ('swir-konofix-installed-' + [guid]::NewGuid().ToString('N'))
+          $installer = Join-Path $stage 'Konofix-Chat-0.5.1-x64-Setup.exe'
+          $process = $null
+          $addedPolicies = @()
+          $createdPolicyKeys = @()
+          $oldBrowserArguments = $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
+          $oldUserData = $env:WEBVIEW2_USER_DATA_FOLDER
+
+          function Wait-SwirProcess($Process, [int]$Seconds, [string]$Label) {
+            if (-not $Process.WaitForExit($Seconds * 1000)) {
+              $Process.Kill($true)
+              throw "$Label timed out."
+            }
+            if ($Process.ExitCode -ne 0) { throw "$Label failed: exit code $($Process.ExitCode)." }
+          }
+
+          try {
+            python integrations/konofix/prepare.py --output $stage
+            python integrations/konofix/prepare.py --verify $installer
+
+            $setup = Start-Process -FilePath $installer -ArgumentList "/S /D=$installRoot" -WindowStyle Hidden -PassThru
+            Wait-SwirProcess $setup 120 'Published Konofix NSIS installation'
+            $chat = Join-Path $installRoot 'konofix-chat.exe'
+            if (-not (Test-Path -LiteralPath $chat -PathType Leaf)) { throw 'Published installer created no Konofix Chat executable.' }
+
+            dotnet run --project desktop/windows/SWIR.Desktop.Konofix.ReleaseSmoke.csproj -c Release -- $chat $installRoot
+            if ($LASTEXITCODE -ne 0) { throw 'SWIR Desktop launcher rejected the published installed Konofix client.' }
+
+            $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+            $listener.Start()
+            $port = ([Net.IPEndPoint]$listener.LocalEndpoint).Port
+            $listener.Stop()
+            $webviewRoot = Join-Path $env:RUNNER_TEMP ('swir-konofix-webview-' + [guid]::NewGuid().ToString('N'))
+            $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$port"
+            $env:WEBVIEW2_USER_DATA_FOLDER = $webviewRoot
+
+            $policyRoot = 'HKLM:\Software\Policies\Microsoft\Edge\WebView2'
+            $policyValues = @{
+              AdditionalBrowserArguments = "--remote-debugging-address=127.0.0.1 --remote-debugging-port=$port"
+              UserDataFolder = $env:WEBVIEW2_USER_DATA_FOLDER
+            }
+            $appIds = @('konofix-chat.exe', 'info.swir.konofixchat')
+            foreach ($setting in $policyValues.Keys) {
+              $key = Join-Path $policyRoot $setting
+              if (Test-Path -LiteralPath $key) {
+                $existingNames = (Get-Item -LiteralPath $key).GetValueNames()
+                foreach ($appId in $appIds) {
+                  if ($existingNames -contains $appId) { throw "Refusing to replace existing WebView policy for $appId." }
+                }
+              } else {
+                New-Item -Path $key -Force | Out-Null
+                $createdPolicyKeys += $key
+              }
+              foreach ($appId in $appIds) {
+                New-ItemProperty -LiteralPath $key -Name $appId -Value $policyValues[$setting] -PropertyType String | Out-Null
+                $addedPolicies += [pscustomobject]@{ Key = $key; Name = $appId }
+              }
+            }
+
+            $stdout = Join-Path $env:RUNNER_TEMP 'swir-konofix-published.stdout.log'
+            $stderr = Join-Path $env:RUNNER_TEMP 'swir-konofix-published.stderr.log'
+            $process = Start-Process -FilePath $chat -WorkingDirectory $installRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+            node upstream-konofix/scripts/check-chat-page.mjs $port
+            if ($LASTEXITCODE -ne 0) {
+              Get-Content -LiteralPath $stdout, $stderr -Tail 80 -ErrorAction SilentlyContinue
+              throw 'Published Konofix frontend smoke failed.'
+            }
+            $process.Refresh()
+            if ($process.HasExited) { throw "Published Konofix exited unexpectedly: $($process.ExitCode)" }
+            Write-Host 'Published Konofix 0.5.1: installer, SWIR launcher qualification and real WebView startup PASS.'
+          } finally {
+            $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $oldBrowserArguments
+            $env:WEBVIEW2_USER_DATA_FOLDER = $oldUserData
+            if ($null -ne $process -and -not $process.HasExited) {
+              $process.Kill($true)
+              $process.WaitForExit()
+            }
+            foreach ($policy in $addedPolicies) {
+              Remove-ItemProperty -LiteralPath $policy.Key -Name $policy.Name -ErrorAction SilentlyContinue
+            }
+            foreach ($key in ($createdPolicyKeys | Select-Object -Unique)) {
+              Remove-Item -LiteralPath $key -Force -ErrorAction SilentlyContinue
+            }
+            $uninstaller = Join-Path $installRoot 'uninstall.exe'
+            if (Test-Path -LiteralPath $uninstaller -PathType Leaf) {
+              $uninstall = Start-Process -FilePath $uninstaller -ArgumentList "/S _?=$installRoot" -WindowStyle Hidden -PassThru
+              Wait-SwirProcess $uninstall 60 'Published Konofix cleanup'
+            }
+            foreach ($path in @($installRoot, $stage, $webviewRoot)) {
+              if ([string]::IsNullOrWhiteSpace($path)) { continue }
+              $full = [IO.Path]::GetFullPath($path)
+              $tempRoot = [IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\') + '\'
+              if (-not $full.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase)) { throw "Refusing cleanup outside RUNNER_TEMP: $full" }
+              Remove-Item -LiteralPath $full -Recurse -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+  upstream-download:
+    name: pinned-upstream-download-only
+    needs: offline
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and independently re-read the pinned upstream installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 integrations/konofix/prepare.py --output "$RUNNER_TEMP/konofix-stage"
+          python3 integrations/konofix/prepare.py --verify "$RUNNER_TEMP/konofix-stage/Konofix-Chat-0.5.1-x64-Setup.exe"
+      - name: Preserve canonical progress math and SVG regeneration checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/validate-roadmap-progress.mjs SWIR-OS-ARCHITECTURE.md
+          node scripts/generate-readme-progress.mjs --self-test
+          node scripts/generate-readme-progress.mjs --check

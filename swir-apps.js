@@ -6,10 +6,16 @@
     catch { return new Set(); }
   })();
 
+  const desktopKonofix = window.SWIR_NATIVE_HOST?.features?.nativeKonofixLaunch === true;
+  const chatApp = desktopKonofix
+    ? { id:"chat", title:"Konofix Chat", subtitle:"Native Konofix 0.5.1 client", icon:"KX", category:"Communication", type:"native", nativeMethod:"launchKonofix", desktop:true, system:false, accent:"#35e6ff" }
+    : { id:"chat", title:"SWIR Chat (legacy Web)", subtitle:"Legacy Web compatibility chat during Konofix cutover", icon:"CH", category:"Communication", type:"iframe", url:"./swir-chat.html", desktop:true, system:false, accent:"#35e6ff" };
+
   const core = [
     { id:"apps", title:"App Center", subtitle:"All SWIR OS applications", icon:"◫", category:"System", type:"internal", accent:"#00c8ff", desktop:true, system:true },
     { id:"store", title:"SWIR Store", subtitle:"Install SWIR App Packages", icon:"S+", category:"System", type:"iframe", url:"./swir-store.html", accent:"#00d8ff", desktop:true, system:true },
     { id:"files", title:"File Explorer", subtitle:"Virtual files, associations, App Data and Trash", icon:"▤", category:"System", type:"iframe", url:"./swir-files.html", accent:"#53c7ff", desktop:true, system:true },
+    chatApp,
     { id:"defaults", title:"Default Apps", subtitle:"File associations and Open With defaults", icon:"DF", category:"System", type:"iframe", url:"./swir-default-apps.html", accent:"#7df0ff", desktop:false, system:true },
     { id:"chatkit", title:"Chat Server Kit", subtitle:"Download API backend and install guide", icon:"API", category:"Communication", type:"iframe", url:"./swir-chat-kit.html", accent:"#66f0ff", desktop:false, system:true },
     { id:"notes", title:"Notes", subtitle:"Autosaving local notes", icon:"N", category:"Productivity", type:"iframe", url:"./swir-notes.html", accent:"#55e6c1", desktop:true, system:true },

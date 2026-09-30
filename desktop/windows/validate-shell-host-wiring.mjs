@@ -20,7 +20,11 @@ const required = [
   '"claimOpenFile"',
   '"cancelOpenFile"',
   'nativeShellIntegration: true',
-  "shellIntegration: surface('shellIntegration', ['info','pendingOpenFiles','claimOpenFile','cancelOpenFile'])",
+  'nativeKonofixLaunch: true',
+  'DesktopKonofixLauncher',
+  '"konofixStatus"',
+  '"launchKonofix"',
+  '_konofix.Launch()',
   '_shellIntegration.Dispose()'
 ];
 
@@ -35,6 +39,11 @@ if (shellBranch < 0 || permissionBoundary < 0 || shellBranch > permissionBoundar
 }
 
 const exposed = source.match(/shellIntegration:\s*surface\('shellIntegration',\s*\[([^\]]+)\]\)/)?.[1] || '';
+const exposedMethods = [...exposed.matchAll(/'([^']+)'/g)].map(match => match[1]);
+const allowedMethods = ['info', 'konofixStatus', 'launchKonofix', 'pendingOpenFiles', 'claimOpenFile', 'cancelOpenFile'];
+if (JSON.stringify(exposedMethods) !== JSON.stringify(allowedMethods)) {
+  throw new Error(`Unexpected shellIntegration web surface: ${exposedMethods.join(', ')}`);
+}
 for (const forbidden of ['registerShortcut', 'unregisterShortcut', 'registerAssociation', 'removeAssociation', 'openPath', 'execute']) {
   if (exposed.includes(forbidden)) throw new Error(`Forbidden shellIntegration web method exposed: ${forbidden}`);
 }

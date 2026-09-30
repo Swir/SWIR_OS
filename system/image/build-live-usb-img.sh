@@ -5,19 +5,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 VENDOR_TRUST_STAGER="$REPO_ROOT/system/image/stage-vendor-repository-trust.mjs"
 VENDOR_POLICY="$REPO_ROOT/system/hardware/vendor-repositories.debian13.json"
+KONOFIX_VERIFIER="$REPO_ROOT/integrations/konofix/verify_linux_system_stage.py"
 
 usage() {
-  echo "Usage: build-live-usb-img.sh --rootfs <dir> --output <img> [--size <bytes>]" >&2
+  echo "Usage: build-live-usb-img.sh --rootfs <dir> --output <img> [--size <bytes>] [--require-konofix-native]" >&2
 }
 fail() { echo "build-live-usb-img: $*" >&2; exit 2; }
 [[ ${EUID:-$(id -u)} -eq 0 ]] || fail "must run as root"
-ROOTFS=""; OUTPUT=""; SIZE_BYTES=$((8 * 1024 * 1024 * 1024)); KERNEL_OPTIONS="root=LABEL=SWIR_LIVE_ROOT rw quiet splash"
+ROOTFS=""; OUTPUT=""; SIZE_BYTES=$((8 * 1024 * 1024 * 1024)); KERNEL_OPTIONS="root=LABEL=SWIR_LIVE_ROOT rw quiet splash"; REQUIRE_KONOFIX_NATIVE=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --rootfs) ROOTFS="$2"; shift 2 ;;
     --output) OUTPUT="$2"; shift 2 ;;
     --size) SIZE_BYTES="$2"; shift 2 ;;
     --kernel-options) KERNEL_OPTIONS="$2"; shift 2 ;;
+    --require-konofix-native) REQUIRE_KONOFIX_NATIVE=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) fail "unknown argument: $1" ;;
   esac
@@ -27,11 +29,15 @@ done
 [[ "$SIZE_BYTES" =~ ^[0-9]+$ ]] || fail "--size must be an integer byte count"
 [[ "$KERNEL_OPTIONS" != *$'\n'* && "$KERNEL_OPTIONS" != *$'\r'* ]] || fail "kernel options contain a newline"
 (( SIZE_BYTES >= 6 * 1024 * 1024 * 1024 )) || fail "image must be at least 6 GiB"
-for cmd in truncate losetup parted partprobe udevadm mkfs.vfat mkfs.ext4 mount umount rsync install find sort sha256sum stat node gpg gpgv; do
+for cmd in truncate losetup parted partprobe udevadm mkfs.vfat mkfs.ext4 mount umount rsync install find sort sha256sum stat node gpg gpgv python3; do
   command -v "$cmd" >/dev/null || fail "missing required command: $cmd"
 done
 [[ -f "$VENDOR_TRUST_STAGER" && ! -L "$VENDOR_TRUST_STAGER" ]] || fail "vendor trust staging service is missing"
 [[ -f "$VENDOR_POLICY" && ! -L "$VENDOR_POLICY" ]] || fail "reviewed vendor repository policy is missing"
+if [[ $REQUIRE_KONOFIX_NATIVE -eq 1 || -e "$ROOTFS/usr/share/swir/provenance/konofix-chat.json" ]]; then
+  [[ -f "$KONOFIX_VERIFIER" && ! -L "$KONOFIX_VERIFIER" ]] || fail "Konofix native rootfs verifier is missing"
+  python3 "$KONOFIX_VERIFIER" --root "$ROOTFS" >/dev/null || fail "Konofix native rootfs verification failed"
+fi
 
 # Final media must carry reviewed vendor policy + pinned key material, but the vendor
 # repository itself stays disabled. Staging performs fresh signed-metadata/key checks;
@@ -73,6 +79,9 @@ mkdir -p "$ROOT_MOUNT/boot/efi"
 mount "$ESP_PART" "$ROOT_MOUNT/boot/efi"; ESP_MOUNTED=1
 rsync -aHAX --numeric-ids --exclude='/boot/efi/*' "$ROOTFS/" "$ROOT_MOUNT/"
 chown 0:0 "$ROOT_MOUNT"; chmod 0755 "$ROOT_MOUNT"
+if [[ $REQUIRE_KONOFIX_NATIVE -eq 1 || -e "$ROOT_MOUNT/usr/share/swir/provenance/konofix-chat.json" ]]; then
+  python3 "$KONOFIX_VERIFIER" --root "$ROOT_MOUNT" >/dev/null || fail "Konofix native payload changed while assembling Live USB media"
+fi
 printf 'LABEL=SWIR_LIVE_ROOT / ext4 defaults 0 1\nLABEL=SWIRLIVEESP /boot/efi vfat umask=0077 0 2\n' > "$ROOT_MOUNT/etc/fstab"
 mkdir -p "$ROOT_MOUNT/var/lib/swir/live"
 printf '%s\n' 'swir-live-media/0.1' > "$ROOT_MOUNT/var/lib/swir/live/media-version"

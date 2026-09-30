@@ -1,0 +1,47 @@
+name: System Konofix Compatibility Contract
+
+on:
+  push:
+    paths:
+      - 'system/runtime/konofix-system-compatibility.mjs'
+      - 'system/runtime/konofix-system-compatibility.selftest.mjs'
+      - 'system/runtime/windows-compatibility-service.mjs'
+      - 'integrations/konofix/upstream.json'
+      - '.github/workflows/system-konofix-compatibility-contract.yml'
+  pull_request:
+    paths:
+      - 'system/runtime/konofix-system-compatibility.mjs'
+      - 'system/runtime/konofix-system-compatibility.selftest.mjs'
+      - 'system/runtime/windows-compatibility-service.mjs'
+      - 'integrations/konofix/upstream.json'
+      - '.github/workflows/system-konofix-compatibility-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify generic compatibility boundary first
+        run: node system/runtime/windows-compatibility-service.selftest.mjs
+      - name: Verify pinned Konofix System adapter
+        run: node system/runtime/konofix-system-compatibility.selftest.mjs
+      - name: Keep unverified qualification claims false
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module - <<'NODE'
+          import { KonofixSystemCompatibilityPolicy } from './system/runtime/konofix-system-compatibility.mjs';
+          if (KonofixSystemCompatibilityPolicy.nativeLinuxGuiQualified !== false ||
+              KonofixSystemCompatibilityPolicy.protonQualified !== false ||
+              KonofixSystemCompatibilityPolicy.realPeerInteroperabilityQualified !== false) {
+            throw new Error('Unverified Konofix qualification must remain false.');
+          }
+          NODE

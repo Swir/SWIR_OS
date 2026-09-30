@@ -325,6 +325,28 @@
     return win;
   }
 
+  async function launchNativeApp(app) {
+    const method = String(app.nativeMethod || "");
+    const shell = window.SWIR_NATIVE_HOST?.shellIntegration;
+    if (!method || typeof shell?.[method] !== "function") {
+      toast(app.title, "This native client is unavailable in the current edition.");
+      return;
+    }
+    try {
+      const result = await shell[method]();
+      const message = result?.alreadyRunning
+        ? (result?.focused ? "Konofix is already running — window restored." : "Konofix is already running.")
+        : (result?.started ? "Konofix launched." : "Native launch completed.");
+      toast(app.title, message);
+    } catch (error) {
+      const code = String(error?.code || "");
+      const message = code === "KONOFIX_NOT_INSTALLED"
+        ? "Konofix 0.5.1 is not installed yet. SWIR will not fall back to the old Desktop chat."
+        : (error?.message || "Native application launch failed.");
+      toast(app.title, message, 5200);
+    }
+  }
+
   function openApp(id) {
     const app = appMap.get(id);
     if (!app) {
@@ -336,6 +358,11 @@
 
     if (app.type === "external") {
       window.open(app.url, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    if (app.type === "native") {
+      void launchNativeApp(app);
       return;
     }
 

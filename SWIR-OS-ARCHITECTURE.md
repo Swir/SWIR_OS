@@ -274,7 +274,7 @@ SWIR Chat API
 MySQL / MariaDB
 ```
 
-The Web client and Chat Server Kit can remain useful during development. A chat client bundled with the final System Edition must be a native Linux application or a separately installed Windows application running through the managed compatibility layer.
+The legacy Web client and Chat Server Kit remain compatibility/development surfaces while the user-requested Konofix replacement is qualified. Desktop Edition must launch the actual installed Konofix client through a trusted-shell native boundary, and System Edition must use either a qualified native Linux client or the managed Windows compatibility layer. The replacement must not silently import legacy chat credentials, identities, history or files.
 
 ---
 

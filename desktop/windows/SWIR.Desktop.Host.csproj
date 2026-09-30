@@ -20,6 +20,7 @@
          lifecycle code cannot accidentally enlarge or change the runtime host. -->
     <Compile Remove="*SelfTests*.cs" />
     <Compile Remove="DesktopInstaller*.cs" />
+    <Compile Remove="DesktopKonofixReleaseSmoke.cs" />
     <Compile Remove="UpdaterActivationCrashHarness.cs" />
     <Compile Remove="DesktopUpdateReleaseTool.cs" />
     <Compile Remove="DesktopPackageBuilder.cs" />

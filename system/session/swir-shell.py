@@ -152,6 +152,7 @@ window.swir-shell {
 LAUNCHERS: Final = (
     ("Files", (("/usr/local/bin/swir-files",), ("/usr/bin/nautilus",), ("/usr/bin/thunar",), ("/usr/bin/pcmanfm",))),
     ("Browser", (("/usr/local/bin/swir-browser",),)),
+    ("Konofix Chat", (("/opt/swir/apps/konofix/konofix-chat",),)),
     ("Player", (("/usr/local/bin/swir-player",),)),
     ("Photo Studio", (("/usr/local/bin/swir-photo-studio",),)),
     ("PDF Viewer", (("/usr/local/bin/swir-pdf-viewer",),)),
