@@ -73,10 +73,17 @@ def same_hardware_identity(live: dict[str, Any], installed: dict[str, Any]) -> b
     live_dmi = live_system.get("dmi") or {}
     installed_dmi = installed_system.get("dmi") or {}
     identity_fields = ("sysVendor", "productName", "productVersion")
-    return (
-        all((live_dmi.get(key) or "") == (installed_dmi.get(key) or "") for key in identity_fields)
-        and live_system.get("architecture") == installed_system.get("architecture")
-    )
+    live_values = {key: str(live_dmi.get(key) or "").strip() for key in identity_fields}
+    installed_values = {key: str(installed_dmi.get(key) or "").strip() for key in identity_fields}
+
+    if live_system.get("architecture") != installed_system.get("architecture"):
+        return False
+    if live_values != installed_values:
+        return False
+
+    # Matching empty/insufficient DMI values are not a hardware identity. Require
+    # at least two stable DMI fields before accepting the pair as same-machine.
+    return sum(bool(live_values[key]) for key in identity_fields) >= 2
 
 
 def verify_pair(live: dict[str, Any], installed: dict[str, Any]) -> dict[str, Any]:
