@@ -23,6 +23,8 @@ HEX64: Final = re.compile(r"^[0-9a-f]{64}$")
 HEX40: Final = re.compile(r"^[0-9a-f]{40}$")
 MAX_IMAGE_BYTES: Final = 128 * 1024 * 1024 * 1024
 IMAGE_READ_BYTES: Final = 4 * 1024 * 1024
+MAX_OBSERVATIONS_BYTES: Final = 256 * 1024
+OBSERVATIONS_READ_BYTES: Final = 64 * 1024
 
 
 def fail(message: str) -> "NoReturn":
@@ -42,9 +44,53 @@ def load_module(filename: str, name: str) -> Any:
 def load_observations(path_text: str, required: tuple[str, ...]) -> dict[str, bool]:
     path = pathlib.Path(path_text)
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        fail(f"cannot read observations file: {exc}")
+        before = path.lstat()
+    except OSError as exc:
+        fail(f"cannot stat observations file: {exc}")
+    if stat.S_ISLNK(before.st_mode) or not stat.S_ISREG(before.st_mode):
+        fail("observations file must be a regular non-symlink file")
+    if before.st_size <= 0 or before.st_size > MAX_OBSERVATIONS_BYTES:
+        fail(f"observations file size must be within 1..{MAX_OBSERVATIONS_BYTES} bytes")
+
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        fail(f"cannot open observations file read-only: {exc}")
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode):
+            fail("observations file must be a regular file")
+        if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+            fail("observations file changed before read")
+        if opened.st_size <= 0 or opened.st_size > MAX_OBSERVATIONS_BYTES:
+            fail(f"observations file size must be within 1..{MAX_OBSERVATIONS_BYTES} bytes")
+        remaining = opened.st_size
+        chunks: list[bytes] = []
+        while remaining:
+            chunk = os.read(fd, min(OBSERVATIONS_READ_BYTES, remaining))
+            if not chunk:
+                fail("observations file changed during read")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        if os.read(fd, 1):
+            fail("observations file grew during read")
+        after = os.fstat(fd)
+        if (
+            (after.st_dev, after.st_ino, after.st_size)
+            != (opened.st_dev, opened.st_ino, opened.st_size)
+        ):
+            fail("observations file changed during read")
+    finally:
+        os.close(fd)
+
+    try:
+        text_data = b"".join(chunks).decode("utf-8")
+        data = json.loads(text_data)
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        fail(f"cannot decode observations file: {exc}")
     if not isinstance(data, dict):
         fail("observations file must contain a JSON object")
     unknown = sorted(set(data) - set(required))
