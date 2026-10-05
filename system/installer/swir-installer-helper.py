@@ -315,6 +315,7 @@ def self_test() -> None:
             pass
         else:
             raise AssertionError(f"invalid {field} was accepted")
+
     def expect_marker_rejected(path: pathlib.Path, *, expected_uid: int) -> None:
         try:
             load_trusted_live_marker(path, expected_uid=expected_uid)
