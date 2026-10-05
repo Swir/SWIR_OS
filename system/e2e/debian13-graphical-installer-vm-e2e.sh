@@ -258,6 +258,7 @@ PY
   [ -b "$target_root" ] || fail target-root-partition
   mount "$target_root" /mnt/swir-target || fail target-root-mount
   [ -s /mnt/swir-target/var/lib/swir/install/install.json ] || fail install-manifest-missing
+  [ ! -e /mnt/swir-target/var/lib/swir/live/live.json ] || fail installed-live-marker-on-disk
   grep -Fxq 'SWIR-GRAPHICAL-INSTALLER-PERSISTENCE-v1' /mnt/swir-target/var/lib/swir/graphical-installer-e2e/source-marker.txt || fail persistence-copy
   verify_user_config_root /mnt/swir-target || fail installed-user-config-on-disk
   umount /mnt/swir-target
@@ -271,6 +272,7 @@ fi
 
 if [ "$rootlabel" = SWIR_ROOT ]; then
   [ -s /var/lib/swir/install/install.json ] || fail installed-manifest
+  [ ! -e /var/lib/swir/live/live.json ] || fail installed-retained-live-marker
   grep -Fxq 'SWIR-GRAPHICAL-INSTALLER-PERSISTENCE-v1' "$OUT/source-marker.txt" || fail installed-persistence
   verify_user_config_root / || fail installed-user-config-after-boot
   systemctl is-active --quiet greetd.service || fail installed-greetd-inactive
@@ -390,6 +392,7 @@ report = {
   "installedDiskBooted": True,
   "installedGraphicalSessionPassed": True,
   "installedPersistencePassed": True,
+  "installedLiveMarkerAbsent": True,
   "physicalHardwareQualificationClaim": False,
   "secureBootClaim": False
 }
