@@ -29,6 +29,7 @@
     "installedDiskBooted",
     "installedGraphicalSessionPassed",
     "installedPersistencePassed",
+    "installedLiveMarkerAbsent",
     "physicalHardwareQualificationClaim",
     "secureBootClaim"
   ],
@@ -57,6 +58,7 @@
     "installedDiskBooted": { "const": true },
     "installedGraphicalSessionPassed": { "const": true },
     "installedPersistencePassed": { "const": true },
+    "installedLiveMarkerAbsent": { "const": true },
     "physicalHardwareQualificationClaim": { "const": false },
     "secureBootClaim": { "const": false }
   }
