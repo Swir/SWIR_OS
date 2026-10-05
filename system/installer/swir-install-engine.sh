@@ -172,6 +172,7 @@ ESP_MOUNTED=1
 rsync -aHAX --numeric-ids --one-file-system \
   --exclude='/boot/efi/*' --exclude='/dev/*' --exclude='/proc/*' --exclude='/sys/*' \
   --exclude='/run/*' --exclude='/tmp/*' --exclude='/mnt/*' --exclude='/media/*' \
+  --exclude='/var/lib/swir/live/' \
   / "$ROOT_MOUNT/"
 chown 0:0 "$ROOT_MOUNT"
 chmod 0755 "$ROOT_MOUNT"
