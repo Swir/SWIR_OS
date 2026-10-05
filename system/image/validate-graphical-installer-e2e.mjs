@@ -38,6 +38,7 @@ for (const key of [
   'installedDiskBooted',
   'installedGraphicalSessionPassed',
   'installedPersistencePassed',
+  'installedLiveMarkerAbsent',
 ]) requireTrue(key);
 for (const key of ['passwordStoredInEvidence', 'physicalHardwareQualificationClaim', 'secureBootClaim']) requireFalse(key);
 if (Number.isNaN(Date.parse(data.generatedAt))) fail('generatedAt is not an ISO timestamp');

@@ -95,7 +95,8 @@ cat > "$ROOT_MOUNT/var/lib/swir/live/live.json" <<'JSON'
 JSON
 chown -R 0:0 "$ROOT_MOUNT/var/lib/swir/live"
 chmod 0755 "$ROOT_MOUNT/var/lib/swir/live"
-chmod 0644 "$ROOT_MOUNT/var/lib/swir/live/media-version" "$ROOT_MOUNT/var/lib/swir/live/live.json"
+chmod 0644 "$ROOT_MOUNT/var/lib/swir/live/media-version"
+chmod 0444 "$ROOT_MOUNT/var/lib/swir/live/live.json"
 ESP="$ROOT_MOUNT/boot/efi"
 mkdir -p "$ESP/EFI/BOOT" "$ESP/EFI/systemd" "$ESP/EFI/Linux" "$ESP/loader/entries"
 install -m 0644 "$EFI_SOURCE" "$ESP/EFI/BOOT/BOOTX64.EFI"

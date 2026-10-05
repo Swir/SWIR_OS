@@ -23,6 +23,13 @@ ENGINE = pathlib.Path("/usr/local/sbin/swir-install-engine")
 LIVE_MARKER = pathlib.Path("/var/lib/swir/live/live.json")
 E2E_MARKER = pathlib.Path("/run/swir/installer-e2e-enabled")
 MAX_PASSWORD_BYTES = 256
+MAX_LIVE_MARKER_BYTES = 4096
+LIVE_MARKER_EXPECTED = {
+    "schema": "swir.live-media/0.1",
+    "mode": "live",
+    "installerAllowed": True,
+    "readOnlyFirst": True,
+}
 USERNAME_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,30}$")
 LOCALE_RE = re.compile(r"^[A-Za-z]{2,3}(?:_[A-Za-z]{2})?(?:\.[A-Za-z0-9_-]+)?$")
 KEYBOARD_RE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
@@ -95,6 +102,70 @@ def validate_request(data: Any) -> dict[str, str]:
     return {k: str(data[k]) for k in allowed}
 
 
+def load_trusted_live_marker(path: pathlib.Path = LIVE_MARKER, *, expected_uid: int = 0) -> dict[str, Any]:
+    try:
+        parent = path.parent.lstat()
+        before = path.lstat()
+    except OSError as exc:
+        raise InstallerError("trusted Live marker is unavailable") from exc
+    if stat.S_ISLNK(parent.st_mode) or not stat.S_ISDIR(parent.st_mode):
+        raise InstallerError("trusted Live marker directory must be a real directory")
+    if parent.st_uid != expected_uid or stat.S_IMODE(parent.st_mode) & 0o022:
+        raise InstallerError("trusted Live marker directory ownership/mode is unsafe")
+    if stat.S_ISLNK(before.st_mode) or not stat.S_ISREG(before.st_mode):
+        raise InstallerError("trusted Live marker must be a regular non-symlink file")
+    if before.st_uid != expected_uid or stat.S_IMODE(before.st_mode) & 0o022:
+        raise InstallerError("trusted Live marker ownership/mode is unsafe")
+    if before.st_size <= 0 or before.st_size > MAX_LIVE_MARKER_BYTES:
+        raise InstallerError("trusted Live marker size is invalid")
+
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        raise InstallerError("trusted Live marker cannot be opened safely") from exc
+
+    def signature(st: os.stat_result) -> tuple[int, int, int, int, int]:
+        return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode):
+            raise InstallerError("trusted Live marker must remain a regular file")
+        if opened.st_uid != expected_uid or stat.S_IMODE(opened.st_mode) & 0o022:
+            raise InstallerError("trusted Live marker ownership/mode changed")
+        if opened.st_size <= 0 or opened.st_size > MAX_LIVE_MARKER_BYTES:
+            raise InstallerError("trusted Live marker size is invalid")
+        if signature(opened) != signature(before):
+            raise InstallerError("trusted Live marker changed before read")
+
+        remaining = opened.st_size
+        chunks: list[bytes] = []
+        while remaining:
+            chunk = os.read(fd, min(4096, remaining))
+            if not chunk:
+                raise InstallerError("trusted Live marker changed during read")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        if os.read(fd, 1):
+            raise InstallerError("trusted Live marker grew during read")
+        after = os.fstat(fd)
+        if signature(after) != signature(opened):
+            raise InstallerError("trusted Live marker changed during read")
+    finally:
+        os.close(fd)
+
+    try:
+        payload = json.loads(b"".join(chunks).decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise InstallerError("trusted Live marker is not valid UTF-8 JSON") from exc
+    if payload != LIVE_MARKER_EXPECTED:
+        raise InstallerError("trusted Live marker authorization payload is invalid")
+    return payload
+
+
 def ensure_live_environment() -> None:
     if os.geteuid() != 0:
         raise InstallerError("helper requires root privileges")
@@ -103,8 +174,7 @@ def ensure_live_environment() -> None:
     st = ENGINE.stat()
     if st.st_uid != 0 or stat.S_IMODE(st.st_mode) & 0o022:
         raise InstallerError("install engine ownership/mode is unsafe")
-    if not LIVE_MARKER.is_file() or LIVE_MARKER.is_symlink():
-        raise InstallerError("graphical installation is allowed only from verified Live media")
+    load_trusted_live_marker()
 
 
 def partition_for_label(disk: str, label: str) -> str:
@@ -245,6 +315,76 @@ def self_test() -> None:
             pass
         else:
             raise AssertionError(f"invalid {field} was accepted")
+
+    def expect_marker_rejected(path: pathlib.Path, *, expected_uid: int) -> None:
+        try:
+            load_trusted_live_marker(path, expected_uid=expected_uid)
+        except InstallerError:
+            return
+        raise AssertionError("invalid trusted Live marker was accepted")
+
+    with tempfile.TemporaryDirectory(prefix="swir-live-marker-selftest-") as temp_dir:
+        root = pathlib.Path(temp_dir)
+        marker = root / "live.json"
+        expected_uid = os.getuid()
+
+        marker.write_text(json.dumps(LIVE_MARKER_EXPECTED) + "\n", encoding="utf-8")
+        os.chmod(marker, 0o444)
+        assert load_trusted_live_marker(marker, expected_uid=expected_uid) == LIVE_MARKER_EXPECTED
+
+        for field, value in (("schema", "swir.live-media/9.9"), ("mode", "installed"), ("installerAllowed", False), ("readOnlyFirst", False)):
+            os.chmod(marker, 0o644)
+            broken_marker = dict(LIVE_MARKER_EXPECTED)
+            broken_marker[field] = value
+            marker.write_text(json.dumps(broken_marker) + "\n", encoding="utf-8")
+            os.chmod(marker, 0o444)
+            expect_marker_rejected(marker, expected_uid=expected_uid)
+
+        os.chmod(marker, 0o644)
+        extra_marker = dict(LIVE_MARKER_EXPECTED)
+        extra_marker["unexpected"] = True
+        marker.write_text(json.dumps(extra_marker) + "\n", encoding="utf-8")
+        os.chmod(marker, 0o444)
+        expect_marker_rejected(marker, expected_uid=expected_uid)
+
+        os.chmod(marker, 0o644)
+        marker.write_text("not-json\n", encoding="utf-8")
+        os.chmod(marker, 0o444)
+        expect_marker_rejected(marker, expected_uid=expected_uid)
+
+        os.chmod(marker, 0o644)
+        marker.write_text("", encoding="utf-8")
+        os.chmod(marker, 0o444)
+        expect_marker_rejected(marker, expected_uid=expected_uid)
+
+        os.chmod(marker, 0o644)
+        marker.write_bytes(b"x" * (MAX_LIVE_MARKER_BYTES + 1))
+        os.chmod(marker, 0o444)
+        expect_marker_rejected(marker, expected_uid=expected_uid)
+
+        os.chmod(marker, 0o644)
+        marker.write_text(json.dumps(LIVE_MARKER_EXPECTED) + "\n", encoding="utf-8")
+        os.chmod(marker, 0o666)
+        expect_marker_rejected(marker, expected_uid=expected_uid)
+
+        os.chmod(marker, 0o444)
+        os.chmod(root, 0o777)
+        expect_marker_rejected(marker, expected_uid=expected_uid)
+        os.chmod(root, 0o700)
+
+        if os.geteuid() == 0:
+            os.chmod(marker, 0o444)
+            os.chown(marker, 65534, -1)
+            expect_marker_rejected(marker, expected_uid=expected_uid)
+            os.chown(marker, expected_uid, -1)
+
+        marker.unlink()
+        target = root / "target.json"
+        target.write_text(json.dumps(LIVE_MARKER_EXPECTED) + "\n", encoding="utf-8")
+        os.chmod(target, 0o444)
+        marker.symlink_to(target)
+        expect_marker_rejected(marker, expected_uid=expected_uid)
+
     print("SWIR graphical installer helper self-test OK")
 
 
